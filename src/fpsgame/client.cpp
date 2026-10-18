@@ -48,6 +48,13 @@ namespace game
     }
     ICOMMAND(otherclients, "", (), otherclients());
 
+    // --- RPG: Shattered Shield ability layer (milestone step 3, additive) ---
+    // The client only ASKS to cast: the server validates cooldown, mana and
+    // target and applies damage. Yaw is client-advisory, used by the server
+    // for the melee front-cone check only. Bindable, e.g. bind Q ability1.
+    ICOMMAND(ability1, "", (), addmsg(N_RPG_CAST, "ri2", 0, int(player1->yaw)));
+    ICOMMAND(ability2, "", (), addmsg(N_RPG_CAST, "ri2", 1, int(player1->yaw)));
+
     void switchname(const char *name)
     {
         filtertext(player1->name, name, NAMEALLOWSPACES, MAXNAMELEN);

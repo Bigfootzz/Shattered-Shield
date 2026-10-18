@@ -674,6 +674,7 @@ enum
     N_GUTS, N_BUY, N_SHOPOPEN,
     N_SERVER_COMMAND,
     N_DEMOPACKET,
+    N_RPG_CAST, // Shattered Shield: client->server ability cast request (ability id, client-advisory yaw)
     NUMSV
 };
 
@@ -706,6 +707,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_SURVINIT, 0, N_SURVREASSIGN, 0, N_SURVSPAWNSTATE, 0, N_SURVNEWROUND, 0, N_SURVROUNDOVER, 2,
     N_GUTS, 3, N_BUY, 0, N_SHOPOPEN, 2, N_SERVER_COMMAND, 0,
     N_DEMOPACKET, 0,
+    N_RPG_CAST, 3,
     -1
 };
 

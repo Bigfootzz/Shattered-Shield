@@ -1,11 +1,14 @@
-// Shattered Shield RPG persistence (milestone steps 1+2).
+// Shattered Shield RPG persistence (milestone steps 1+2)
+// + ability session state (milestone step 3).
 // SQLite-backed character store. Identity = player name for now.
 #include "rpg.h"
+#include "abilities.h"
 #include "sqlite3.h"
 #include "cube.h"
 
 #include <ctime>
 #include <map>
+#include <set>
 #include <string>
 
 namespace rpg
@@ -30,12 +33,30 @@ namespace rpg
     };
 
     // in-memory view of currently connected characters (write-through to the DB)
+    // level/xp persist; mana/cooldowns are session-only (milestone step 3)
     struct cachedchar
     {
         int level;
         int xp;
+        int mana;
+        int lastcast[ABILITY_COUNT]; // millis of last successful cast per ability
+        int lastregen;               // millis of last regen tick (<0 = not started)
     };
     static std::map<std::string, cachedchar> cache;
+
+    static cachedchar *findcached(const char *name)
+    {
+        if(!name || !name[0]) return NULL;
+        std::map<std::string, cachedchar>::iterator it = cache.find(std::string(name));
+        return it == cache.end() ? NULL : &it->second;
+    }
+
+    static void initcaststate(cachedchar &cc, int level, int now)
+    {
+        cc.mana = maxmana(level);
+        loopi(ABILITY_COUNT) cc.lastcast[i] = -1000000000; // every ability ready on connect
+        cc.lastregen = now;
+    }
 
     int xpforlevel(int level)
     {
@@ -146,6 +167,7 @@ namespace rpg
         }
         cachedchar cc;
         cc.level = level; cc.xp = xp;
+        initcaststate(cc, level, -1); // mana full, abilities ready; regen starts on first tick
         cache[std::string(name)] = cc;
         return existed;
     }
@@ -225,5 +247,71 @@ namespace rpg
         std::map<std::string, cachedchar>::iterator it = cache.find(std::string(name));
         if(it != cache.end()) { level = it->second.level; xp = it->second.xp; return true; }
         return loadrow(name, level, xp);
+    }
+
+    // --- ability layer v1: session state (milestone step 3) ---
+
+    bool getmana(const char *name, int &mana, int &maxmana)
+    {
+        cachedchar *cc = findcached(name);
+        if(!cc) return false;
+        mana = cc->mana;
+        maxmana = rpg::maxmana(cc->level);
+        return true;
+    }
+
+    bool castready(const char *name, int ability, int now, int &waitms)
+    {
+        waitms = 0;
+        if(!validability(ability)) return false;
+        cachedchar *cc = findcached(name);
+        if(!cc) return false;
+        int ready_at = cc->lastcast[ability] + rpg::ability(ability).cooldownms;
+        if(now < ready_at) { waitms = ready_at - now; return false; }
+        cc->lastcast[ability] = now; // consume the cooldown only on a validated cast
+        return true;
+    }
+
+    bool spendmana(const char *name, int cost)
+    {
+        cachedchar *cc = findcached(name);
+        if(!cc || cc->mana < cost) return false;
+        cc->mana -= cost;
+        return true;
+    }
+
+    void regen(int now)
+    {
+        if(!db) return;
+        for(std::map<std::string, cachedchar>::iterator it = cache.begin(); it != cache.end(); ++it)
+        {
+            cachedchar &cc = it->second;
+            if(cc.lastregen < 0) { cc.lastregen = now; continue; } // first tick: start the clock
+            int dt = now - cc.lastregen;
+            if(dt >= 1000)
+            {
+                int cap = maxmana(cc.level);
+                cc.mana = min(cap, cc.mana + dt*MANA_REGEN_PER_SEC/1000);
+                cc.lastregen = now;
+            }
+        }
+    }
+
+    // --- test-only monster pinning (milestone step 3) ---
+    static std::set<int> pinnedmonsters;
+
+    void pinmonster(int clientnum)
+    {
+        pinnedmonsters.insert(clientnum);
+    }
+
+    void unpinmonster(int clientnum)
+    {
+        pinnedmonsters.erase(clientnum);
+    }
+
+    bool ispinmonster(int clientnum)
+    {
+        return pinnedmonsters.find(clientnum) != pinnedmonsters.end();
     }
 }

@@ -39,4 +39,25 @@ namespace rpg
 
     // Cumulative XP required to REACH the given level (2..MAX_LEVEL); -1 out of range.
     int xpforlevel(int level);
+
+    // --- ability layer v1 (milestone step 3): session state, server-authoritative ---
+    // Mana and cooldowns live only for connected characters (cleared on
+    // disconnect); they are NOT persisted to the DB. The server enforces all
+    // of it — the client only asks to cast.
+    bool getmana(const char *name, int &mana, int &maxmana);
+    // True when the cooldown is ready AND marks it consumed; false sets waitms
+    // (millis until ready). Call only after every other validation passes, so
+    // failed casts never consume the cooldown.
+    bool castready(const char *name, int ability, int now, int &waitms);
+    bool spendmana(const char *name, int cost);  // false when mana < cost
+    void regen(int now);                         // mana regen tick for all cached chars
+
+    // --- test-only monster pinning (milestone step 3) ---
+    // Lets the scripted harness park a monster at the caster server-side.
+    // The owning client still simulates/renders it at its own spawn point,
+    // but the server ignores its N_POS while pinned, so ability targeting
+    // (which is server-side) sees the pinned position. Cleared on death.
+    void pinmonster(int clientnum);
+    void unpinmonster(int clientnum);
+    bool ispinmonster(int clientnum);
 }

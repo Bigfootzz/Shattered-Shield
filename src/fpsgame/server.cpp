@@ -3,6 +3,7 @@
 
 // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
 #include "rpg/rpg.h"
+#include "rpg/abilities.h"
 
 #ifdef SERVER
 #include "server/lua.h"
@@ -421,6 +422,7 @@ namespace server
 
         extern clientinfo *addai(int skill, int limit, ai::AiType aiType = ai::AI_TYPE_BOT);
         extern void deleteai(clientinfo *ci);
+        extern void reinitai(clientinfo *ci); // RPG ability-layer test spawner runs the normal spawn pipeline eagerly
     }
 
     #define MM_MODE 0xF
@@ -836,6 +838,52 @@ namespace server
         if(leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", args[0].getstr(), newlevel);
     }
     COMMANDN(rpggrantxp, rpggrantxp_cmd, "siV");
+
+    // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
+    // TEST-ONLY helpers for the scripted harness. Harmless in production: they
+    // use the same spawn path as the game modes. Not part of the shipped design.
+    void makeInfected(clientinfo *victim, int infectionType, bool forceNetworking); // defined below
+    void rpgmana_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 1) { conoutf("usage: rpgmana <name>"); return; }
+        int mana = 0, maxmana = 0;
+        if(!rpg::getmana(args[0].getstr(), mana, maxmana)) { conoutf("rpgmana: no session for '%s'", args[0].getstr()); return; }
+        conoutf("rpgmana: %s -- %d/%d", args[0].getstr(), mana, maxmana);
+    }
+    COMMANDN(rpgmana, rpgmana_cmd, "sV");
+
+    // Spawn one monster parked on the casting player's feet (optional hp
+    // override for deterministic tests). Uses the mode spawn path
+    // (aiman::addai + makeInfected); the normal reinitai/spawn pipeline
+    // broadcasts it on the next serverupdate.
+    void rpgspawnmonster_cmd(tagval *args, int numargs)
+    {
+        if(!rpg::connected()) { conoutf("rpgspawnmonster: character database is not open"); return; }
+        int hp = numargs >= 1 ? max(args[0].getint(), 1) : 0;
+        clientinfo *caster = NULL;
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
+        }
+        if(!caster) { conoutf("rpgspawnmonster: no live player to spawn next to"); return; }
+        clientinfo *mi = aiman::addai(50, -1, ai::AI_TYPE_MONSTER);
+        if(!mi) { conoutf("rpgspawnmonster: no free AI slot"); return; }
+        makeInfected(mi, monster::getRandomType(), false);
+        copystring(mi->name, monster::getMonsterType(mi->state.getMonsterType()).classInfo.name, MAXNAMELEN+1);
+        mi->state.state = CS_ALIVE;
+        // Run the normal spawn pipeline now (reassign()->respawn() resets the
+        // position to the -1e10 sentinel, sendspawn() broadcasts); the later
+        // serverupdate pass then becomes a no-op for this monster.
+        aiman::reinitai(mi);
+        if(hp > 0) mi->state.maxhealth = mi->state.health = hp;
+        mi->state.o = caster->state.o; // on the caster's feet: melee cone auto-passes, range trivially met
+        // The owning client simulates the monster at its own spawn point and reports
+        // that via N_POS; pin it so the server keeps the test position (see N_POS).
+        rpg::pinmonster(mi->clientnum);
+        conoutf("rpgspawnmonster: '%s' (hp %d) at caster '%s'", mi->name, mi->state.health, caster->name);
+    }
+    COMMANDN(rpgspawnmonster, rpgspawnmonster_cmd, "iV");
 
     void resetitems()
     {
@@ -2315,6 +2363,7 @@ namespace server
             // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
             if(actor && actor!=target && target->state.ai.type==ai::AI_TYPE_MONSTER && actor->state.ai.type==ai::AI_TYPE_NONE)
             {
+                rpg::unpinmonster(target->clientnum); // test pin ends with the monster
                 bool rpg_leveled = false;
                 int rpg_newlevel = rpg::awardxp(actor->name, rpg::XP_PER_MONSTER_KILL, &rpg_leveled);
                 if(rpg_leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", actor->name, rpg_newlevel);
@@ -2366,6 +2415,100 @@ namespace server
             
             // Weapon effects are networked the next time updateEffects is called
         }
+    }
+
+    // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
+    // Server-authoritative ability casting. The client only sends (ability id,
+    // client-advisory yaw); cooldown, mana, damage and target validity are all
+    // decided here. Damage flows through dodamage(), so a killing blow feeds
+    // the steps 1+2 XP hook exactly like a weapon kill. No game-mode logic
+    // is touched. Yaw is advisory: it only steers the melee front-cone target
+    // pick, never damage/cooldown/mana.
+
+    static clientinfo *rpg_findtarget(clientinfo *cq, const rpg::abilitydef &ab, int yaw)
+    {
+        clientinfo *best = NULL;
+        float bestdist = ab.range;
+        vec fwd(-sinf(yaw*RAD), cosf(yaw*RAD), 0); // engine yaw->facing convention, cf. vec(yaw, pitch)
+        loopv(clients)
+        {
+            clientinfo *t = clients[i];
+            if(t == cq) continue;
+            if(t->state.ai.type != ai::AI_TYPE_MONSTER) continue; // monsters only: PvE world
+            if(t->state.state != CS_ALIVE || t->state.health <= 0) continue;
+            vec delta(t->state.o);
+            delta.sub(cq->state.o);
+            float dist = delta.magnitude();
+            if(dist > ab.range) continue;
+            if(ab.melee)
+            {
+                if(dist > 0.75f) // standing on the caster counts as "in front"
+                {
+                    vec dir(delta);
+                    dir.normalize();
+                    if(fwd.dot(dir) < 0.5f) continue; // ~60-degree front cone
+                }
+            }
+            else
+            {
+                vec from(cq->state.o); from.z += 12.0f; // ~eye height; gamestate has no eyeheight field
+                vec to(t->state.o); to.z += 4;
+                vec hitpos;
+                if(!raycubelos(from, to, hitpos)) continue; // no line of sight
+            }
+            if(!best || dist < bestdist) { best = t; bestdist = dist; }
+        }
+        return best;
+    }
+
+    void rpg_cast(clientinfo *cq, int ability, int yaw)
+    {
+        if(!rpg::connected() || !rpg::validability(ability)) return;
+        if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players cast
+        const rpg::abilitydef &ab = rpg::ability(ability);
+        if(cq->state.state != CS_ALIVE)
+        {
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to cast.");
+            return;
+        }
+        int level = 1, xp = 0;
+        if(!rpg::getstats(cq->name, level, xp))
+        {
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Character not loaded.");
+            return;
+        }
+        clientinfo *target = rpg_findtarget(cq, ab, yaw);
+        if(!target)
+        {
+            defformatstring(msg)("\f2%s: \f7no target in range.", ab.name);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            return;
+        }
+        int mana = 0, maxmana = 0;
+        rpg::getmana(cq->name, mana, maxmana);
+        if(mana < ab.manacost)
+        {
+            defformatstring(msg)("\f2%s: \f7not enough mana (%d/%d).", ab.name, mana, ab.manacost);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            return;
+        }
+        int waitms = 0;
+        if(!rpg::castready(cq->name, ability, totalmillis, waitms))
+        {
+            defformatstring(msg)("\f2%s \f7on cooldown (%.1fs).", ab.name, waitms/1000.0f);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            return;
+        }
+        rpg::spendmana(cq->name, ab.manacost);
+        vec push(target->state.o);
+        push.sub(cq->state.o);
+        push.z = 0;
+        if(push.squaredlen() > 0.01f) push.normalize();
+        int hpbefore = target->state.health;
+        dodamage(target, cq, ab.damage, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
+        conoutf("rpg: '%s' casts %s on '%s' for %d (%d -> %d hp)", cq->name, ab.name, target->name, ab.damage, hpbefore, target->state.health);
+        defformatstring(msg)("\f2%s \f7hits %s for %d damage.", ab.name, target->name, ab.damage);
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
     }
 
     void suicide(clientinfo *ci, int type = 0)
@@ -2570,6 +2713,8 @@ namespace server
     void serverupdate()
     {
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+        // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
+        rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
         static int rpg_lastautosave = 0;
         if(totalmillis - rpg_lastautosave >= 60000)
         {
@@ -3346,7 +3491,10 @@ namespace server
                         while(curmsg<p.length()) cp->position.add(p.buf[curmsg++]);
                     }
                     if(smode && cp->state.state==CS_ALIVE) smode->moved(cp, cp->state.o, cp->gameclip, pos, (flags&0x80)!=0);
-                    cp->state.o = pos;
+                    // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
+                    // Test-pinned monsters keep their server-set position; client N_POS is ignored.
+                    // Only the rpgspawnmonster debug command sets the pin. Real gameplay is untouched.
+                    if(!rpg::ispinmonster(cp->clientnum)) cp->state.o = pos;
                     cp->gameclip = (flags&0x80)!=0;
 
                     if(!cp->maploaded && cp->state.ai.type == ai::AI_TYPE_NONE)
@@ -3500,6 +3648,14 @@ namespace server
             case N_SUICIDE:
             {
                 if(cq) cq->addevent(new suicideevent(getint(p)));
+                break;
+            }
+
+            // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
+            case N_RPG_CAST:
+            {
+                int ability = getint(p), yaw = getint(p);
+                if(cq) rpg_cast(cq, ability, yaw);
                 break;
             }
 
