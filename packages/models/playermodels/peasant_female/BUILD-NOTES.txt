@@ -1,0 +1,44 @@
+char: peasant_female
+usescale: 36.362446
+blend height: 1.7876
+meshes/textures:
+  Eyebrows -> T_Hair_2_BaseColor.png
+  Eyes -> T_Eye_Brown.png
+  Female_Peasant_Arms -> T_Peasant_BaseColor.png
+  Female_Peasant_Body -> T_Peasant_BaseColor.png
+  Female_Peasant_Feet -> T_Peasant_BaseColor.png
+  Female_Peasant_Legs -> T_Peasant_BaseColor.png
+  Hair_Buns -> T_Hair_2_BaseColor.png
+  Superhero_Female -> T_Superhero_Female_Dark_BaseColor.png
+slot -> file:
+  idle -> peasant_female_Idle_No_Loop.iqm
+  forward -> peasant_female_Jog_Fwd_Loop.iqm
+  backward -> peasant_female_Walk_Loop.iqm
+  left -> peasant_female_Walk_Loop.iqm
+  right -> peasant_female_Walk_Loop.iqm
+  edit -> peasant_female_Idle_Lantern_Loop.iqm
+  jump -> peasant_female_NinjaJump_Start.iqm
+  lag -> peasant_female_Walk_Loop.iqm
+  dying -> peasant_female_Hit_Knockback.iqm
+  dead -> peasant_female_LayToIdle.iqm
+  lose -> peasant_female_Idle_Shield_Break.iqm
+  pain -> peasant_female_Hit_Knockback.iqm
+  pain2 -> peasant_female_Hit_Knockback.iqm
+  sink -> peasant_female_Slide_Exit.iqm
+  swim -> peasant_female_Slide_Loop.iqm
+  taunt -> peasant_female_Idle_TalkingPhone_Loop.iqm
+  win -> peasant_female_Yes.iqm
+  hold 1 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 2 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 3 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 4 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 5 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 6 -> peasant_female_Idle_No_Loop.iqm @0
+  hold 7 -> peasant_female_Idle_No_Loop.iqm @0
+  attack1 -> peasant_female_Sword_Regular_A.iqm
+  attack2 -> peasant_female_Sword_Regular_B.iqm
+  attack3 -> peasant_female_Sword_Regular_C.iqm
+  attack4 -> peasant_female_Sword_Regular_Combo.iqm
+  attack5 -> peasant_female_Sword_Heavy_Combo.iqm
+  attack6 -> peasant_female_Sword_Dash.iqm
+  attack7 -> peasant_female_Sword_Regular_Combo.iqm

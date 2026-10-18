@@ -66,34 +66,29 @@ namespace game
     static const playermodelinfo playermodels[] =
     {
         {
-            "playermodels/alanharris",  "playermodels/alanharris/blue",     "playermodels/alanharris/red",  "playermodels/alanharris/hudguns",      NULL,   NULL,
+            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/alanharris",  "playermodels/alanharrist_blue",    "playermodels/alanharris_red",  NULL,   true,   true,   0.0f,   0.0f,   0.0f
+            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/swat",        "playermodels/swat/blue",           "playermodels/swat/red",        "playermodels/swat/hudguns",            NULL,   NULL,
+            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/swat",        "playermodels/swat_blue",           "playermodels/swat_red",        NULL,   true,   true,   3.0f,   16.0f,   1.2f
+            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/thief",       "playermodels/thief/blue",          "playermodels/thief/red",       "playermodels/thief/hudguns",           NULL,   NULL,
+            "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/thief",       "playermodels/thief_blue",          "playermodels/thief_red",       NULL,   true,   true,   3.0f,   16.0f,   1.2f
+            "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/peasant_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/aneta",       "playermodels/aneta/blue",          "playermodels/aneta/red",       "playermodels/aneta/hudguns",           NULL,   NULL,
+            "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/aneta",       "playermodels/aneta_blue",          "playermodels/aneta_red",       NULL,   true,   true,   3.0f,   13.5f,   1.0f
-        },
-        {
-            "playermodels/advent",      "playermodels/advent/blue",         "playermodels/advent/red",      "playermodels/advent/hudguns",          NULL,   NULL,
-            { NULL, NULL, NULL },
-            "playermodels/advent",      "playermodels/advent_blue",         "playermodels/advent_red",      NULL,   true,   true,   3.0f,   15.0f,   1.0f
+            "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/peasant_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
     };
 
     const int NUMPLAYERMODELS = sizeof(playermodels)/sizeof(playermodels[0]);
-    VARP(playermodel, 0, 1, NUMPLAYERMODELS - 1);
+    VARP(playermodel, 0, 0, NUMPLAYERMODELS - 1);
 
     #if defined(_DEBUG) && !defined(STANDALONE)
         extern const int forceplayermodels;

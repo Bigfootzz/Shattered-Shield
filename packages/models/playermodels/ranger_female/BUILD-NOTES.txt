@@ -1,0 +1,50 @@
+char: ranger_female
+usescale: 36.061301
+blend height: 1.8025
+meshes/textures:
+  Eyebrows -> T_Hair_2_BaseColor.png
+  Eyes -> T_Eye_Brown.png
+  Female_Ranger_Acc_Pauldrons -> T_Ranger_BaseColor.png
+  Female_Ranger_Arms -> T_Regular_Female_Dark_BaseColor.png
+  Female_Ranger_Arms_Bracer -> T_Ranger_BaseColor.png
+  Female_Ranger_Arms__Ranger -> T_Ranger_BaseColor.png
+  Female_Ranger_Body -> T_Ranger_BaseColor.png
+  Female_Ranger_Body_Belt_1 -> T_Ranger_BaseColor.png
+  Female_Ranger_Body_Belt_2 -> T_Ranger_BaseColor.png
+  Female_Ranger_Feet -> T_Ranger_BaseColor.png
+  Female_Ranger_Head_Hood -> T_Ranger_BaseColor.png
+  Female_Ranger_Legs -> T_Ranger_BaseColor.png
+  Hair_Long -> T_Hair_2_BaseColor.png
+  Superhero_Female -> T_Superhero_Female_Dark_BaseColor.png
+slot -> file:
+  idle -> ranger_female_Idle_No_Loop.iqm
+  forward -> ranger_female_Jog_Fwd_Loop.iqm
+  backward -> ranger_female_Walk_Loop.iqm
+  left -> ranger_female_Walk_Loop.iqm
+  right -> ranger_female_Walk_Loop.iqm
+  edit -> ranger_female_Idle_Lantern_Loop.iqm
+  jump -> ranger_female_NinjaJump_Start.iqm
+  lag -> ranger_female_Walk_Loop.iqm
+  dying -> ranger_female_Hit_Knockback.iqm
+  dead -> ranger_female_LayToIdle.iqm
+  lose -> ranger_female_Idle_Shield_Break.iqm
+  pain -> ranger_female_Hit_Knockback.iqm
+  pain2 -> ranger_female_Hit_Knockback.iqm
+  sink -> ranger_female_Slide_Exit.iqm
+  swim -> ranger_female_Slide_Loop.iqm
+  taunt -> ranger_female_Idle_TalkingPhone_Loop.iqm
+  win -> ranger_female_Yes.iqm
+  hold 1 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 2 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 3 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 4 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 5 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 6 -> ranger_female_Idle_No_Loop.iqm @0
+  hold 7 -> ranger_female_Idle_No_Loop.iqm @0
+  attack1 -> ranger_female_Sword_Regular_A.iqm
+  attack2 -> ranger_female_Sword_Regular_B.iqm
+  attack3 -> ranger_female_Sword_Regular_C.iqm
+  attack4 -> ranger_female_Sword_Regular_Combo.iqm
+  attack5 -> ranger_female_Sword_Heavy_Combo.iqm
+  attack6 -> ranger_female_Sword_Dash.iqm
+  attack7 -> ranger_female_Sword_Regular_Combo.iqm
