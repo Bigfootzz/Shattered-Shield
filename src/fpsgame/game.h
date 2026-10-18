@@ -301,7 +301,7 @@ inline const GameMode *getGameModeS(const char *shortName)
 
 #ifdef CLIENT
 
-#define DEFAULT_MAP "reinc"
+#define DEFAULT_MAP "rpg_01"
 #define DEFAULT_MODE 7
 
 /**
