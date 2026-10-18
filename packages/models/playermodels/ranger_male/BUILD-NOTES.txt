@@ -48,3 +48,11 @@ slot -> file:
   attack5 -> ranger_male_Sword_Heavy_Combo.iqm
   attack6 -> ranger_male_Sword_Dash.iqm
   attack7 -> ranger_male_Sword_Regular_Combo.iqm
+
+SKIN-FIT FIX (2026-10-18):
+- Removed redundant outfit Body/Arms/Legs meshes (duplicated base body, caused
+  camo texture on skin). Base body provides all skin.
+- Garments (pauldron/bracer/belt/boots/hood/feet) fit-preserved via deformation
+  transfer from body during canonical rebind.
+- Rebuilt char.iqm + anims; updated iqm.cfg (removed skins for deleted meshes).
+- Verified: clean skin renders, zero IQM errors on headless boot.

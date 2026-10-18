@@ -181,3 +181,26 @@ proof.
 
 No blockers — all four characters converted cleanly. Nothing committed;
 no src/ touched; no build run.
+
+## SKIN-FIT FIX (2026-10-18)
+
+**Bug:** The outfit packs' modular `Body`/`Arms`/`Legs` meshes duplicate the base
+body (Superhero/Regular). Including both caused the outfit's camo-textured
+Body/Arms/Legs to cover the base body's skin, making exposed skin (chest, arms,
+thighs) appear with the outfit's camouflage texture and painted buckle/strap
+details.
+
+**Fix:**
+1. Removed the redundant outfit `Body`/`Arms`/`Legs` meshes at import (exact
+   suffix match: `_Body`, `_Arms`, `_Legs`, excluding base bodies and
+   accessories like `_Body_Belt_1`, `_Arms_Bracer`). The base body (Superhero/
+   Regular) provides all skin; only true garments are kept (pauldron, bracer,
+   belt, boots, hood, feet).
+2. Garment fit preserved via deformation transfer: each garment vert inherits
+   the displacement of its nearest body vert during the body's canonical rebind,
+   maintaining the authored fit in world space.
+
+**Result:** All four characters rebuilt. Skin renders clean (no camo, no buckles
+on skin); garments show only outfit textures. Verified via re-import renders
+(stand + attack for rangers, stand for peasants) and headless client boot
+(zero IQM errors).
