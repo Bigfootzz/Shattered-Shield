@@ -39,7 +39,8 @@ target_link_libraries(${RR_SERVER_BINARY}
     ${UV_LIBRARIES}
     ${LUVIT_LIBRARIES}
     ${LUAJIT_LIBRARIES}
-    ${EXTRA_LIBS})
+    ${EXTRA_LIBS}
+    rpg)
 
 install(TARGETS
     ${RR_SERVER_BINARY}

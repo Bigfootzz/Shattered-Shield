@@ -133,6 +133,11 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/fpsgame
 )
 
+# Shattered Shield RPG layer (persistence etc.) — static lib, linked by both
+# the client (dedicated-server mode runs the game server in-process) and the
+# standalone server target.
+add_subdirectory(rpg)
+
 if(${BUILD_CC})
     add_subdirectory(controller-camera)
 else()

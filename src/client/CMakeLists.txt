@@ -131,6 +131,7 @@ target_link_libraries(${RR_CLIENT_BINARY}
     ${HTTP_PARSER_LIBRARIES}
     ${YAJL_LIBRARIES}
     ${BUILD_EXTRA_LIBS}
+    rpg
 )
 
 # SDL 1.2 built without x11-shared needs X11 at final link.
