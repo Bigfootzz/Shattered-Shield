@@ -1,0 +1,34 @@
+
+md3load tris.md3
+md3skin * skin.jpg //skin_mask.jpg
+
+md3pitch 1 0 -20 20
+
+
+md3anim forward 55 4 10
+md3anim dying 16 24 10
+
+md3anim dead 39 1
+
+md3anim "attack 1" 48 6 5
+md3anim "pain" 40 1 50
+md3anim idle 1 14 8
+
+
+
+
+//md3anim attack 2 48 5 10
+//md3anim attack 3 48 5 10
+//md3anim attack 4 48 5 10
+//md3anim attack 5 48 5 10
+//md3anim attack 6 48 5 10
+//md3anim attack 7 48 5 10
+
+//md3anim vweb shoot 48 5 20
+
+
+//mdlyaw -90
+
+
+mdlscale 180
+mdlspec -1

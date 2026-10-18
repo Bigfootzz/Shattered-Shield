@@ -1,0 +1,17 @@
+
+include_directories(${OPENCV_INCLUDE_DIRS})
+
+set(CC_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/main)
+
+set(RR_CC_BINARY "controller_camera_${BUILD_PLATFORM_BIN}_${BUILD_TARGET_ARCH}${BUILD_VERSION_POSTFIX}" CACHE INTERNAL "Revelade revolution controller camera binary name.")
+add_executable(${RR_CC_BINARY} ${CC_SOURCES})
+
+target_link_libraries(${RR_CC_BINARY}
+    ${OpenCV_LIBS})
+
+install(TARGETS
+    ${RR_CC_BINARY}
+    RUNTIME DESTINATION ${INSTALL_RUNTIME_DIR}
+    LIBRARY DESTINATION ${INSTALL_LIBRARY_DIR}
+    ARCHIVE DESTINATION ${INSTALL_ARCHIVE_DIR})

@@ -1,0 +1,130 @@
+name: Build Revelade Revolution
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            zlib1g-dev libgl1-mesa-dev libglu1-mesa-dev libx11-dev \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev \
+            libenet-dev libuv1-dev libyajl-dev libhttp-parser-dev \
+            libbullet-dev libluajit-5.1-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SERVER=OFF
+
+      - name: Build
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/src/client/client_linux_x64 dist/
+          cp -r data packages dist/
+          tar czf revelade-linux-x64.tar.gz -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: revelade-linux-x64
+          path: revelade-linux-x64.tar.gz
+
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-SDL2_image
+            mingw-w64-x86_64-SDL2_mixer
+            mingw-w64-x86_64-bullet
+            mingw-w64-x86_64-libuv
+            mingw-w64-x86_64-yajl
+            mingw-w64-x86_64-luajit
+            zip
+
+      # MSYS2 ships no enet package; build enet 1.3.18 from source instead.
+      - name: Build enet from source
+        shell: msys2 {0}
+        run: |
+          curl -sL -o enet.tar.gz https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
+          tar xzf enet.tar.gz
+          cmake -S enet-1.3.18 -B enet-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/mingw64
+          cmake --build enet-build -j$(nproc)
+          cmake --install enet-build
+          # enet's CMake install puts the archive in lib/static, but the
+          # pkg-config link line only searches lib, so copy it into place.
+          if [ -f /mingw64/lib/static/libenet.a ] && [ ! -f /mingw64/lib/libenet.a ]; then
+            cp /mingw64/lib/static/libenet.a /mingw64/lib/libenet.a
+          fi
+          # The project finds enet via pkg-config; write the .pc if upstream didn't.
+          if [ ! -f /mingw64/lib/pkgconfig/libenet.pc ]; then
+            mkdir -p /mingw64/lib/pkgconfig
+            printf 'prefix=/mingw64\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\n\nName: libenet\nDescription: ENet reliable UDP networking library\nVersion: 1.3.18\nLibs: -L${libdir} -lenet -lws2_32 -lwinmm\nCflags: -I${includedir}\n' > /mingw64/lib/pkgconfig/libenet.pc
+          fi
+
+      # http-parser is a single C file; build it directly if no package provides it.
+      - name: Build http-parser from source
+        shell: msys2 {0}
+        run: |
+          if ! find_library_out=$(find /mingw64 -name 'libhttp_parser*' 2>/dev/null) || [ -z "$find_library_out" ]; then
+            curl -sL -o http-parser.tar.gz https://github.com/nodejs/http-parser/archive/refs/tags/v2.9.4.tar.gz
+            tar xzf http-parser.tar.gz
+            gcc -O2 -c http-parser-2.9.4/http_parser.c -o http_parser.o
+            ar rcs /mingw64/lib/libhttp_parser.a http_parser.o
+            cp http-parser-2.9.4/http_parser.h /mingw64/include/
+          fi
+
+      # The repo's CMake never sets SDL_LIBRARIES/SDL_INCLUDE_DIRS on Windows,
+      # so inject them via cache vars (same recipe as the local MinGW build).
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SERVER=OFF -G "MinGW Makefiles" \
+            -DSDL_INCLUDE_DIRS=/mingw64/include/SDL2 \
+            -DSDL_LIBRARIES="SDL2main;SDL2;SDL2_image;SDL2_mixer"
+
+      - name: Build
+        shell: msys2 {0}
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Package
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist
+          cp build/src/client/client_win64_x64.exe dist/ || cp build/src/client/client_windows_x64.exe dist/
+          cp -r data packages dist/
+          cp /mingw64/bin/SDL2.dll dist/
+          cp /mingw64/bin/SDL2_image.dll dist/
+          cp /mingw64/bin/SDL2_mixer.dll dist/
+          cp /mingw64/bin/zlib1.dll dist/ || true
+          cd dist && zip -r ../revelade-windows-x64.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: revelade-windows-x64
+          path: revelade-windows-x64.zip

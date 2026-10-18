@@ -1,0 +1,15 @@
+replace fx/ctf with new sounds
+(these have been "borrowed from AssaultCube, with permission from Makke to reuse in Sauerbraten", we may need permission to use them in RR too)
+-Flagpickup -> done, timov
+-Flagdrop -> done, Same ^
+
+
+replace fx/splosh(2/3).ogg with new sounds
+review fx/press.ogg
+(these three are taken from Red Eclipse, I'm not sure if we can use them)
+
+puopulate voice/radio
+(we may need a voice actor for this, who could also record new voices for capture mode)
+
+
+I've reviewed all the lisences I could find and I think we're fine, with the above exceptions.

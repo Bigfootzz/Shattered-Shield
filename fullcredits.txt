@@ -1,0 +1,9 @@
+Models:
+    A.W.O.L
+    geartrooper a.k.a. John Siar: ironantknight@gmail.com
+    Pyccna
+	
+Textures:
+   Snipergoth
+   Chasester
+   
