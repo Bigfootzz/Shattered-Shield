@@ -1,6 +1,9 @@
 #include "game.h"
 #include "auth.h"
 
+// --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+#include "rpg/rpg.h"
+
 #ifdef SERVER
 #include "server/lua.h"
 #endif
@@ -811,6 +814,29 @@ namespace server
         sendservmsg(s);
     }
 
+// --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+    void rpgstats_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 1 || !args[0].getstr()[0]) { conoutf("usage: rpgstats <name>"); return; }
+        if(!rpg::connected()) { conoutf("rpgstats: character database is not open"); return; }
+        int level = 0, xp = 0;
+        if(!rpg::getstats(args[0].getstr(), level, xp)) conoutf("rpgstats: no character named '%s'", args[0].getstr());
+        else conoutf("rpgstats: %s -- level %d, xp %d", args[0].getstr(), level, xp);
+    }
+    COMMANDN(rpgstats, rpgstats_cmd, "sV");
+
+    void rpggrantxp_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 2) { conoutf("usage: rpggrantxp <name> <amount>"); return; }
+        if(!rpg::connected()) { conoutf("rpggrantxp: character database is not open"); return; }
+        bool leveled = false;
+        int newlevel = rpg::awardxp(args[0].getstr(), args[1].getint(), &leveled);
+        if(newlevel < 0) { conoutf("rpggrantxp: no character named '%s'", args[0].getstr()); return; }
+        conoutf("rpggrantxp: %s +%d xp (level %d)", args[0].getstr(), args[1].getint(), newlevel);
+        if(leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", args[0].getstr(), newlevel);
+    }
+    COMMANDN(rpggrantxp, rpggrantxp_cmd, "siV");
+
     void resetitems()
     {
         mcrc = 0;
@@ -838,6 +864,8 @@ namespace server
         smapname[0] = '\0';
         resetitems();
         auth::init();
+        // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+        rpg::init();
     }
 
     int numclients(int exclude = -1, bool nospec = true, bool noai = true, bool priv = false)
@@ -2041,6 +2069,13 @@ namespace server
     }
     void changemap(const char *s, int mode)
     {
+        // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE)
+                rpg::savepos(ci->name, smapname, ci->state.o.x, ci->state.o.y, ci->state.o.z, 0.0f /* yaw: not on gamestate; reserved for later */);
+        }
         stopdemo();
         sendservmsg("Waiting for map to load on all clients");
         pausegame(true);
@@ -2276,6 +2311,13 @@ namespace server
                 const ::monster::MonsterType &zt = ::monster::getMonsterType(target->state.getMonsterType());
                 actor->state.guts += zt.classInfo.maxhealth/zt.freq*2;
                 sendf(actor->ownernum, 1, "ri3", N_GUTS, actor->clientnum, actor->state.guts);
+            }
+            // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+            if(actor && actor!=target && target->state.ai.type==ai::AI_TYPE_MONSTER && actor->state.ai.type==ai::AI_TYPE_NONE)
+            {
+                bool rpg_leveled = false;
+                int rpg_newlevel = rpg::awardxp(actor->name, rpg::XP_PER_MONSTER_KILL, &rpg_leveled);
+                if(rpg_leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", actor->name, rpg_newlevel);
             }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
@@ -2527,6 +2569,18 @@ namespace server
 
     void serverupdate()
     {
+        // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+        static int rpg_lastautosave = 0;
+        if(totalmillis - rpg_lastautosave >= 60000)
+        {
+            rpg_lastautosave = totalmillis;
+            loopv(clients)
+            {
+                clientinfo *ci = clients[i];
+                if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE)
+                    rpg::savepos(ci->name, smapname, ci->state.o.x, ci->state.o.y, ci->state.o.z, 0.0f /* yaw: not on gamestate; reserved for later */);
+            }
+        }
         if(waitingForMapLoad)
         {
             int totalMapLoadTime = 0;
@@ -2800,6 +2854,8 @@ namespace server
             if(ci->privilege) setmaster(ci, false, ci->clientnum);
             if(smode) smode->leavegame(ci, true);
             ci->state.timeplayed += lastmillis - ci->state.lasttimeplayed;
+            // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+            rpg::ondisconnect(ci->name, smapname, ci->state.o.x, ci->state.o.y, ci->state.o.z, 0.0f /* yaw: not on gamestate; reserved for later */);
             savescore(ci);
             sendf(-1, 1, "ri2", N_CDIS, n);
             clients.removeobj(ci);
@@ -2917,6 +2973,9 @@ namespace server
 
         if(m_demo) setupdemoplayback();
         if(smode) smode->entergame(ci);
+
+        // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
+        rpg::onconnect(ci->name);
 
         #ifdef SERVER
         if(false && lua::pushEvent("client.connect"))
