@@ -1,9 +1,13 @@
 #include "game.h"
+#include "engine.h"
 #include "rpg/rpg.h"
 #include "rpg/abilities.h"
 #include "rpg/stats.h"
 #include "rpg/items.h"
 #include "auth.h"
+
+// rendergl.cpp ground-truth camera basis (global scope)
+extern vec camdir, camright, camup;
 
 namespace game
 {
@@ -56,14 +60,350 @@ namespace game
     // The client only ASKS to cast: the server validates cooldown, mana and
     // target and applies damage. Yaw is client-advisory, used by the server
     // for the melee front-cone check only. Bindable, e.g. bind Q ability1.
-    ICOMMAND(ability1, "", (), addmsg(N_RPG_CAST, "ri2", 0, int(player1->yaw)));
-    ICOMMAND(ability2, "", (), addmsg(N_RPG_CAST, "ri2", 1, int(player1->yaw)));
+    // Targeting v1: casts carry the client-selected target as ADVISORY data.
+    // The server validates it (monster, alive, in range) and falls back to the
+    // old nearest-target behavior when no selection is set (-1).
+    static void rpg_castability(int ability)
+    {
+        if(!player1) return;
+        addmsg(N_RPG_CAST, "ri3", ability, int(player1->yaw), rpg::selectedtarget());
+    }
+    ICOMMAND(ability1, "", (), rpg_castability(0));
+    ICOMMAND(ability2, "", (), rpg_castability(1));
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
     // The client only ASKS (item id / slot); the server validates and pushes
     // fresh state (N_RPG_INV) after every mutation. The GUIs in
     // data/menus/rpg.cfg read the client cache live (re-executed every frame).
     ICOMMAND(isrpgmap, "", (), intret(rpg::mapactive(getclientmap()) ? 1 : 0));
+
+    // --- RPG: Shattered Shield mouse & targeting v1 (additive) ---
+    // Free cursor + click intent on RPG maps. Picking is a real raycast: the
+    // cursor pixel is unprojected through the inverse MVP matrix into a world
+    // ray from the camera, tested against monster bounding cylinders (the same
+    // intersect() the weapon code uses), loot-drop interaction cylinders, and
+    // the world itself (raycubepos) for occlusion. NPCs have no system yet:
+    // the monster loop is the single place an NPC entity check slots in later.
+    // Pick volume matches the RENDERED model, not the physics body. The engine's
+    // intersect() cylinder (eyeheight/aboveeye, ~18 tall) is the FPS shooting
+    // volume; the zombie models render ~65 tall, so a click on the visible body
+    // must test a visual-size cylinder or real clicks miss (proven in testing).
+    // Height comes from the model's own bounding box - the same data the
+    // renderer culls with - with a humanoid fallback if the box is degenerate.
+    static float rpg_visualheight(fpsent *d)
+    {
+        const playermodelinfo &mdl = getplayermodelinfo(d);
+        if(mdl.ffa && mdl.ffa[0])
+        {
+            model *m = loadmodel(mdl.ffa);
+            if(m)
+            {
+                vec center, br;
+                m->boundbox(center, br);
+                float h = (center.z + br.z) - (center.z - br.z);
+                if(h > 8.0f) return h + 4.0f; // small margin
+            }
+        }
+        return 70.0f; // fallback: humanoid zombie visual
+    }
+    static bool rpg_pickintersect(fpsent *d, const vec &from, const vec &to, float &dist)
+    {
+        vec feet = d->feetpos();
+        vec bottom(feet.x, feet.y, feet.z), top(feet.x, feet.y, feet.z + rpg_visualheight(d));
+        if(!linecylinderintersect(from, to, bottom, top, max(d->radius, 7.0f), dist)) return false;
+        dist *= from.dist(to); // linecylinderintersect returns a fraction; we need world units // linecylinderintersect returns a fraction; we need world units
+        return true;
+    }
+    struct rpgpickresult { int kind; fpsent *mon; int lootidx; }; // kind: 0 none, 1 loot, 2 monster
+    static rpgpickresult rpg_pick(float cx, float cy, int w, int h)
+    {
+        rpgpickresult r; r.kind = 0; r.mon = NULL; r.lootidx = -1;
+        if(!camera1 || !player1 || w <= 0 || h <= 0) return r;
+        vec4 scr;
+        scr.x = 2.0f*cx/w - 1.0f;
+        scr.y = 1.0f - 2.0f*cy/h;
+        scr.z = 0.0f; scr.w = 1.0f;
+        vec wp = invmvpmatrix.perspectivetransform(scr);
+        vec dir = vec(wp).sub(camera1->o);
+        if(dir.magnitude() < 1e-6f) return r;
+        dir.normalize();
+        vec from = camera1->o;
+        vec to = vec(dir).mul(1024.0f).add(from);
+        vec hitpos;
+        float worldd = raycubepos(from, dir, hitpos, 0, RAY_CLIPMAT|RAY_SKIPFIRST);
+        if(worldd < 0) worldd = 1e16f;
+        fpsent *best = NULL; float bestd = 1e16f;
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(!d || d == player1) continue;
+            // NPC hook: when NPCs exist, their entity check goes here alongside monsters.
+            if(d->ai.type != ai::AI_TYPE_MONSTER) continue;
+            if(d->state != CS_ALIVE) continue;
+            float dist;
+            if(!rpg_pickintersect(d, from, to, dist)) continue;
+            if(dist < bestd) { best = d; bestd = dist; }
+        }
+        rpg::lootdrop drops[64]; int nd = 0;
+        int bestloot = -1; float bestld = 1e16f;
+        if(rpg::getclientloot(drops, 64, nd)) loopi(nd)
+        {
+            vec bottom(drops[i].x, drops[i].y, drops[i].z), top(drops[i].x, drops[i].y, drops[i].z + 4.0f);
+            float dist;
+            if(!linecylinderintersect(from, to, bottom, top, 2.5f, dist)) continue;
+            if(dist < bestld) { bestld = dist; bestloot = drops[i].idx; }
+        }
+        // nearest of monster/loot wins; the world occludes everything behind it
+        if(best && bestd < worldd && bestd <= bestld) { r.kind = 2; r.mon = best; }
+        else if(bestloot >= 0 && bestld < worldd) { r.kind = 1; r.lootidx = bestloot; }
+        return r;
+    }
+
+    // Resolve the selected clientnum to a live monster, NULL when gone/dead.
+    static fpsent *rpg_selmon()
+    {
+        int cn = rpg::selectedtarget();
+        if(cn < 0) return NULL;
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(d && d->clientnum == cn && d->ai.type == ai::AI_TYPE_MONSTER && d->state == CS_ALIVE) return d;
+        }
+        return NULL;
+    }
+
+    static void rpg_screenwh(int &w, int &h)
+    {
+        w = h = 0;
+        if(screen) SDL_GetWindowSize(screen, &w, &h);
+    }
+
+    // Click intent: button 0 = left (select / deselect), 1 = right (select + auto-attack).
+    // Plain function (not inline in the ICOMMAND): the macro parser splits on bare
+    // commas, so multi-declaration bodies live here instead.
+    static void rpg_doclick(int button)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(!player1 || player1->state != CS_ALIVE) return;
+        int w = 0; int h = 0; rpg_screenwh(w, h);
+        float cx = 0; float cy = 0;
+        rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
+        rpgpickresult pk = rpg_pick(cx, cy, w, h);
+        if(button == 1)
+        {
+            if(pk.kind == 2 && pk.mon)
+            {
+                rpg::selecttarget(pk.mon->clientnum);
+                rpg::setautoattack(true);
+                conoutf("rpg: auto-attacking '%s'", pk.mon->name);
+            }
+            else
+            {
+                if(rpg::autoattacking() || rpg::selectedtarget() >= 0) conoutf("rpg: auto-attack stopped");
+                rpg::selecttarget(-1); rpg::setautoattack(false);
+            }
+        }
+        else
+        {
+            if(pk.kind == 2 && pk.mon)
+            {
+                rpg::selecttarget(pk.mon->clientnum);
+                conoutf("rpg: selected '%s' (%d/%d hp)", pk.mon->name, pk.mon->health, pk.mon->maxhealth);
+            }
+            else if(pk.kind == 1)
+            {
+                conoutf("rpg: loot here - walk over it to pick it up");
+            }
+            else
+            {
+                if(rpg::selectedtarget() >= 0) conoutf("rpg: deselected");
+                rpg::selecttarget(-1); rpg::setautoattack(false);
+            }
+        }
+    }
+    // "D" signature: acts on press only; the release re-fire is a no-op by design.
+    ICOMMAND(rpgclick, "Di", (int *down, int *button), { if(*down) rpg_doclick(*button); });
+    ICOMMAND(rpgcleartarget, "", (), rpg::cleartargeting());
+    // --- TEST-ONLY scaffolding (mouse & targeting v1 harness) ---
+    // The headless harness cannot move the OS pointer, so these drive the same
+    // code paths the real input takes: rpgtestdelta exercises game::cursormove
+    // (the exact function the engine event loop calls), rpgtestsnap projects
+    // the nearest live monster to screen space and parks the cursor on it so
+    // rpgclick runs the genuine raycast pick, and rpgtestmouselook exposes the
+    // mouse-look gate for both map kinds.
+    ICOMMAND(rpgtestdelta, "ii", (int *dx, int *dy), cursormove(*dx, *dy));
+    ICOMMAND(rpgcursorpos, "", (),
+    {
+        float cx = 0; float cy = 0; rpg::cursorget(cx, cy);
+        conoutf("rpgtest: cursorpos %.0f %.0f", cx, cy);
+    });
+    ICOMMAND(rpgtestmouselook, "", (), conoutf("rpgtest: allowmouselook=%d (map %s)", allowmouselook() ? 1 : 0, getclientmap()));
+    ICOMMAND(rpgtestbinds, "", (),
+    {
+        char *b1 = executestr("getbind MOUSE1"); char *b2 = executestr("getbind MOUSE2");
+        conoutf("rpgtest: MOUSE1=[%s] MOUSE2=[%s]", b1 ? b1 : "(none)", b2 ? b2 : "(none)");
+        delete[] b1; delete[] b2;
+    });
+    static int rpg_snapok = 0;
+    static int rpg_snapwait_until = 0;
+    static bool rpg_dosnap()
+    {
+        rpg_snapok = 0;
+        if(!rpg::mapactive(getclientmap()) || !player1 || !camera1) return false;
+        fpsent *best = NULL; float bestd = 1e16f;
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(!d || d == player1 || d->ai.type != ai::AI_TYPE_MONSTER || d->state != CS_ALIVE) continue;
+            float dist = d->o.dist(player1->o);
+            if(dist < bestd) { best = d; bestd = dist; }
+        }
+        if(!best) { conoutf("rpgtestsnap: no live monster"); return false; }
+        vec p = best->feetpos(); p.z += rpg_visualheight(best)*0.55f;
+        vec4 in; in.x = p.x; in.y = p.y; in.z = p.z; in.w = 1.0f;
+        vec4 v; mvmatrix.transform(in, v);
+        if(v.z >= -2.0f) { conoutf("rpgtestsnap: '%s' behind camera, not snapping", best->name); return false; }
+        vec4 c; mvpmatrix.transform(in, c);
+        if(c.w == 0) return false;
+        int w = 0; int h = 0; rpg_screenwh(w, h);
+        float nx = c.x/c.w; float ny = c.y/c.w;
+        float sx = (nx*0.5f + 0.5f)*w; float sy = (0.5f - ny*0.5f)*h;
+        rpg::cursorset(sx, sy);
+        conoutf("rpgtestsnap: cursor -> %.0f,%.0f on '%s' (mon o=%.0f,%.0f,%.0f cam=%.0f,%.0f,%.0f yaw=%.0f player=%.0f,%.0f,%.0f pyaw=%.0f)",
+            sx, sy, best->name, best->o.x, best->o.y, best->o.z, camera1->o.x, camera1->o.y, camera1->o.z,
+            camera1->yaw, player1->o.x, player1->o.y, player1->o.z, player1->yaw);
+        // deep pick diagnostic: rebuild the ray and test the monster + world explicitly
+        {
+            vec4 dscr; dscr.x = 2.0f*sx/w - 1.0f; dscr.y = 1.0f - 2.0f*sy/h; dscr.z = 0.0f; dscr.w = 1.0f;
+            vec dwp = invmvpmatrix.perspectivetransform(dscr);
+            vec ddir = vec(dwp).sub(camera1->o); ddir.normalize();
+            vec dhit; float dworld = raycubepos(camera1->o, ddir, dhit, 0, RAY_CLIPMAT|RAY_SKIPFIRST);
+            float ddist = -2; bool dh = rpg_pickintersect(best, camera1->o, vec(ddir).mul(1024.0f).add(camera1->o), ddist);
+            conoutf("rpgtestsnap: diag dir=%.2f,%.2f,%.2f worldd=%.1f inthit=%d intdist=%.1f cyl r=%.1f eye=%.1f above=%.1f",
+                ddir.x, ddir.y, ddir.z, dworld, dh ? 1 : 0, ddist, best->radius, best->eyeheight, best->aboveeye);
+        }
+        {
+            vec off = vec(best->o).sub(camera1->o);
+            conoutf("rpgtestsnap: basis camdir=%.2f,%.2f,%.2f camright=%.2f,%.2f,%.2f off=%.1f,%.1f,%.1f fwd=%.1f right=%.1f",
+                camdir.x, camdir.y, camdir.z, camright.x, camright.y, camright.z,
+                off.x, off.y, off.z, off.dot(camdir), off.dot(camright));
+        }
+        rpgpickresult verify = rpg_pick(sx, sy, w, h);
+        conoutf("rpgtestsnap: verify pick kind=%d %s", verify.kind, verify.mon ? verify.mon->name : "(none)");
+        rpg_snapok = (verify.kind == 2) ? 1 : 0;
+        return verify.kind == 2;
+    }
+    ICOMMAND(rpgtestsnap, "", (), rpg_dosnap(););
+    ICOMMAND(rpgtestsnapok, "", (), intret(rpg_snapok));
+    static int rpg_snapclick_btn = -1;
+    ICOMMAND(rpgtestsnapwait, "", (), { rpg_snapok = 0; rpg_snapclick_btn = -1; rpg_snapwait_until = totalmillis + 15000; conoutf("rpgtestsnapwait: tracking monster each frame for 15s"); });
+    ICOMMAND(rpgtestsnapstop, "", (), { rpg_snapwait_until = 0; rpg_snapclick_btn = -1; conoutf("rpgtestsnapwait: stopped"); });
+    static string rpg_shotarm;
+    ICOMMAND(rpgtestsnapshot, "s", (char *n), { copystring(rpg_shotarm, n); conoutf("rpgtestsnapshot: armed '%s'", n); });
+    ICOMMAND(rpgtestshottaken, "", (), intret(rpg_shotarm[0] ? 0 : 1));
+    ICOMMAND(rpgtestsnapclick, "i", (int *b), { rpg_snapok = 0; rpg_snapclick_btn = *b; rpg_snapwait_until = totalmillis + 15000; conoutf("rpgtestsnapclick: snap+click(%d)", *b); });
+    ICOMMAND(rpgtestcursorset, "ii", (int *x, int *y), rpg::cursorset(float(*x), float(*y)););
+    ICOMMAND(rpgteststats, "", (), { int l = 0; int x = 0; rpg::getclientstats(l, x); conoutf("rpgteststats: level=%d xp=%d", l, x); });
+    // Target-frame queries for the HUD (never authoritative)
+    ICOMMAND(rpgtargetname, "", (), { fpsent *d = rpg_selmon(); result(d ? d->name : ""); });
+    ICOMMAND(rpgtargethp, "", (), { fpsent *d = rpg_selmon(); intret(d ? d->health : 0); });
+    ICOMMAND(rpgtargetmaxhp, "", (), { fpsent *d = rpg_selmon(); intret(d ? d->maxhealth : 0); });
+
+    static int rpg_testforcerange = 0; // TEST-ONLY: bypass auto-attack client range check
+    ICOMMAND(rpgtestforcerange, "i", (int *v), { rpg_testforcerange = *v ? 1 : 0; conoutf("rpgtestforcerange: %s", rpg_testforcerange ? "ON" : "OFF"); });
+    // Per-frame targeting maintenance. Called from updateworld() on RPG maps.
+    void updatetargeting()
+    {
+        if(rpg_snapwait_until && rpg::mapactive(getclientmap()))
+        {
+            if(totalmillis >= rpg_snapwait_until) { rpg_snapwait_until = 0; rpg_snapclick_btn = -1; conoutf("rpgtestsnapwait: timed out"); }
+            else if(rpg_dosnap())
+            {
+                if(rpg_shotarm[0]) { conoutf("rpgtestsnapshot: taking '%s'", rpg_shotarm); defformatstring(cmd)("screenshot %s", rpg_shotarm); rpg_shotarm[0] = '\0'; executestr(cmd); }
+                if(rpg_snapclick_btn >= 0)
+                {
+                    int b = rpg_snapclick_btn;
+                    rpg_snapclick_btn = -1; rpg_snapwait_until = 0;
+                    conoutf("rpgtestsnapclick: snapped, clicking %d", b);
+                    rpg_doclick(b);
+                }
+                else if(!rpg_snapok) { rpg_snapok = 1; conoutf("rpgtestsnapwait: tracking"); }
+            }
+        }
+        if(!rpg::mapactive(getclientmap()) || !player1) return;
+        int w, h; rpg_screenwh(w, h);
+        if(w <= 0 || h <= 0) return;
+        float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
+
+        // hover state (real pick every frame; logs transitions only)
+        rpgpickresult pk = rpg_pick(cx, cy, w, h);
+        int hov = rpg::HOVER_DEFAULT;
+        if(pk.kind == 2) hov = rpg::HOVER_HOSTILE;
+        else if(pk.kind == 1) hov = rpg::HOVER_LOOT;
+        if(hov != rpg::hoverstate())
+        {
+            rpg::sethoverstate(hov);
+            conoutf("rpg: hover %s", hov == rpg::HOVER_HOSTILE ? "hostile" : (hov == rpg::HOVER_LOOT ? "loot" : "default"));
+        }
+
+        // selection validity: target died or left -> deselect, stop auto-attack
+        fpsent *sel = rpg_selmon();
+        if(rpg::selectedtarget() >= 0 && !sel)
+        {
+            conoutf("rpg: target lost, deselecting");
+            rpg::selecttarget(-1); rpg::setautoattack(false);
+            return;
+        }
+        if(player1->state != CS_ALIVE)
+        {
+            if(rpg::autoattacking()) { rpg::setautoattack(false); conoutf("rpg: auto-attack stopped (you died)"); }
+            return;
+        }
+
+        // auto-attack: repeated Power Strike (ability 0) through the real,
+        // server-validated cast path. Client-side pre-checks only avoid chat
+        // spam; cooldown/mana/range/line-of-sight are enforced by the server.
+        // Out of range: HOLD in place (no teleport, no auto-path) and say so.
+        if(rpg::autoattacking() && sel)
+        {
+            static int lasttry = 0, lastholdlog = 0;
+            static bool washolding = false;
+            if(totalmillis - lasttry >= 250)
+            {
+                lasttry = totalmillis;
+                const rpg::abilitydef &ab = rpg::ability(0);
+                vec delta(sel->o); delta.sub(player1->o);
+                bool inrange = rpg_testforcerange || delta.magnitude() <= ab.range; // TEST-ONLY
+                if(!inrange)
+                {
+                    if(!washolding || totalmillis - lastholdlog > 5000)
+                    {
+                        conoutf("rpg: auto-attack holding - target out of range (%.0f > %.0f)", delta.magnitude(), ab.range);
+                        lastholdlog = totalmillis;
+                    }
+                    washolding = true;
+                }
+                else if(rpg::cooldownleft(0, totalmillis) > 0) washolding = false;
+                else
+                {
+                    int mana = 0, maxmana = 0;
+                    rpg::getclientmana(mana, maxmana);
+                    if(mana >= ab.manacost)
+                    {
+                        if(washolding) conoutf("rpg: auto-attack resumed");
+                        washolding = false;
+                        conoutf("rpg: auto-attack tick -> '%s' (hp %d/%d)", sel->name, sel->health, sel->maxhealth);
+                        rpg_castability(0);
+                    }
+                    else if(!washolding || totalmillis - lastholdlog > 5000)
+                    {
+                        conoutf("rpg: auto-attack holding - waiting for mana");
+                        lastholdlog = totalmillis; washolding = true;
+                    }
+                }
+            }
+        }
+    }
     ICOMMAND(rpginventory, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpginv"); });
     ICOMMAND(rpgcharacter, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpgchar"); });
     ICOMMAND(rpgequip, "s", (char *s), addmsg(N_RPG_EQUIP, "rs", s));
@@ -819,7 +1159,21 @@ namespace game
 
     bool ispaused() { return gamepaused; }
 
-    bool allowmouselook() { return !gamepaused || !remote || m_edit; }
+    bool allowmouselook()
+    {
+        // RPG: on RPG maps the mouse is a free cursor, not a camera control.
+        // FPS/battleground maps are untouched.
+        return (!gamepaused || !remote || m_edit) && !rpg::mapactive(getclientmap());
+    }
+
+    // RPG: raw mouse deltas for the free cursor. The engine calls this even
+    // when mouse-look is gated off (see main.cpp event loop). Menus consume
+    // deltas first via g3d_movecursor, so the world cursor freezes while a
+    // menu is open and resumes when it closes.
+    void cursormove(int dx, int dy)
+    {
+        if(rpg::mapactive(getclientmap())) rpg::cursoraccum(dx, dy);
+    }
 
     void changegamespeed(int val)
     {

@@ -780,4 +780,30 @@ namespace rpg
         }
         return true;
     }
+
+    // --- mouse & targeting v1: client presentation state (plain data) ---
+    static float clcursorx = 640.0f, clcursory = 360.0f;
+    static int clhover = HOVER_DEFAULT;
+    static int clselclient = -1;
+    static bool clautoattack = false;
+
+    void cursoraccum(int dx, int dy)
+    {
+        clcursorx += dx; clcursory += dy;
+    }
+    void cursorget(float &x, float &y) { x = clcursorx; y = clcursory; }
+    void cursorset(float x, float y) { clcursorx = x; clcursory = y; }
+    void cursorclamp(float &x, float &y, int w, int h)
+    {
+        if(x < 0) x = 0; if(y < 0) y = 0;
+        if(x > w) x = w; if(y > h) y = h;
+        clcursorx = x; clcursory = y;
+    }
+    int hoverstate() { return clhover; }
+    void sethoverstate(int s) { clhover = s; }
+    int selectedtarget() { return clselclient; }
+    void selecttarget(int clientnum) { clselclient = clientnum; }
+    bool autoattacking() { return clautoattack; }
+    void setautoattack(bool on) { clautoattack = on; }
+    void cleartargeting() { clselclient = -1; clautoattack = false; }
 }

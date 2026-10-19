@@ -1351,6 +1351,10 @@ void g3d_limitscale(float scale)
 
 static inline bool g3d_sort(const gui &a, const gui &b) { return a.dist < b.dist; }
 
+// RPG: true while any 2D menu window is up (menus own the mouse then;
+// the free world cursor hides). Read at draw time, after g3d_render().
+bool g3d_gui2dopen() { return guis2d.length() > 0; }
+
 bool g3d_windowhit(bool on, bool act)
 {
     extern int cleargui(int n);

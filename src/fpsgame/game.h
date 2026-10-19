@@ -720,7 +720,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_SURVINIT, 0, N_SURVREASSIGN, 0, N_SURVSPAWNSTATE, 0, N_SURVNEWROUND, 0, N_SURVROUNDOVER, 2,
     N_GUTS, 3, N_BUY, 0, N_SHOPOPEN, 2, N_SERVER_COMMAND, 0,
     N_DEMOPACKET, 0,
-    N_RPG_CAST, 3,
+    N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
     N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     -1
@@ -1222,6 +1222,7 @@ namespace game
     extern void stopfollowing();
     extern void clientdisconnected(int cn, bool notify = true);
     extern void clearclients(bool notify = true);
+    extern void updatetargeting(); // RPG mouse & targeting v1 (client.cpp)
     extern void startgame();
     extern void spawnplayer(fpsent *);
     extern void deathstate(fpsent *d, bool restore = false);

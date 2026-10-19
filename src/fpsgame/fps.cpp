@@ -5,6 +5,8 @@
 #include "engine.h"
 #include "version.h"
 
+extern float gtextscale;   // rendertext.cpp: current HUD text scale (save/restore in rpg_hudtext)
+
 namespace game
 {
     bool intermission = false;
@@ -658,7 +660,9 @@ namespace game
     bool detachcamera()
     {
         fpsent *d = hudplayer();
-        return d->state==CS_DEAD;
+        // RPG: third person is the enforced default view on RPG maps.
+        // The thirdperson var itself is never modified; FPS maps are untouched.
+        return d->state==CS_DEAD || rpg::mapactive(getclientmap());
     }
 
     bool collidecamera()
@@ -758,6 +762,7 @@ namespace game
         updateweapons(curtime);
         otherplayers(curtime);
         ai::update();
+        updatetargeting(); // RPG mouse & targeting v1 (no-op off RPG maps)
         moveragdolls();
         gets2c();
         updatemovables(curtime);
@@ -1856,6 +1861,24 @@ namespace game
         drawquad(x, y, w, h, u0, v0, u1, v1, false, false);
     }
 
+    // HUD text containment (user fix, Oct 19): draw strip text at an explicit
+    // pixel height sized to its section (health recess, slot, hint line) so
+    // nothing crosses a section boundary. Sizes derive from the strip geometry,
+    // not the engine's leftover text scale; the incoming scale is restored.
+    static void rpg_hudtext(const char *str, int left, int top, float pxh)
+    {
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        draw_text(str, left, top);
+        settextscale(save);
+    }
+    static void rpg_hudtextc(const char *str, float cx, float cy, float pxh)
+    {
+        float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
+        rpg_hudtext(str, int(cx - wpx/2), int(cy - pxh/2), pxh);
+    }
+
     void drawrpghud(fpsent *d, int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -1903,7 +1926,8 @@ namespace game
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/bar_hp.png")->id);
         if(hpf > 0) rpg_drawtexuv(bx0, by0, bw*hpf, bh, 0, 0, hpf, 1);
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        draw_text(hps, int(bx0 + bw/2 - 70), int(by0 + bh/2 - 16));
+        // numerals contained in the thin health recess (72% of its height)
+        rpg_hudtextc(hps, bx0 + bw/2, by0 + bh/2, bh*0.72f);
 
         // action slots (lower recess): 10 slots on keys 1-0; slot 1 = Power
         // Strike, slot 2 = Spark Bolt, slots 3-0 are empty kit frames.
@@ -1927,14 +1951,66 @@ namespace game
                 {
                     rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);
                     defformatstring(cds)("%.1f", cd/1000.0f);
-                    draw_text(cds, int(qx + slotn/2 - 24), int(sloty + slotn/2 - 16));
+                    // cooldown numeral contained in the slot (40% of slot size)
+                    rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.40f);
                 }
             }
             defformatstring(knum)("%d", (i+1)%10);
-            draw_text(knum, int(qx + 5*s), int(sloty - 8*s));
+            // key number sits fully above the slot, inside the lower recess
+            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 26*s), 26*s);
         }
 
-        draw_text("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44));
+        // hint line above the strip, smaller, contained in the gap
+        rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
+    }
+
+    // RPG: free world cursor (mouse & targeting v1). Drawn from the kit cursor
+    // set: default pointer, glove over loot, hostile marker over monsters.
+    // Hidden while a 2D menu is open (menus own the mouse then) and off RPG maps.
+    void drawrpgcursor(int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(g3d_gui2dopen()) return;
+        float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h);
+        float vscale = 1800.0f/h;
+        float sz = 64.0f*vscale;
+        // hotspot: the arrow tip sits ~(8,8)px inside the 64px cell
+        float vx = cx*vscale - 8.0f*vscale, vy = cy*vscale - 8.0f*vscale;
+        const char *tex = "packages/ui/rpg/cursors/cursor_default.png";
+        int hov = rpg::hoverstate();
+        if(hov == rpg::HOVER_HOSTILE) tex = "packages/ui/rpg/cursors/cursor_attack.png";
+        else if(hov == rpg::HOVER_LOOT) tex = "packages/ui/rpg/cursors/cursor_glove.png";
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
+        rpg_drawtexuv(vx, vy, sz, sz, 0, 0, 1, 1);
+    }
+
+    // RPG: kit target frame for the selected monster (name + live HP).
+    // HP is read from the client-side dynent state (display only; all damage
+    // is server-authoritative as before).
+    void drawrpgtarget(int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        int cn = rpg::selectedtarget();
+        if(cn < 0) return;
+        fpsent *d = NULL;
+        loopv(clients)
+        {
+            fpsent *t = clients[i];
+            if(t && t->clientnum == cn && t->ai.type == ai::AI_TYPE_MONSTER && t->state == CS_ALIVE) { d = t; break; }
+        }
+        if(!d) return;
+        float X = w*1800.0f/h;
+        float fw = 792.0f*0.8f, fh = 140.0f*0.8f;
+        float fx = (X - fw)/2, fy = 60.0f;
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/target_frame.png")->id);
+        rpg_drawtexuv(fx, fy, fw, fh, 0, 0, 1, 1);
+        float s = fw/792.0f;
+        draw_text(d->name, int(fx + 168*s), int(fy + 20*s));
+        float hpf = d->maxhealth > 0 ? clamp(float(d->health)/float(d->maxhealth), 0.0f, 1.0f) : 0;
+        float bx = fx + 162*s, bw = 612*s, by = fy + 76*s, bh = 50*s;
+        if(hpf > 0) rpg_fillrect(bx, by, bw*hpf, bh, 0.72f, 0.08f, 0.08f);
+        defformatstring(hps)("%d/%d", d->health, d->maxhealth);
+        draw_text(hps, int(bx + bw/2 - 60), int(by + bh/2 - 16));
     }
 
     void drawhudicons(fpsent *d, int w, int h)
@@ -1973,7 +2049,8 @@ namespace game
                 defformatstring(shoptext)("SHOP: %ds", (shopend-lastmillis+999)/1000);
                 draw_text(shoptext, w*1800/h - 262, 150, 255, 220, 80);
             }
-            if(!d->isInfected()) drawcrosshairhud(d, w, h);
+            // RPG: no center crosshair on RPG maps - the free cursor is the pointer there.
+            if(!d->isInfected() && !rpg::mapactive(getclientmap())) drawcrosshairhud(d, w, h);
 
             // --- RPG: Shattered Shield inventory (milestone step 4): the FPS health body is hidden on RPG maps (the RPG bars replace it) ---
             if (!m_insta && !rpg::mapactive(getclientmap()))
@@ -2478,6 +2555,7 @@ namespace game
         {
             if(d->state!=CS_SPECTATOR) drawhudicons(d, w, h);
             if(d->state!=CS_SPECTATOR) drawrpghud(d, w, h);
+            if(d->state!=CS_SPECTATOR) { drawrpgtarget(w, h); drawrpgcursor(w, h); }
             if(cmode) cmode->drawhud(d, w, h);
         }
 

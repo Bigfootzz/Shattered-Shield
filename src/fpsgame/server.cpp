@@ -869,6 +869,13 @@ namespace server
     }
     COMMANDN(rpgmana, rpgmana_cmd, "sV");
 
+    // TEST-ONLY HP pin for rpgspawnmonster <hp>: applied inside sendspawn
+    // (after spawnstate resets health to the monster-type default), so the
+    // broadcast N_SPAWNSTATE carries the requested HP. One-shot per spawn.
+    static int rpg_testspawn_cn = -1, rpg_testspawn_hp = 0;
+    static int rpg_testforcerange_srv = 0; // TEST-ONLY: bypass server range check
+    extern void sendspawn(clientinfo *ci); // defined below; re-broadcasts after test position is set
+
     // Spawn one monster parked on the casting player's feet (optional hp
     // override for deterministic tests). Uses the mode spawn path
     // (aiman::addai + makeInfected); the normal reinitai/spawn pipeline
@@ -876,7 +883,7 @@ namespace server
     void rpgspawnmonster_cmd(tagval *args, int numargs)
     {
         if(!rpg::connected()) { conoutf("rpgspawnmonster: character database is not open"); return; }
-        int hp = numargs >= 1 ? max(args[0].getint(), 1) : 0;
+        int hp = numargs >= 1 ? args[0].getint() : 0; // >0 pins an override; 0/absent = type default
         clientinfo *caster = NULL;
         loopv(clients)
         {
@@ -889,18 +896,38 @@ namespace server
         makeInfected(mi, monster::getRandomType(), false);
         copystring(mi->name, monster::getMonsterType(mi->state.getMonsterType()).classInfo.name, MAXNAMELEN+1);
         mi->state.state = CS_ALIVE;
-        // Run the normal spawn pipeline now (reassign()->respawn() resets the
-        // position to the -1e10 sentinel, sendspawn() broadcasts); the later
-        // serverupdate pass then becomes a no-op for this monster.
+        // Run the normal spawn pipeline (reassign/respawn wipes position to
+        // sentinel, sendspawn broadcasts). Then set the test position and
+        // re-broadcast so clients get the correct position + HP.
+        if(hp > 0) { rpg_testspawn_cn = mi->clientnum; rpg_testspawn_hp = hp; }
         aiman::reinitai(mi);
-        if(hp > 0) mi->state.maxhealth = mi->state.health = hp;
-        mi->state.o = caster->state.o; // on the caster's feet: melee cone auto-passes, range trivially met
-        // The owning client simulates the monster at its own spawn point and reports
-        // that via N_POS; pin it so the server keeps the test position (see N_POS).
-        rpg::pinmonster(mi->clientnum);
+        // fallback: if sendspawn did not consume the pin, apply directly
+        if(rpg_testspawn_cn == mi->clientnum)
+        {
+            mi->state.maxhealth = mi->state.health = rpg_testspawn_hp;
+            rpg_testspawn_cn = -1; rpg_testspawn_hp = 0;
+        }
+        float dist = numargs >= 2 ? max(args[1].getfloat(), 0.0f) : 0.0f;
+        mi->state.o = caster->state.o; // TEST-ONLY: spawn at caster
+        if(dist > 0.0f) mi->state.o.add(vec(0, dist, 0)); // +Y in front of test player (yaw 0)
+        // Re-broadcast with the test position (the sendspawn in reinitai went out
+        // before the position was set). Re-set the HP pin (one-shot) so the
+        // second sendspawn also applies the override.
+        if(hp > 0) { rpg_testspawn_cn = mi->clientnum; rpg_testspawn_hp = hp; }
+        sendspawn(mi);
         conoutf("rpgspawnmonster: '%s' (hp %d) at caster '%s'", mi->name, mi->state.health, caster->name);
     }
     COMMANDN(rpgspawnmonster, rpgspawnmonster_cmd, "iV");
+    // TEST-ONLY godmode for targeting proofs (server console only). When on,
+    // monsters cannot damage players. Does not affect monster-vs-monster or PvP.
+    static bool rpg_testgod = false;
+    void rpgtestgod_cmd(tagval *args, int numargs)
+    {
+        rpg_testgod = numargs >= 1 ? args[0].getint() != 0 : !rpg_testgod;
+        conoutf("rpgtestgod: %s", rpg_testgod ? "ON" : "OFF");
+    }
+    ICOMMAND(rpgtestforcerangesrv, "i", (int *v), { rpg_testforcerange_srv = *v ? 1 : 0; conoutf("rpgtestforcerangesrv: %s", rpg_testforcerange_srv ? "ON" : "OFF"); });
+    COMMANDN(rpgtestgod, rpgtestgod_cmd, "iV");
     // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
     static void rpg_syncinv(clientinfo *cq); // defined with the other inventory ops below
     // TEST-ONLY debug commands (server console only, like rpgspawnmonster).
@@ -964,9 +991,11 @@ namespace server
         }
         if(!victim) { conoutf("rpgmonsterdmg: no live player '%s'", name); return; }
         if(!monster) { conoutf("rpgmonsterdmg: no live monster (spawn one with rpgspawnmonster first)"); return; }
-        int hpbefore = victim->state.health;
-        vec push(0, 0, 0);
-        dodamage(victim, monster, amount, WEAP_FIST, push, false);
+        int hpbefore = victim->state.health;
+        vec push(0, 0, 0);
+        bool savegod = rpg_testgod; rpg_testgod = false; // explicit test damage bypasses god mode
+        dodamage(victim, monster, amount, WEAP_FIST, push, false);
+        rpg_testgod = savegod;
         conoutf("rpgmonsterdmg: '%s' %d -> %d hp (raw %d)", name, hpbefore, victim->state.health, amount);
     }
     COMMANDN(rpgmonsterdmg, rpgmonsterdmg_cmd, "siV");
@@ -1989,6 +2018,12 @@ namespace server
     static void rpg_applyspawnhealth(clientinfo *ci)
     {
         if(!rpg::connected() || !rpg::mapactive(smapname)) return;
+        if(ci->clientnum == rpg_testspawn_cn && rpg_testspawn_hp > 0)
+        {
+            ci->state.maxhealth = ci->state.health = rpg_testspawn_hp;
+            rpg_testspawn_cn = -1; rpg_testspawn_hp = 0;
+            return;
+        }
         int rpg_lvl = 1, rpg_xp = 0;
         if(!rpg::getstats(ci->name, rpg_lvl, rpg_xp)) return;
         gamestate &gs = ci->state;
@@ -2485,6 +2520,11 @@ namespace server
         // survival damage upgrade: bought damage levels scale a human's outgoing damage (dmsp only)
         if(actor && actor!=target && m_dmsp && actor->state.ai.type==ai::AI_TYPE_NONE && actor->dmgmult > 100)
             damage = damage*actor->dmgmult/100;
+        if(rpg_testgod && target && target->state.ai.type == ai::AI_TYPE_NONE &&
+           actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER)
+        {
+            damage = 0; // test godmode: monsters cannot hurt players
+        }
         gamestate &ts = target->state;
         ts.dodamage(damage);
         if (damage>0 && target!=actor && !isteam(target->team, actor->team)) actor->state.damage += damage;
@@ -2601,8 +2641,33 @@ namespace server
     // is touched. Yaw is advisory: it only steers the melee front-cone target
     // pick, never damage/cooldown/mana.
 
-    static clientinfo *rpg_findtarget(clientinfo *cq, const rpg::abilitydef &ab, int yaw)
+    static clientinfo *rpg_findtarget(clientinfo *cq, const rpg::abilitydef &ab, int yaw, int advisory)
     {
+        // Targeting v1: an explicit client selection (advisory target clientnum)
+        // is validated here (monster, alive, in range) and wins over the nearest
+        // pick. The melee front-cone check is waived for an explicit target: the
+        // click IS the aim ("right-click to auto-attack" works from any facing).
+        // Range, line-of-sight (spells), cooldown, mana and damage stay exactly
+        // as before. advisory < 0 keeps the old nearest-target behavior.
+        if(advisory >= 0)
+        {
+            clientinfo *t = NULL;
+            loopv(clients) if(clients[i]->clientnum == advisory) { t = clients[i]; break; }
+            if(!t || t == cq) return NULL;
+            if(t->state.ai.type != ai::AI_TYPE_MONSTER) return NULL; // monsters only: PvE world
+            if(t->state.state != CS_ALIVE || t->state.health <= 0) return NULL;
+            vec delta(t->state.o);
+            delta.sub(cq->state.o);
+            if(!rpg_testforcerange_srv && delta.magnitude() > ab.range) return NULL; // TEST-ONLY bypass
+            if(!ab.melee)
+            {
+                vec from(cq->state.o); from.z += 12.0f;
+                vec to(t->state.o); to.z += 4;
+                vec hitpos;
+                if(!raycubelos(from, to, hitpos)) return NULL; // no line of sight
+            }
+            return t;
+        }
         clientinfo *best = NULL;
         float bestdist = ab.range;
         vec fwd(-sinf(yaw*RAD), cosf(yaw*RAD), 0); // engine yaw->facing convention, cf. vec(yaw, pitch)
@@ -2637,7 +2702,7 @@ namespace server
         return best;
     }
 
-    void rpg_cast(clientinfo *cq, int ability, int yaw)
+    void rpg_cast(clientinfo *cq, int ability, int yaw, int advisory)
     {
         if(!rpg::connected() || !rpg::validability(ability)) return;
         if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players cast
@@ -2653,7 +2718,7 @@ namespace server
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Character not loaded.");
             return;
         }
-        clientinfo *target = rpg_findtarget(cq, ab, yaw);
+        clientinfo *target = rpg_findtarget(cq, ab, yaw, advisory);
         if(!target)
         {
             defformatstring(msg)("\f2%s: \f7no target in range.", ab.name);
@@ -4033,8 +4098,8 @@ namespace server
             // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
             case N_RPG_CAST:
             {
-                int ability = getint(p), yaw = getint(p);
-                if(cq) rpg_cast(cq, ability, yaw);
+                int ability = getint(p), yaw = getint(p), advisory = getint(p);
+                if(cq) rpg_cast(cq, ability, yaw, advisory);
                 break;
             }
             // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---

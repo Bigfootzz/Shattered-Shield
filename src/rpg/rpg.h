@@ -110,4 +110,19 @@ namespace rpg
     void removeloot(int idx);
     void clearloot();
     bool getclientloot(lootdrop *out, int maxout, int &n);
+
+    // --- mouse & targeting v1 (milestone step 6): client presentation state ---
+    // Plain data only (no engine symbols) so the server link is unaffected.
+    // Selection + auto-attack are client intent; the server re-validates every
+    // cast exactly as before. NPCs have no system yet: the pick code treats a
+    // (currently empty) NPC hook alongside monsters so they slot in later.
+    enum { HOVER_DEFAULT = 0, HOVER_LOOT = 1, HOVER_HOSTILE = 2 };
+    void cursoraccum(int dx, int dy);              // add relative motion to the free cursor
+    void cursorget(float &x, float &y);            // raw accumulated cursor pos (screen px)
+    void cursorset(float x, float y);
+    void cursorclamp(float &x, float &y, int w, int h);
+    int  hoverstate(); void sethoverstate(int s);  // HOVER_* above
+    int  selectedtarget(); void selecttarget(int clientnum); // -1 = none
+    bool autoattacking(); void setautoattack(bool on);
+    void cleartargeting();                          // deselect + stop auto-attack (map change, death)
 }

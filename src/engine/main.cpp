@@ -950,7 +950,11 @@ void checkinput()
                 {
                     int dx = event.motion.xrel, dy = event.motion.yrel;
                     checkmousemotion(dx, dy);
-                    if(!g3d_movecursor(dx, dy)) mousemove(dx, dy);
+                    // RPG: the game gets first refusal on raw deltas (free-cursor
+                    // maps) before the engine's mouse-look path. Menus still win
+                    // via g3d_movecursor; mouse-look itself is gated by
+                    // game::allowmouselook() inside mousemove().
+                    if(!g3d_movecursor(dx, dy)) { game::cursormove(dx, dy); mousemove(dx, dy); }
                     mousemoved = true;
                 }
                 break;
