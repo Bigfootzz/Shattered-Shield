@@ -2042,7 +2042,9 @@ namespace game
                 text_bounds(tst, tw, th);
                 draw_text(tst, bx + (width*a_scale)/2 - tw/2, by*a_scale + height*a_scale + 6);
             }
-            drawhudplayers(d, w, h);
+            // RPG: the "frags name: class" team list is FPS furniture; hidden on
+            // RPG maps only. FPS/battleground modes are untouched.
+            if(!rpg::mapactive(getclientmap())) drawhudplayers(d, w, h);
             drawhudevents(d, w, h);
        }
     }
@@ -2425,9 +2427,13 @@ namespace game
             if(f) draw_text(colorname(f), w*1800/h - fw - pw, 1200 - fh);
         }
 
-        if(needscorebar(player1)) drawscorebar(d, w, h); // draw scorebar
+        // RPG: the mode score bar is FPS furniture; hidden on RPG maps only.
+        // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
+        if(!rpg::mapactive(getclientmap()) && needscorebar(player1)) drawscorebar(d, w, h); // draw scorebar
 
-        if(needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap
+        // RPG: the compass/radar is FPS furniture; hidden on RPG maps only.
+        // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
+        if(!rpg::mapactive(getclientmap()) && needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap
         if(showtimers) drawtimers(d, w, h);
 
         if(d->state!=CS_EDITING)
