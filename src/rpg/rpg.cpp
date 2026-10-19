@@ -808,4 +808,10 @@ namespace rpg
     bool autoattacking() { return clautoattack; }
     void setautoattack(bool on) { clautoattack = on; }
     void cleartargeting() { clselclient = -1; clautoattack = false; }
+
+    // RPG radar marker sources. NPCs, quests, and gathering do not exist yet:
+    // return 0 today; they fill in automatically once those systems land.
+    int npcmarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
+    int questmobmarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
+    int gathermarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
 }

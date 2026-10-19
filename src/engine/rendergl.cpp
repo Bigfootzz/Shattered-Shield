@@ -957,7 +957,7 @@ FVARP(mouseaccel, 0, 0, 1000);
 
 VARP(killcammode, 0, 1, 2);
 VARP(thirdperson, 0, 0, 2);
-FVAR(thirdpersondistance, 0, 20, 50);
+FVAR(thirdpersondistance, 15, 20, 60);
 FVAR(thirdpersonup, -25, 0, 25);
 FVAR(thirdpersonside, -25, 0, 25);
 physent *camera1 = NULL;
@@ -995,10 +995,14 @@ void mousemove(int dx, int dy)
     camera1->yaw += dx*cursens;
     camera1->pitch -= dy*cursens*(invmouse ? -1 : 1);
     fixcamerarange();
-    if(camera1!=player && !detachedcamera)
+    // Shattered Shield (user design, Oct 19): in third person the player model
+    // faces the camera's forward direction - the follow camera stays behind
+    // the character wherever third person is active (RPG maps, battlegrounds).
+    // First person (attached camera) keeps the stock yaw+pitch sync.
+    if(camera1!=player)
     {
         player->yaw = camera1->yaw;
-        player->pitch = camera1->pitch;
+        if(!detachedcamera) player->pitch = camera1->pitch;
     }
 }
 

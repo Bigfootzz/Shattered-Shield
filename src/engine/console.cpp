@@ -12,6 +12,13 @@ char *commandaction = NULL, *commandprompt = NULL;
 enum { CF_COMPLETE = 1<<0, CF_EXECUTE = 1<<1 };
 int commandflags = 0, commandpos = -1;
 
+// RPG chat-box tap (Shattered Shield, additive only): routes console chat and
+// system lines into the RPG chat box buffers. Compiled out of the standalone
+// server build; the tap itself is a no-op off RPG maps.
+#ifndef STANDALONE
+namespace game { extern void rpg_chat_tap(int type, const char *line); }
+#endif
+
 VARFP(maxcon, 10, 200, MAXCONLINES, { while(conlines.length() > maxcon) delete[] conlines.pop().line; });
 
 #define CONSTRLEN 512
@@ -37,6 +44,9 @@ void conoutfv(int type, const char *fmt, va_list args)
     vformatstring(buf, fmt, args, sizeof(buf));
 
     conline(type, buf);
+#ifndef STANDALONE
+    game::rpg_chat_tap(type, buf);
+#endif
     filtertext(buf, buf);
 
     if(type & console::verbosity)

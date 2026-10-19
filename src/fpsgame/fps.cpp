@@ -665,6 +665,23 @@ namespace game
         return d->state==CS_DEAD || rpg::mapactive(getclientmap());
     }
 
+    // Follow-cam wheel zoom (user design, Oct 19): in third person the wheel
+    // moves the follow camera closer/farther instead of switching weapons.
+    // Wheel up zooms in, wheel down zooms out; clamped 15..60 (default 20).
+    // The distance is a var, so it holds while playing. Returns 1 when the
+    // wheel was consumed (third person active), 0 for the stock wheel path
+    // (first person keeps weapon-switching untouched).
+    ICOMMAND(followcamzoom, "i", (int *delta),
+    {
+        if(camera1 != player1 && (thirdperson > 1 || detachcamera()))
+        {
+            thirdpersondistance = clamp(thirdpersondistance + (*delta > 0 ? -2.5f : 2.5f), 15.0f, 60.0f);
+            intret(1);
+        }
+        else intret(0);
+    });
+
+
     bool collidecamera()
     {
         switch(player1->state)
@@ -1912,14 +1929,18 @@ namespace game
         rpg_drawtexuv(sx, sy, sw, sh, 0, 0, 1, 1);
 
         // mana orb (left), native circle (9,12,132,132): fill grows from the bottom
-        float osz = 132*s;
-        float ox = sx + 9*s, oy = sy + 12*s;
+        // Orbs seated flush in their sockets (user fix, Oct 19): the chrome
+        // ring spans native y 10..143, so the fill is y=11 size 130 (11..141,
+        // centered at 76) instead of y=12 size 132, which rode low and crossed
+        // the ring's bottom edge. Left x 9->11 mirrors the right socket.
+        float osz = 130*s;
+        float ox = sx + 11*s, oy = sy + 11*s;
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_mana.png")->id);
         if(mpf > 0) rpg_drawtexuv(ox, oy + osz*(1-mpf), osz, osz*mpf, 0, 1-mpf, 1, 1);
 
         // health orb (right), native circle (883,12,132,132): red fill grows from bottom
         // User design change Oct 19: right orb is HEALTH (was XP); numerals on the orb.
-        float xx = sx + 883*s, xy = sy + 12*s;
+        float xx = sx + 883*s, xy = sy + 11*s;
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_hp.png")->id);
         if(hpf > 0) rpg_drawtexuv(xx, xy + osz*(1-hpf), osz, osz*hpf, 0, 1-hpf, 1, 1);
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
@@ -1969,6 +1990,134 @@ namespace game
         rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
     }
 
+    // RPG chat box v1 (user design, Oct 19): tabbed World | Clan | System panel,
+    // bottom-right of the screen on RPG maps only. Console lines are tapped via
+    // rpg_chat_tap (hooked in conoutfv): CON_CHAT -> World, CON_TEAMCHAT -> Clan,
+    // "rpg: " lines -> System. Clan rides the team channel for now: there is NO
+    // clan/guild system in the game yet. The active tab is a VARP so the chat
+    // prompt (rpgchat in data/menus/rpg.cfg) can route input: World -> say,
+    // Clan -> sayteam, System is read-only and falls back to World.
+    VARP(rpg_chattab, 0, 0, 2);
+
+    enum { RPG_CHAT_WORLD = 0, RPG_CHAT_CLAN = 1, RPG_CHAT_SYSTEM = 2, RPG_CHAT_NTABS = 3 };
+    struct rpg_chatline { string text; };
+    static vector<rpg_chatline> rpg_chatbuf[RPG_CHAT_NTABS];
+    static const int RPG_CHAT_CAP = 50;
+    static const char *rpg_chatnames[RPG_CHAT_NTABS] = { "World", "Clan", "System" };
+    // channel colors: warm white / green / amber (spirit of the reference box)
+    static const float rpg_chancol[RPG_CHAT_NTABS][3] = {
+        { 1.00f, 0.93f, 0.86f }, { 0.55f, 1.00f, 0.55f }, { 1.00f, 0.78f, 0.42f }
+    };
+    // tab hit-rects from the last draw (virtual coords), for click routing
+    static float rpg_chattabs[RPG_CHAT_NTABS][4];
+
+    void rpg_chat_tap(int type, const char *line)
+    {
+        if(!rpg::connected() || !rpg::mapactive(getclientmap())) return;
+        int tab = -1;
+        if(type & CON_CHAT) tab = RPG_CHAT_WORLD;
+        else if(type & CON_TEAMCHAT) tab = RPG_CHAT_CLAN;
+        else if(!strncmp(line, "rpg: ", 5))
+        {
+            // keep the System tab readable: skip high-frequency debug chatter
+            if(!strncmp(line, "rpg: hover", 10)) return;
+            if(strstr(line, "auto-attack tick")) return;
+            tab = RPG_CHAT_SYSTEM;
+        }
+        if(tab < 0) return;
+        vector<rpg_chatline> &b = rpg_chatbuf[tab];
+        rpg_chatline cl; copystring(cl.text, line);
+        b.add(cl);
+        while(b.length() > RPG_CHAT_CAP) b.remove(0);
+    }
+
+    // colored text helpers (the strip helpers are white-only)
+    static void rpg_chattext(const char *str, int left, int top, float pxh, float r, float g, float b)
+    {
+        glColor4f(r, g, b, 1.0f);
+        rpg_hudtext(str, left, top, pxh);
+        glColor4f(1, 1, 1, 1.0f);
+    }
+    static void rpg_chattextc(const char *str, float cx, float cy, float pxh, float r, float g, float b)
+    {
+        float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
+        rpg_chattext(str, int(cx - wpx/2), int(cy - pxh/2), pxh, r, g, b);
+    }
+    // conservative fit: chop lines that would overflow the message area
+    static void rpg_chatfit(string &dst, const char *src, float maxw, float pxh)
+    {
+        copystring(dst, src);
+        int maxchars = int(maxw/(pxh*0.5f)) - 2;
+        if(maxchars < 8) maxchars = 8;
+        if(int(strlen(dst)) > maxchars)
+        {
+            dst[maxchars] = 0;
+            if(dst[maxchars-1] == '\f') dst[maxchars-1] = 0; // don't leave a dangling color code
+        }
+    }
+
+    bool rpg_chattabclick(float vx, float vy)
+    {
+        if(!rpg::mapactive(getclientmap())) return false;
+        loopi(RPG_CHAT_NTABS)
+            if(vx >= rpg_chattabs[i][0] && vx < rpg_chattabs[i][2] &&
+               vy >= rpg_chattabs[i][1] && vy < rpg_chattabs[i][3])
+            { rpg_chattab = i; return true; }
+        return false;
+    }
+
+    void drawrpgchat(fpsent *d, int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
+        // strip right edge, same geometry as drawrpghud (sw=1500 centered)
+        float stripr = (X + 1500.0f)/2;
+        float bw = min(640.0f, X - stripr - 48.0f);
+        if(bw < 320.0f) bw = 320.0f;
+        float bx1 = X - 24.0f, bx0 = bx1 - bw;
+        float tabh = 46.0f, lineh = 30.0f, pad = 12.0f;
+        int nlines = 8;
+        float bh = tabh + pad + nlines*lineh + pad;
+        float by1 = 1800.0f - 24.0f, by0 = by1 - bh;
+
+        // dark kit-style plate + thin steel border
+        rpg_fillrect(bx0, by0, bw, bh, 0.055f, 0.055f, 0.085f, 0.86f);
+        rpg_fillrect(bx0, by0, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
+        rpg_fillrect(bx0, by1-2, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
+        rpg_fillrect(bx0, by0, 2, bh, 0.45f, 0.47f, 0.52f, 0.9f);
+        rpg_fillrect(bx1-2, by0, 2, bh, 0.45f, 0.47f, 0.52f, 0.9f);
+
+        // tab bar: clickable with the free cursor (routed in rpg_doclick)
+        float tabw = bw/RPG_CHAT_NTABS;
+        loopi(RPG_CHAT_NTABS)
+        {
+            float tx0 = bx0 + i*tabw;
+            rpg_chattabs[i][0] = tx0; rpg_chattabs[i][1] = by0;
+            rpg_chattabs[i][2] = tx0 + tabw; rpg_chattabs[i][3] = by0 + tabh;
+            float cr = rpg_chancol[i][0], cg = rpg_chancol[i][1], cb = rpg_chancol[i][2];
+            if(i == rpg_chattab)
+            {
+                rpg_fillrect(tx0+2, by0+2, tabw-4, tabh-2, 0.12f, 0.13f, 0.18f, 0.9f);
+                rpg_fillrect(tx0+8, by0+tabh-5, tabw-16, 3, cr, cg, cb, 1.0f);
+            }
+            else { cr = cg = cb = 0.55f; }
+            rpg_chattextc(rpg_chatnames[i], tx0 + tabw/2, by0 + tabh/2, 26.0f, cr, cg, cb);
+        }
+
+        // messages, bottom-aligned, most recent lines that fit
+        vector<rpg_chatline> &b = rpg_chatbuf[rpg_chattab];
+        int shown = min(nlines, b.length());
+        loopi(shown)
+        {
+            string fit; rpg_chatfit(fit, b[b.length()-shown+i].text, bw - 2*pad, lineh*0.9f);
+            float ly = by1 - pad - (shown-i)*lineh;
+            // lines carry their own \f color codes; the default tint covers plain lines
+            rpg_chattext(fit, int(bx0+pad), int(ly), lineh*0.9f,
+                         rpg_chancol[rpg_chattab][0], rpg_chancol[rpg_chattab][1], rpg_chancol[rpg_chattab][2]);
+        }
+    }
+
     // RPG: free world cursor (mouse & targeting v1). Drawn from the kit cursor
     // set: default pointer, glove over loot, hostile marker over monsters.
     // Hidden while a 2D menu is open (menus own the mouse then) and off RPG maps.
@@ -1992,6 +2141,12 @@ namespace game
     // RPG: kit target frame for the selected monster (name + live HP).
     // HP is read from the client-side dynent state (display only; all damage
     // is server-authoritative as before).
+    // Selected-target display (user design, Oct 19): SIMPLE. The target's
+    // NAME on one clean line, a HEALTH BAR directly under it. The cramped
+    // kit frame and the overlapping numeric HP text are gone. Compact,
+    // top center, RPG maps only. Same name+bar treatment for any target
+    // type; the bar color follows the target (hostile red, NPC gold,
+    // player green).
     void drawrpgtarget(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -2001,21 +2156,23 @@ namespace game
         loopv(clients)
         {
             fpsent *t = clients[i];
-            if(t && t->clientnum == cn && t->ai.type == ai::AI_TYPE_MONSTER && t->state == CS_ALIVE) { d = t; break; }
+            if(t && t->clientnum == cn) { d = t; break; }
         }
-        if(!d) return;
+        if(!d || d->state == CS_DEAD) return;
         float X = w*1800.0f/h;
-        float fw = 792.0f*0.8f, fh = 140.0f*0.8f;
-        float fx = (X - fw)/2, fy = 60.0f;
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/target_frame.png")->id);
-        rpg_drawtexuv(fx, fy, fw, fh, 0, 0, 1, 1);
-        float s = fw/792.0f;
-        draw_text(d->name, int(fx + 168*s), int(fy + 20*s));
+        float cx = X/2;
+        rpg_hudtextc(d->name, cx, 76, 40.0f);
+        float bw = 420.0f, bh = 20.0f, bx = cx - bw/2, by = 104.0f;
         float hpf = d->maxhealth > 0 ? clamp(float(d->health)/float(d->maxhealth), 0.0f, 1.0f) : 0;
-        float bx = fx + 162*s, bw = 612*s, by = fy + 76*s, bh = 50*s;
-        if(hpf > 0) rpg_fillrect(bx, by, bw*hpf, bh, 0.72f, 0.08f, 0.08f);
-        defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        draw_text(hps, int(bx + bw/2 - 60), int(by + bh/2 - 16));
+        float fr = 0.85f, fg = 0.12f, fb = 0.10f; // hostile red
+        if(d->ai.type != ai::AI_TYPE_MONSTER)
+        {
+            fr = 0.95f; fg = 0.75f; fb = 0.25f;   // NPC gold
+            if(d->ai.type == ai::AI_TYPE_NONE) { fr = 0.35f; fg = 0.90f; fb = 0.40f; } // player green
+        }
+        rpg_fillrect(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
+        rpg_fillrect(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
+        if(hpf > 0) rpg_fillrect(bx, by, bw*hpf, bh, fr, fg, fb, 1.0f);
     }
 
     void drawhudicons(fpsent *d, int w, int h)
@@ -2463,6 +2620,71 @@ namespace game
         if (cmode) cmode->drawblips(d, w, h, x, y, s, rscale);
     }
 
+    // RPG radar (user design, Oct 19): PvE tracker in the upper-right corner on
+    // RPG maps only. Same frame geometry as the stock radar, but no compass
+    // dials and no FPS pickups/teammates: markers are color-coded by category.
+    //   NPCs (quest givers, vendors) ...... gold/yellow  (wired, none exist yet)
+    //   active quest mobs ................. bright orange, larger (wired, none exist yet)
+    //   regular hostile mobs .............. red         (LIVE, from AI state)
+    //   gathering materials/nodes ......... green       (wired, none exist yet)
+    // The NPC/quest/gathering sources return 0 today and light up automatically
+    // once those systems land (quest chain v1 is next in the queue); no data is
+    // faked for the empty categories. The FPS radar path is untouched.
+    static void rpg_drawmarker(fpsent *d, float x, float y, float s, const vec &pos, float size, float r, float g, float b)
+    {
+        // Stock blip pattern: textured quad tinted per category. (The neutral
+        // grey blip tints cleanly; this matches the engine's HUD blip rendering.)
+        float scale = calcradarscale();
+        vec dir = d->o;
+        dir.sub(pos).div(scale);
+        float dist = dir.magnitude2(), maxdist = 1 - 0.05f - 0.05f;
+        if(dist >= maxdist) dir.mul(maxdist/dist);
+        dir.rotate_around_z(-camera1->yaw*RAD);
+        glColor4f(r, g, b, 1.0f);
+        drawradar(x + s*0.5f*(1.0f + dir.x) - size/2, y + s*0.5f*(1.0f + dir.y) - size/2, size);
+        glColor4f(1, 1, 1, 1.0f);
+    }
+
+    void drawrpgradar(fpsent *d, int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        if(!showradar) return;
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        glColor4f(1, 1, 1, minimapalpha);
+        if(minimapalpha >= 1) glDisable(GL_BLEND);
+        bindminimap();
+        drawminimap(d, x, y, s);
+        if(minimapalpha >= 1) glEnable(GL_BLEND);
+        settexture("data/hud/radar.png", 3);
+        glColor4f(1, 1, 1, radartexalpha);
+        drawradar(x, y, s);   // frame only; the compass dials stay FPS furniture
+        glColor4f(1, 1, 1, 1.0f);
+
+        float msize = s*0.06f, qsize = s*0.09f;
+        float m[3*64];        // scratch: up to 64 markers per wired category
+        settexture("data/hud/blip_grey.png", 3); // neutral blip, tinted per category
+        // NPCs: gold
+        int n = rpg::npcmarkers(m, 64);
+        loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, msize, 1.0f, 0.80f, 0.25f); }
+        // active quest mobs: bright orange, larger than regular hostiles.
+        // (When the quest system lands, quest mobs come out of the hostile pass.)
+        n = rpg::questmobmarkers(m, 64);
+        loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, qsize, 1.0f, 0.50f, 0.10f); }
+        // regular hostiles: red, enumerated live from AI state
+        loopv(clients)
+        {
+            fpsent *e = clients[i];
+            if(!e || e->ai.type != ai::AI_TYPE_MONSTER || e->state != CS_ALIVE) continue;
+            rpg_drawmarker(d, x, y, s, e->o, msize, 1.0f, 0.20f, 0.15f);
+        }
+        // gathering nodes: green
+        n = rpg::gathermarkers(m, 64);
+        loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, msize, 0.35f, 1.0f, 0.40f); }
+    }
+
+
     void drawprogress(int x, int y, float start, float length, float size, bool left, bool sec, bool millis, const vec &colour, float fade, float skew, float textscale, const char *text, ...)
     {
         if(skew <= 0.f) return;
@@ -2553,13 +2775,16 @@ namespace game
 
         // RPG: the compass/radar is FPS furniture; hidden on RPG maps only.
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
-        if(!rpg::mapactive(getclientmap()) && needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap
+        if(!rpg::mapactive(getclientmap()) && needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap (FPS path untouched)
+        // RPG: the radar is back on RPG maps as the PvE tracker (user design, Oct 19).
+        if(rpg::mapactive(getclientmap())) drawrpgradar(d, w, h);
         if(showtimers) drawtimers(d, w, h);
 
         if(d->state!=CS_EDITING)
         {
             if(d->state!=CS_SPECTATOR) drawhudicons(d, w, h);
             if(d->state!=CS_SPECTATOR) drawrpghud(d, w, h);
+            if(d->state!=CS_SPECTATOR) drawrpgchat(d, w, h);
             if(d->state!=CS_SPECTATOR) { drawrpgtarget(w, h); drawrpgcursor(w, h); }
             if(cmode) cmode->drawhud(d, w, h);
         }

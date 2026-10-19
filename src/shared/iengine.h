@@ -53,6 +53,7 @@ extern float rayfloor  (const vec &o, vec &floor, int mode = 0, float radius = 0
 extern bool  raycubelos(const vec &o, const vec &dest, vec &hitpos);
 
 extern int thirdperson;
+extern float thirdpersondistance; // follow-cam distance (wheel zoom adjusts)
 extern bool isthirdperson();
 
 extern bool settexture(const char *name, int clamp = 0);

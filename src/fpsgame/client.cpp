@@ -63,9 +63,11 @@ namespace game
     // Targeting v1: casts carry the client-selected target as ADVISORY data.
     // The server validates it (monster, alive, in range) and falls back to the
     // old nearest-target behavior when no selection is set (-1).
+    static void rpg_facetarget(); // defined with the targeting helpers below
     static void rpg_castability(int ability)
     {
         if(!player1) return;
+        rpg_facetarget(); // face the selected target; yaw is client-advisory
         addmsg(N_RPG_CAST, "ri3", ability, int(player1->yaw), rpg::selectedtarget());
     }
     ICOMMAND(ability1, "", (), rpg_castability(0));
@@ -172,6 +174,24 @@ namespace game
         return NULL;
     }
 
+    static int rpg_facetill = 0; // face the target until this time (manual casts)
+    // RPG follow camera (user design, Oct 19): when casting at a selected
+    // target, the character faces the target so the strike visibly plays out
+    // toward the mob on screen. Sets a 1s face window; the per-frame update
+    // below keeps facing the target while auto-attacking.
+    static void rpg_facetarget()
+    {
+        if(!player1 || !rpg::mapactive(getclientmap())) return;
+        fpsent *sel = rpg_selmon();
+        if(!sel) return;
+        vec delta(sel->o); delta.sub(player1->o); delta.z = 0;
+        if(delta.magnitude() < 0.01f) return;
+        float yaw, pitch;
+        vectoyawpitch(delta, yaw, pitch);
+        player1->yaw = yaw;
+        rpg_facetill = totalmillis + 1000;
+    }
+
     static void rpg_screenwh(int &w, int &h)
     {
         w = h = 0;
@@ -181,6 +201,8 @@ namespace game
     // Click intent: button 0 = left (select / deselect), 1 = right (select + auto-attack).
     // Plain function (not inline in the ICOMMAND): the macro parser splits on bare
     // commas, so multi-declaration bodies live here instead.
+    bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
+
     static void rpg_doclick(int button)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -188,6 +210,8 @@ namespace game
         int w = 0; int h = 0; rpg_screenwh(w, h);
         float cx = 0; float cy = 0;
         rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
+        // chat box tabs eat their own clicks (the rest of the box is click-through)
+        if(rpg_chattabclick(cx*1800.0f/h, cy*1800.0f/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
@@ -359,6 +383,25 @@ namespace game
         {
             if(rpg::autoattacking()) { rpg::setautoattack(false); conoutf("rpg: auto-attack stopped (you died)"); }
             return;
+        }
+
+        // Follow-camera facing (user design, Oct 19): the character faces the
+        // camera's forward direction; while fighting a selected target (auto-
+        // attack, or 1s after a manual cast) it faces the target instead, so
+        // strikes visibly play out toward the mob on screen.
+        {
+            fpsent *facesel = (sel && (rpg::autoattacking() || totalmillis < rpg_facetill)) ? sel : NULL;
+            if(facesel)
+            {
+                vec delta(facesel->o); delta.sub(player1->o); delta.z = 0;
+                if(delta.magnitude() > 0.01f)
+                {
+                    float fyaw, fpitch;
+                    vectoyawpitch(delta, fyaw, fpitch);
+                    player1->yaw = fyaw;
+                }
+            }
+            else player1->yaw = camera1->yaw;
         }
 
         // auto-attack: repeated Power Strike (ability 0) through the real,

@@ -112,6 +112,19 @@ namespace rpg
     void clearloot();
     bool getclientloot(lootdrop *out, int maxout, int &n);
 
+    // --- RPG radar marker plumbing (milestone: radar v1) ---
+    // Marker categories for the PvE radar. NPCs, the quest system, and
+    // gathering nodes do NOT exist in the game yet: their marker sources are
+    // wired here and return 0 today, and light up automatically once those
+    // systems land (quest chain v1 is next in the queue). Hostile mobs are
+    // enumerated live by the HUD from AI state. Never fake data for the
+    // empty categories. Plain float triples (x,y,z); no engine symbols, so
+    // the server link is unaffected.
+    enum { RPG_MARK_NPC = 0, RPG_MARK_QUESTMOB = 1, RPG_MARK_HOSTILE = 2, RPG_MARK_GATHER = 3, RPG_MARK_N = 4 };
+    int npcmarkers(float *out, int maxout);       // 0 today: no NPC system yet
+    int questmobmarkers(float *out, int maxout); // 0 today: no quest system yet
+    int gathermarkers(float *out, int maxout);    // 0 today: no gathering yet
+
     // --- mouse & targeting v1 (milestone step 6): client presentation state ---
     // Plain data only (no engine symbols) so the server link is unaffected.
     // Selection + auto-attack are client intent; the server re-validates every
