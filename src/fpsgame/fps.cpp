@@ -1924,27 +1924,30 @@ namespace game
         float sx = (X - sw)/2, sy = 1800.0f - sh - 24.0f;
         float s = sw/1024.0f;                // native-art -> virtual scale
 
-        // strip frame
+        // Orb fills draw FIRST, generously sized, then the strip frame draws
+        // OVER them (user call, Oct 19: "put them behind the hud"). The fills
+        // used to draw on top of the frame, which left each disc visibly
+        // pasted over the strip with its edge crossing the chrome ring.
+        // Now the ring art masks the fill edges: each fill box (native
+        // 6,8,136 left and 882,8,136 right) covers the full dark socket and
+        // tucks under the rim, and the rim's opaque pixels hide the overflow,
+        // so the fill reads as seated inside the socket. The health numerals
+        // draw last, on top of everything, to stay readable. Fills grow
+        // from the bottom as before.
+        float osz = 136*s;
+        float ox = sx + 6*s, oy = sy + 8*s;
+        float xx = sx + 882*s, xy = sy + 8*s;
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_mana.png")->id);
+        if(mpf > 0) rpg_drawtexuv(ox, oy + osz*(1-mpf), osz, osz*mpf, 0, 1-mpf, 1, 1);
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_hp.png")->id);
+        if(hpf > 0) rpg_drawtexuv(xx, xy + osz*(1-hpf), osz, osz*hpf, 0, 1-hpf, 1, 1);
+
+        // strip frame over the fills
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/strip.png")->id);
         rpg_drawtexuv(sx, sy, sw, sh, 0, 0, 1, 1);
 
-        // mana orb (left), native circle (9,12,132,132): fill grows from the bottom
-        // Orbs seated flush in their sockets (user fix, Oct 19): the chrome
-        // ring spans native y 10..143, so the fill is y=11 size 130 (11..141,
-        // centered at 76) instead of y=12 size 132, which rode low and crossed
-        // the ring's bottom edge. Left x 9->11 mirrors the right socket.
-        float osz = 130*s;
-        float ox = sx + 11*s, oy = sy + 11*s;
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_mana.png")->id);
-        if(mpf > 0) rpg_drawtexuv(ox, oy + osz*(1-mpf), osz, osz*mpf, 0, 1-mpf, 1, 1);
-
-        // health orb (right), native circle (883,12,132,132): red fill grows from bottom
-        // User design change Oct 19: right orb is HEALTH (was XP); numerals on the orb.
-        float xx = sx + 883*s, xy = sy + 11*s;
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_hp.png")->id);
-        if(hpf > 0) rpg_drawtexuv(xx, xy + osz*(1-hpf), osz, osz*hpf, 0, 1-hpf, 1, 1);
+        // health numerals on top of everything (20% of orb diameter fits "100/100")
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        // health numerals centered on the orb (20% of orb diameter fits "100/100")
         rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.20f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
