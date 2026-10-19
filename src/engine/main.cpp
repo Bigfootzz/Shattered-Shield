@@ -226,7 +226,7 @@ void renderbackground(const char *caption, Texture *mapshot, Texture *bgshot, co
         }
         else
         {
-            settexture("data/gui/background.png", 0);
+            settexture("packages/ui/rpg/menu/loadscreen.png", 0); // Shattered Shield load screen (ITEM 5)
             glColor4f(1.f, 1.f, 1.f, 1.f);
             //float bu = w*0.67f/256.0f + backgroundu, bv = h*0.67f/256.0f + backgroundv;
             glBegin(GL_TRIANGLE_STRIP);
@@ -406,45 +406,47 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
 
     float fh = 0.075f*min(w, h), fw = fh*10,
           fx = renderedframe ? w - fw - fh/4 : 0.5f*(w - fw),
-          fy = renderedframe ? fh/4 : h - fh*1.5f,
-          fu1 = 0/512.0f, fu2 = 511/512.0f,
-          fv1 = 0/64.0f, fv2 = 52/64.0f;
-    settexture("data/gui/loading_frame.png", 3);
-    glBegin(GL_TRIANGLE_STRIP);
-    glTexCoord2f(fu1, fv1); glVertex2f(fx,    fy);
-    glTexCoord2f(fu2, fv1); glVertex2f(fx+fw, fy);
-    glTexCoord2f(fu1, fv2); glVertex2f(fx,    fy+fh);
-    glTexCoord2f(fu2, fv2); glVertex2f(fx+fw, fy+fh);
-    glEnd();
-
+          fy = renderedframe ? fh/4 : h - fh*1.5f;
+    // Shattered Shield loading bar (ITEM 5, Oct 19): procedural silver/stone
+    // track with gold fill. No textures, no zombie art. Revelade keeps its own.
+    glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // outer border (dark stone)
+    glColor4f(0.16f, 0.16f, 0.18f, 0.92f);
+    glBegin(GL_QUADS);
+    glVertex2f(fx - 2, fy - 2); glVertex2f(fx + fw + 2, fy - 2);
+    glVertex2f(fx + fw + 2, fy + fh + 2); glVertex2f(fx - 2, fy + fh + 2);
+    glEnd();
+    // track (silver stone)
+    glColor4f(0.52f, 0.54f, 0.58f, 0.95f);
+    glBegin(GL_QUADS);
+    glVertex2f(fx, fy); glVertex2f(fx + fw, fy);
+    glVertex2f(fx + fw, fy + fh); glVertex2f(fx, fy + fh);
+    glEnd();
+    // inner highlight line (top edge of track)
+    glColor4f(0.72f, 0.74f, 0.78f, 0.9f);
+    glBegin(GL_QUADS);
+    glVertex2f(fx + 1, fy + 1); glVertex2f(fx + fw - 1, fy + 1);
+    glVertex2f(fx + fw - 1, fy + 3); glVertex2f(fx + 1, fy + 3);
+    glEnd();
 
-    float bw = fw*(511 - 2*17)/511.0f, bh = fh*20/52.0f,
-          bx = fx + fw*17/511.0f, by = fy + fh*16/52.0f,
-          bv1 = 0/32.0f, bv2 = 20/32.0f,
-          su1 = 0/32.0f, su2 = 7/32.0f, sw = fw*7/511.0f,
-          eu1 = 23/32.0f, eu2 = 30/32.0f, ew = fw*7/511.0f,
-          mw = bw - sw - ew,
-          ex = bx+sw + max(mw*bar, fw*7/511.0f);
+    // gold fill (ember-gold), inset within the track
+    float bh = fh - 8, by = fy + 4;
+    float bx = fx + 4, bw = fw - 8;
+    float mw = bw, sw = 0.0f;
     if(bar > 0)
     {
-        settexture("data/gui/loading_bar.png", 3);
+        float fillw = bw * (bar > 1 ? 1 : bar);
+        glColor4f(0.98f, 0.70f, 0.26f, 1.0f);
         glBegin(GL_QUADS);
-        glTexCoord2f(su1, bv1); glVertex2f(bx,    by);
-        glTexCoord2f(su2, bv1); glVertex2f(bx+sw, by);
-        glTexCoord2f(su2, bv2); glVertex2f(bx+sw, by+bh);
-        glTexCoord2f(su1, bv2); glVertex2f(bx,    by+bh);
-
-        glTexCoord2f(su2, bv1); glVertex2f(bx+sw, by);
-        glTexCoord2f(eu1, bv1); glVertex2f(ex,    by);
-        glTexCoord2f(eu1, bv2); glVertex2f(ex,    by+bh);
-        glTexCoord2f(su2, bv2); glVertex2f(bx+sw, by+bh);
-
-        glTexCoord2f(eu1, bv1); glVertex2f(ex,    by);
-        glTexCoord2f(eu2, bv1); glVertex2f(ex+ew, by);
-        glTexCoord2f(eu2, bv2); glVertex2f(ex+ew, by+bh);
-        glTexCoord2f(eu1, bv2); glVertex2f(ex,    by+bh);
+        glVertex2f(bx, by); glVertex2f(bx + fillw, by);
+        glVertex2f(bx + fillw, by + bh); glVertex2f(bx, by + bh);
+        glEnd();
+        glColor4f(1.0f, 0.85f, 0.45f, 0.9f);
+        glBegin(GL_QUADS);
+        glVertex2f(bx, by); glVertex2f(bx + fillw, by);
+        glVertex2f(bx + fillw, by + 2); glVertex2f(bx, by + 2);
         glEnd();
     }
 
@@ -461,6 +463,7 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     }
 
     glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
 
     if(tex)
     {
@@ -493,6 +496,11 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     glPopMatrix();
     swapbuffers(false);
 }
+
+// TEST-ONLY: show the loading bar for screenshots
+static float testloadbar_val = -1;
+
+
 
 void keyrepeat(bool on)
 {

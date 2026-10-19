@@ -1867,6 +1867,57 @@ namespace game
     // TEST-ONLY: direct walk control (the `forward` console command does not move the headless player; this sets the physics flag directly).
     ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
 
+    // --- character select (ITEM 5): CubeScript bindings for the menu ---
+    // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2
+    ICOMMAND(rpg_charlist, "", (),
+    {
+        char names[3][64]; int levels[3]; char archs[3][32]; char models[3][64];
+        int n = rpg::charlist(names, levels, archs, models, 3);
+        // use execute+alias (setsvar does not persist for GUI lookup)
+        defformatstring(cmd)("alias rpg_charn %d", n); execute(cmd);
+        loopi(3)
+        {
+            defformatstring(an)("alias rpg_charname%d (concatword \"%s\")", i, i < n ? names[i] : ""); execute(an);
+            defformatstring(al)("alias rpg_charlevel%d %d", i, i < n ? levels[i] : 0); execute(al);
+            defformatstring(aa)("alias rpg_chararch%d (concatword \"%s\")", i, i < n ? archs[i] : ""); execute(aa);
+            defformatstring(am)("alias rpg_charmodel%d (concatword \"%s\")", i, i < n ? models[i] : ""); execute(am);
+        }
+    });
+    ICOMMAND(rpg_createchar, "ss", (char *name, char *model),
+    {
+        // model like "ranger_male"; archetype derived (Ranger/Peasant)
+        const char *arch = strstr(model, "ranger") ? "Ranger" : (strstr(model, "peasant") ? "Peasant" : "");
+        int ok = rpg::charcreate(name, arch, model) ? 1 : 0;
+        defformatstring(cmd)("alias rpg_createok %d", ok); execute(cmd);
+    });
+    ICOMMAND(rpg_deletechar, "s", (char *name),
+    {
+        rpg::chardelete(name);
+    });
+    // ENTER WORLD: set name to the character, connect (local or server alias), load rpg_01
+    ICOMMAND(rpg_enterworld, "s", (char *name),
+    {
+        if(!name || !name[0]) return;
+        // character name is the persistence key
+        setvar("name", 0); // noop guard
+        string cname; copystring(cname, name);
+        // use the engine name var
+        setsvar("name", cname);
+        const char *srv = getalias("__char_server");
+        if(!srv || !srv[0] || !strcmp(srv, "local"))
+        {
+            // local: host our own world
+            if(!isconnected()) localconnect();
+            changemap("rpg_01");
+        }
+        else
+        {
+            // remote: connect then the server drives the map
+            connectserv(srv, 16960, "");
+        }
+        cleargui();
+    });
+
     // Kit-strip RPG HUD (user design, Oct 19; gauge swap Oct 19): one bottom-center
     // strip. Blue orb (left) = mana, RED orb (right) = health with cur/max numerals,
     // yellow/green bar across the middle recess = XP (level progress). 10 action

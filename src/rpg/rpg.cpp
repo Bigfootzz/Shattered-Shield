@@ -1209,6 +1209,106 @@ namespace rpg
         if(tag) copystring(tag, clclan_tag);
         return clclan_id > 0;
     }
+    // --- character select (ITEM 5): client-side direct rpg.db access ---
+    static sqlite3 *chardb_open()
+    {
+        const char *p = findfile("rpg.db", "w");
+        if(!p) p = "rpg.db";
+        // also try the home dir explicitly
+        {
+            const char *h = getenv("HOME");
+            if(h)
+            {
+                defformatstring(hp)("%s/.revelade-revolution/rpg.db", h);
+                FILE *f = fopen(hp, "r");
+                if(f) { fclose(f); p = hp; }
+            }
+        }
+        sqlite3 *cdb = NULL;
+        if(sqlite3_open(p, &cdb) != SQLITE_OK) { if(cdb) sqlite3_close(cdb); return NULL; }
+        return cdb;
+    }
+    int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max)
+    {
+        if(max <= 0) return 0;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return 0;
+        sqlite3_stmt *st = NULL;
+        int n = 0;
+        if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance FROM characters ORDER BY last_seen DESC LIMIT ?", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(st, 1, max);
+            while(n < max && sqlite3_step(st) == SQLITE_ROW)
+            {
+                copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+                if(levels) levels[n] = sqlite3_column_int(st, 1);
+                if(archetypes) copystring(archetypes[n], (const char *)sqlite3_column_text(st, 2), 32);
+                if(models) copystring(models[n], (const char *)sqlite3_column_text(st, 3), 64);
+                n++;
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return n;
+    }
+    bool charcreate(const char *name, const char *archetype, const char *model)
+    {
+        if(!name || !name[0] || strlen(name) > 32) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        // enforce 3-slot cap
+        sqlite3_stmt *st = NULL;
+        int count = 0;
+        if(sqlite3_prepare_v2(cdb, "SELECT COUNT(*) FROM characters", -1, &st, NULL) == SQLITE_OK)
+        {
+            if(sqlite3_step(st) == SQLITE_ROW) count = sqlite3_column_int(st, 0);
+            sqlite3_finalize(st);
+        }
+        if(count >= 3) { sqlite3_close(cdb); return false; }
+        bool ok = false;
+        if(sqlite3_prepare_v2(cdb, "INSERT INTO characters(name, level, xp, archetype, appearance, created_at, last_seen) VALUES(?1, 1, 0, ?2, ?3, ?4, ?4)", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 2, archetype ? archetype : "", -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 3, model ? model : "", -1, SQLITE_STATIC);
+            sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
+            ok = sqlite3_step(st) == SQLITE_DONE;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
+    bool chardelete(const char *name)
+    {
+        if(!name || !name[0]) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        // wipe character and all their rows
+        const char *tables[] = { "characters", "rpg_inventory", "rpg_equipment", "rpg_quests", "rpg_clan_members", "rpg_mutes", "rpg_blocks" };
+        sqlite3_stmt *st = NULL;
+        for(size_t i = 0; i < sizeof(tables)/sizeof(tables[0]); i++)
+        {
+            defformatstring(sql)("DELETE FROM %s WHERE %s=?", tables[i], !strcmp(tables[i], "characters") || !strcmp(tables[i], "rpg_clan_members") ? "name" : "owner");
+            // rpg_clan_members uses name; others use name or owner
+            if(!strcmp(tables[i], "rpg_inventory") || !strcmp(tables[i], "rpg_equipment") || !strcmp(tables[i], "rpg_quests"))
+                formatstring(sql)("DELETE FROM %s WHERE name=?", tables[i]);
+            else if(!strcmp(tables[i], "rpg_mutes") || !strcmp(tables[i], "rpg_blocks"))
+                formatstring(sql)("DELETE FROM %s WHERE owner=? OR target=?", tables[i]);
+            else
+                formatstring(sql)("DELETE FROM %s WHERE name=?", tables[i]);
+            if(sqlite3_prepare_v2(cdb, sql, -1, &st, NULL) == SQLITE_OK)
+            {
+                sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+                if(!strcmp(tables[i], "rpg_mutes") || !strcmp(tables[i], "rpg_blocks"))
+                    sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+        }
+        // if they were a clan leader, disbanding is complex; just remove (leader field may dangle - acceptable v1)
+        sqlite3_close(cdb);
+        return true;
+    }
 
     // --- quest chain v1: client presentation caches (never authoritative) ---
     static int clquest_id = QUEST_NONE, clquest_state = -1, clquest_kills = 0, clquest_need = 0;

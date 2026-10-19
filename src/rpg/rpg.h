@@ -192,6 +192,12 @@ namespace rpg
     // --- clan system v1: client presentation cache (never authoritative) ---
     void setclientclan(int id, int rank, const char *name, const char *tag);
     bool getclientclan(int &id, int &rank, char *name, char *tag); // true when in a clan
+    // --- character select (ITEM 5): client-side direct rpg.db access ---
+    // Lists up to max characters (name, level, archetype, model). Returns count.
+    // Opens its own SQLite handle; safe to call from the main menu.
+    int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max);
+    bool charcreate(const char *name, const char *archetype, const char *model); // false if name taken or 3+ chars
+    bool chardelete(const char *name);
     // Champion tracking (server-side session state; the champion is a real
     // monster client spawned by the quest system, not a test spawn).
     void setchampioncn(int cn);
