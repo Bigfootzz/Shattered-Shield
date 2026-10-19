@@ -1843,60 +1843,98 @@ namespace game
     // TEST-ONLY: direct walk control (the `forward` console command does not move the headless player; this sets the physics flag directly).
     ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
 
+    // Kit-strip RPG HUD (user design, Oct 19): one bottom-center strip built from
+    // the kit's window_hud art. Blue orb (left) = mana, yellow/green orb
+    // (right) = XP, red bar across the middle recess = health, 10 action slots
+    // (keys 1-0) in the lower recess. All fills are REAL continuous UV crops of
+    // the kit art (no fake segments). RPG maps only; FPS/battleground maps keep
+    // the stock HUD untouched.
+    static void rpg_drawtexuv(float x, float y, float w, float h, float u0, float v0, float u1, float v1)
+    {
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(1, 1, 1, 1);
+        drawquad(x, y, w, h, u0, v0, u1, v1, false, false);
+    }
+
     void drawrpghud(fpsent *d, int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
         int mana = 0, maxmana = 0;
         rpg::getclientmana(mana, maxmana);
-        float hppct = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
-        float mpct = maxmana > 0 ? float(mana) / float(maxmana) : 0;
-        // bar_frame.png is 492x32: draw at native aspect (was 420x30)
-        float bx = 60, bw = 492, bh = 32;
-        float by = 1800 - 260;
-        // health bar
-        Texture *frame = rpg_loadtex("packages/ui/rpg/hud/bar_frame.png");
-        glBindTexture(GL_TEXTURE_2D, frame->id);
-        glColor4f(1, 1, 1, 1);
-        drawtexture(bx, by, bw, bh);
-        if(hppct > 0) rpg_fillrect(bx + 12, by + 6, (bw - 24) * hppct, bh - 12, 0.85f, 0.15f, 0.15f);
-        defformatstring(hps)("HP %d/%d", d->health, d->maxhealth);
-        draw_text(hps, int(bx), int(by - 36));
-        // mana bar
-        float my = by + bh + 44;
-        glBindTexture(GL_TEXTURE_2D, frame->id);
-        glColor4f(1, 1, 1, 1);
-        drawtexture(bx, my, bw, bh);
-        if(mpct > 0) rpg_fillrect(bx + 12, my + 6, (bw - 24) * mpct, bh - 12, 0.2f, 0.4f, 0.95f);
-        defformatstring(mps)("MP %d/%d", mana, maxmana);
-        draw_text(mps, int(bx), int(my - 36));
-        // ability icons, bottom-right, with cooldown feedback
-        float ix = w*1800/h - 260, iy = 1800 - 220, isz = 96;
-        Texture *ps = rpg_loadtex("packages/ui/rpg/hud/icon_powerstrike.png");
-        glBindTexture(GL_TEXTURE_2D, ps->id);
-        glColor4f(1, 1, 1, 1);
-        drawtexture(ix, iy, isz, isz);
-        int cd0 = rpg::cooldownleft(0, totalmillis);
-        if(cd0 > 0)
+        float hpf = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
+        float mpf = maxmana > 0 ? float(mana) / float(maxmana) : 0;
+        int clevel = 1, cxp = 0;
+        rpg::getclientstats(clevel, cxp);
+        // XP progress within the current level, from the server-side XP table
+        // (levels 1-10). Level 1 starts at 0; max level shows full.
+        float xpf = 1.0f;
         {
-            rpg_fillrect(ix, iy, isz, isz, 0.0f, 0.0f, 0.0f, 0.65f);
-            defformatstring(cds)("%.1f", cd0/1000.0f);
-            draw_text(cds, int(ix + 28), int(iy + 30));
+            int base = clevel <= 1 ? 0 : rpg::xpforlevel(clevel);
+            int next = clevel >= rpg::MAX_LEVEL ? -1 : rpg::xpforlevel(clevel + 1);
+            if(next > base) xpf = clamp(float(cxp - base) / float(next - base), 0.0f, 1.0f);
         }
-        else draw_text("1", int(ix + 4), int(iy - 30));
-        Texture *sb = rpg_loadtex("packages/ui/rpg/hud/icon_sparkbolt.png");
-        glBindTexture(GL_TEXTURE_2D, sb->id);
-        glColor4f(1, 1, 1, 1);
-        drawtexture(ix + isz + 20, iy, isz, isz);
-        int cd1 = rpg::cooldownleft(1, totalmillis);
-        if(cd1 > 0)
+        hpf = clamp(hpf, 0.0f, 1.0f);
+        mpf = clamp(mpf, 0.0f, 1.0f);
+
+        float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
+        float sw = 1500.0f;                  // strip width (native art is 1024x156)
+        float sh = sw*156.0f/1024.0f;
+        float sx = (X - sw)/2, sy = 1800.0f - sh - 24.0f;
+        float s = sw/1024.0f;                // native-art -> virtual scale
+
+        // strip frame
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/strip.png")->id);
+        rpg_drawtexuv(sx, sy, sw, sh, 0, 0, 1, 1);
+
+        // mana orb (left), native circle (9,12,132,132): fill grows from the bottom
+        float osz = 132*s;
+        float ox = sx + 9*s, oy = sy + 12*s;
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_mana.png")->id);
+        if(mpf > 0) rpg_drawtexuv(ox, oy + osz*(1-mpf), osz, osz*mpf, 0, 1-mpf, 1, 1);
+
+        // xp orb (right), native circle (883,12,132,132)
+        float xx = sx + 883*s, xy = sy + 12*s;
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_xp.png")->id);
+        if(xpf > 0) rpg_drawtexuv(xx, xy + osz*(1-xpf), osz, osz*xpf, 0, 1-xpf, 1, 1);
+
+        // health bar (middle thin recess), native x 153-870, y 28-48
+        float bx0 = sx + 153*s, by0 = sy + 28*s, bw = (870-153)*s, bh = (48-28)*s;
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/bar_hp.png")->id);
+        if(hpf > 0) rpg_drawtexuv(bx0, by0, bw*hpf, bh, 0, 0, hpf, 1);
+        defformatstring(hps)("%d/%d", d->health, d->maxhealth);
+        draw_text(hps, int(bx0 + bw/2 - 70), int(by0 + bh/2 - 16));
+
+        // action slots (lower recess): 10 slots on keys 1-0; slot 1 = Power
+        // Strike, slot 2 = Spark Bolt, slots 3-0 are empty kit frames.
+        Texture *slottex = rpg_loadtex("packages/ui/rpg/slots/slot.png");
+        Texture *abicons[2] = {
+            rpg_loadtex("packages/ui/rpg/hud/icon_powerstrike.png"),
+            rpg_loadtex("packages/ui/rpg/hud/icon_sparkbolt.png")
+        };
+        float slotn = 56*s, sloty = sy + 92*s;
+        loopi(10)
         {
-            rpg_fillrect(ix + isz + 20, iy, isz, isz, 0.0f, 0.0f, 0.0f, 0.65f);
-            defformatstring(cds2)("%.1f", cd1/1000.0f);
-            draw_text(cds2, int(ix + isz + 48), int(iy + 30));
+            float qx = sx + (160 + i*70)*s;
+            glBindTexture(GL_TEXTURE_2D, slottex->id);
+            rpg_drawtexuv(qx, sloty, slotn, slotn, 0, 0, 1, 1);
+            if(i < 2)
+            {
+                glBindTexture(GL_TEXTURE_2D, abicons[i]->id);
+                rpg_drawtexuv(qx + 4*s, sloty + 4*s, slotn - 8*s, slotn - 8*s, 0, 0, 1, 1);
+                int cd = rpg::cooldownleft(i, totalmillis);
+                if(cd > 0)
+                {
+                    rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);
+                    defformatstring(cds)("%.1f", cd/1000.0f);
+                    draw_text(cds, int(qx + slotn/2 - 24), int(sloty + slotn/2 - 16));
+                }
+            }
+            defformatstring(knum)("%d", (i+1)%10);
+            draw_text(knum, int(qx + 5*s), int(sloty - 8*s));
         }
-        else draw_text("2", int(ix + isz + 24), int(iy - 30));
-        draw_text("[I] inventory  [C] character", int(w*1800/h/2 - 260), int(1800 - 70));
+
+        draw_text("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44));
     }
 
     void drawhudicons(fpsent *d, int w, int h)
