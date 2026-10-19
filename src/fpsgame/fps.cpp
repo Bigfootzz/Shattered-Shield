@@ -2685,7 +2685,10 @@ namespace game
         float scale = calcradarscale();
         vec dir = d->o;
         dir.sub(pos).div(scale);
-        float dist = dir.magnitude2(), maxdist = 1 - 0.05f - 0.05f;
+        // Marker clamp tightened for the new frame art (Oct 19): the ornate
+        // ring's interior opening is 0.81 of the rect half-width (vs 0.92 stock),
+        // so edge markers are pulled slightly inward to stay visible.
+        float dist = dir.magnitude2(), maxdist = 0.76f;
         if(dist >= maxdist) dir.mul(maxdist/dist);
         dir.rotate_around_z(-camera1->yaw*RAD);
         glColor4f(r, g, b, 1.0f);
@@ -2705,9 +2708,14 @@ namespace game
         bindminimap();
         drawminimap(d, x, y, s);
         if(minimapalpha >= 1) glEnable(GL_BLEND);
-        settexture("data/hud/radar.png", 3);
+        // RPG frame art (user-supplied Oct 19): ornate silver ring + shield studs,
+        // converted from the baked-checkerboard JPEG to a real alpha PNG
+        // (packages/ui/rpg/hud/radar_frame.png). Replaces the stock radar.png
+        // frame on RPG maps only; the FPS/battleground radar is untouched.
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1, 1, 1, radartexalpha);
-        drawradar(x, y, s);   // frame only; the compass dials stay FPS furniture
+        drawradar(x, y, s);
         glColor4f(1, 1, 1, 1.0f);
 
         float msize = s*0.06f, qsize = s*0.09f;
