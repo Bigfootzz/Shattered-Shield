@@ -248,6 +248,14 @@ extern void pushfont();
 extern bool popfont();
 extern void gettextres(int &w, int &h);
 extern void draw_text(const char *str, int left, int top, int r = 255, int g = 255, int b = 255, int a = 255, int cursor = -1, int maxwidth = -1);
+// Shattered Shield chat-box input surface (console.cpp): the game renders
+// chat input inside its own panel; the stock bottom-left line is suppressed.
+#ifndef STANDALONE
+extern bool consoleinputisbox();
+extern const char *consoleinputbuf();
+extern const char *consoleinputprompt();
+extern int consoleinputpos();
+#endif
 extern int draw_text(const char *str, int left, int top, int r, int g, int b, int a, int flags, int cursor, int maxwidth); //RR
 extern int draw_textx(const char *fstr, int left, int top, int r = 255, int g = 255, int b = 255, int a = 255, int flags = 0, int cursor = -1, int maxwidth = -1, ...) PRINTFARGS(1, 11); //RR
 extern void draw_textf(const char *fstr, int left, int top, ...) PRINTFARGS(1, 4);

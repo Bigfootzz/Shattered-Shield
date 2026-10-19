@@ -1390,7 +1390,14 @@ namespace game
     ICOMMAND(suicide, "", (), suicide(player1));
 
     VARP(showradar, 0, 1, 1);
-    bool needminimap(bool cond) { return showradar && cond && ((cmode)? cmode->needsminimap(): m_teammode) /*m_ctf || m_protect || m_hold || m_capture*/; }
+    // Shattered Shield (Fix 6, Oct 19): the world radar shows the map terrain
+    // inside the ring (engine minimap path), so the texture must generate on
+    // world maps too - the stock gate (team modes only) left a black disc.
+    bool needminimap(bool cond)
+    {
+        if(rpg::mapactive(getclientmap())) return showradar && cond;
+        return showradar && cond && ((cmode)? cmode->needsminimap(): m_teammode) /*m_ctf || m_protect || m_hold || m_capture*/;
+    }
 
     void drawicon(int icon, float x, float y, float sz)
     {
@@ -2088,9 +2095,22 @@ namespace game
     // tab hit-rects from the last draw (virtual coords), for click routing
     static float rpg_chattabs[RPG_CHAT_NTABS][4];
 
+    // Chat surface (user ruling, Oct 19): the tabbed box is the chat surface
+    // on EVERY map (world + battlegrounds). While active, player chat lives
+    // only in the box; the engine suppresses the stock left-side feed and
+    // bottom-left input line (console.cpp). HUD strip/radar/target keep
+    // their per-map behavior - this gate covers the CHAT surface only.
+    bool chatboxactive()
+    {
+        // TEST-ONLY: rpg_testforce (defined in client.cpp) allows harness testing on stock maps
+        extern int rpg_testforce;
+        if(rpg_testforce && player1 && player1->state == CS_ALIVE) return true;
+        return rpg::connected() && player1 && player1->state == CS_ALIVE;
+    }
+
     void rpg_chat_tap(int type, const char *line)
     {
-        if(!rpg::connected() || !rpg::mapactive(getclientmap())) return;
+        if(!rpg::connected()) return;
         int tab = -1;
         if(type & CON_CHAT) tab = RPG_CHAT_WORLD;
         else if(type & CON_TEAMCHAT) tab = RPG_CHAT_CLAN;
@@ -2135,7 +2155,7 @@ namespace game
 
     bool rpg_chattabclick(float vx, float vy)
     {
-        if(!rpg::mapactive(getclientmap())) return false;
+        if(!chatboxactive()) return false;
         loopi(RPG_CHAT_NTABS)
             if(vx >= rpg_chattabs[i][0] && vx < rpg_chattabs[i][2] &&
                vy >= rpg_chattabs[i][1] && vy < rpg_chattabs[i][3])
@@ -2145,7 +2165,7 @@ namespace game
 
     void drawrpgchat(fpsent *d, int w, int h)
     {
-        if(!rpg::mapactive(getclientmap())) return;
+        if(!chatboxactive()) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
@@ -2155,11 +2175,17 @@ namespace game
         float bx1 = X - 24.0f, bx0 = bx1 - bw;
         float tabh = 46.0f, lineh = 30.0f, pad = 12.0f;
         int nlines = 8;
-        float bh = tabh + pad + nlines*lineh + pad;
+        // framed in-panel input field (MMO layout): the panel grows by the
+        // field's height while a chat input is open, history above it.
+        bool inputopen = consoleinputisbox();
+        float fieldh = inputopen ? 56.0f : 0.0f;
+        float bh = tabh + pad + nlines*lineh + pad + fieldh;
         float by1 = 1800.0f - 24.0f, by0 = by1 - bh;
+        float msgby1 = by1 - fieldh; // message area bottom (above the field)
 
-        // dark kit-style plate + thin steel border
-        rpg_fillrect(bx0, by0, bw, bh, 0.055f, 0.055f, 0.085f, 0.86f);
+        // dark smoke translucent plate + thin steel border (readability
+        // backing behind the text area, inside the panel rect)
+        rpg_fillrect(bx0, by0, bw, bh, 0.055f, 0.055f, 0.085f, 0.62f);
         rpg_fillrect(bx0, by0, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
         rpg_fillrect(bx0, by1-2, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
         rpg_fillrect(bx0, by0, 2, bh, 0.45f, 0.47f, 0.52f, 0.9f);
@@ -2182,16 +2208,41 @@ namespace game
             rpg_chattextc(rpg_chatnames[i], tx0 + tabw/2, by0 + tabh/2, 26.0f, cr, cg, cb);
         }
 
-        // messages, bottom-aligned, most recent lines that fit
+        // messages, bottom-aligned above the input field, most recent first
         vector<rpg_chatline> &b = rpg_chatbuf[rpg_chattab];
         int shown = min(nlines, b.length());
         loopi(shown)
         {
             string fit; rpg_chatfit(fit, b[b.length()-shown+i].text, bw - 2*pad, lineh*0.9f);
-            float ly = by1 - pad - (shown-i)*lineh;
+            float ly = msgby1 - pad - (shown-i)*lineh;
             // lines carry their own \f color codes; the default tint covers plain lines
             rpg_chattext(fit, int(bx0+pad), int(ly), lineh*0.9f,
                          rpg_chancol[rpg_chattab][0], rpg_chancol[rpg_chattab][1], rpg_chancol[rpg_chattab][2]);
+        }
+
+        // framed in-panel input field (user design, Oct 19): a real text-entry
+        // box at the bottom of the panel - message history above, input below.
+        // Typed text + caret render inside the field while typing.
+        if(inputopen)
+        {
+            float fx0 = bx0 + 8, fx1 = bx1 - 8, fy1 = by1 - 8, fy0 = fy1 - 40.0f;
+            // field fill + steel frame
+            rpg_fillrect(fx0, fy0, fx1-fx0, fy1-fy0, 0.03f, 0.03f, 0.05f, 0.92f);
+            rpg_fillrect(fx0, fy0, fx1-fx0, 2, 0.45f, 0.47f, 0.52f, 0.9f);
+            rpg_fillrect(fx0, fy1-2, fx1-fx0, 2, 0.45f, 0.47f, 0.52f, 0.9f);
+            rpg_fillrect(fx0, fy0, 2, fy1-fy0, 0.45f, 0.47f, 0.52f, 0.9f);
+            rpg_fillrect(fx1-2, fy0, 2, fy1-fy0, 0.45f, 0.47f, 0.52f, 0.9f);
+            // prompt + buffer + caret, same idiom as the stock rendercommand
+            defformatstring(is)("%s %s", consoleinputprompt(), consoleinputbuf());
+            int cpos = consoleinputpos();
+            int cursor = cpos >= 0 ? cpos + 1 + (int)strlen(consoleinputprompt()) : (int)strlen(is);
+            float pxh = 26.0f;
+            float save = gtextscale;
+            float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+            settextscale(pxh/baseh);
+            int tw, th; text_bounds(is, tw, th);
+            draw_text(is, int(fx0+8), int(fy0 + (fy1-fy0-th)/2), 255, 255, 255, 255, cursor);
+            settextscale(save);
         }
     }
 
@@ -2202,6 +2253,8 @@ namespace game
     {
         if(!rpg::mapactive(getclientmap())) return;
         if(g3d_gui2dopen()) return;
+        extern bool rpg_rmbsteering(); // client.cpp: hide the cursor while right-drag steering
+        if(rpg_rmbsteering()) return;
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h);
         float vscale = 1800.0f/h;
         float sz = 64.0f*vscale;
@@ -2906,7 +2959,7 @@ namespace game
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
         if(!rpg::mapactive(getclientmap()) && needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap (FPS path untouched)
         // RPG: the radar is back on RPG maps as the PvE tracker (user design, Oct 19).
-        if(rpg::mapactive(getclientmap())) drawrpgradar(d, w, h);
+        { extern int rpg_testforce; if(rpg_testforce || rpg::mapactive(getclientmap())) drawrpgradar(d, w, h); }
         if(showtimers) drawtimers(d, w, h);
 
         if(d->state!=CS_EDITING)

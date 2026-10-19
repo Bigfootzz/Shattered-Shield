@@ -18,6 +18,8 @@ namespace game
 
     clientmode *cmode = NULL;
     captureclientmode capturemode;
+    // TEST-ONLY (harness): bypass the RPG-map gate for turning/steering tests
+    VARP(rpg_testforce, 0, 0, 1);
     ctfclientmode ctfmode;
     infectionclientmode infectionmode;
     dmspclientmode dmspmode;
@@ -265,8 +267,65 @@ namespace game
             }
         }
     }
-    // "D" signature: acts on press only; the release re-fire is a no-op by design.
-    ICOMMAND(rpgclick, "Di", (int *down, int *button), { if(*down) rpg_doclick(*button); });
+    // "D" signature: press arms / release fires (see below).
+    // --- Playtest fix (Oct 19): character/camera turning on world maps ---
+    // A/D (the strafe keys) ROTATE the character and the follow camera at a
+    // smooth turn rate instead of strafing; W then walks the new heading.
+    // Right-mouse: press arms a pending click; motion beyond RPG_RMB_DRAGPX
+    // while held becomes camera steering (cursor pinned+hidden); release
+    // without a drag fires the classic right-click (select + auto-attack),
+    // release after a drag just ends steering and NEVER attacks.
+    static float rpg_turnrate = 150.0f; // deg/sec, MMO-standard smooth turn
+    static bool rpg_rmbheld = false, rpg_rmbdrag = false;
+    static float rpg_rmbpx = 0, rpg_rmbpy = 0; // press point, screen px
+    static float rpg_rmblx = 0, rpg_rmbly = 0; // last steered sample, screen px
+    #define RPG_RMB_DRAGPX 12.0f
+    #define RPG_RMB_STEERSENS 0.15f // deg per px of drag, near stock mouse feel
+    bool rpg_rmbsteering() { return rpg_rmbdrag; } // fps.cpp hides the cursor while steering
+    static void rpg_rmbpress()
+    {
+        if((!rpg_testforce && !rpg::mapactive(getclientmap())) || !player1 || player1->state != CS_ALIVE || g3d_gui2dopen()) return;
+        float cx = 0, cy = 0; rpg::cursorget(cx, cy);
+        int w = 0, h = 0; rpg_screenwh(w, h);
+        rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
+        rpg_rmbheld = true; rpg_rmbdrag = false;
+        rpg_rmbpx = rpg_rmblx = cx; rpg_rmbpy = rpg_rmbly = cy;
+    }
+    static void rpg_rmbrelease(int button)
+    {
+        bool held = rpg_rmbheld, drag = rpg_rmbdrag;
+        rpg_rmbheld = rpg_rmbdrag = false;
+        if(!held || drag) return; // drag release: steering ends, never attacks
+        if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE || g3d_gui2dopen()) return;
+        rpg_doclick(button); // classic right-click: select + auto-attack
+    }
+    ICOMMAND(rpgclick, "Di", (int *down, int *button),
+    {
+        if(*button == 1) { if(*down) rpg_rmbpress(); else rpg_rmbrelease(*button); }
+        else if(*down) rpg_doclick(*button); // left click unchanged: fires on press
+    });
+    // TEST-ONLY: drive the right-button state machine without an OS pointer.
+    ICOMMAND(rpgtestrmbpress, "", (), rpg_rmbpress());
+    ICOMMAND(rpgtestrmbrelease, "", (), rpg_rmbrelease(1));
+    ICOMMAND(rpgtestyaw, "", (),
+    {
+        conoutf("rpgtest: yaw player=%.1f camera=%.1f", player1 ? player1->yaw : -1, camera1 ? camera1->yaw : -1);
+    });
+    // TEST-ONLY (harness): write yaw/state to a file (console output is not
+    // captured in the headless harness). Also rpg_testforce bypasses the
+    // mapactive gate so turning/steering can be exercised on stock maps when
+    // the RPG maps won't load in the harness environment.
+    ICOMMAND(rpgteststrafe, "i", (int *v), { if(player1) player1->strafe = *v; });
+    ICOMMAND(rpgtestwritestate, "s", (char *f),
+    {
+        if(!f || !f[0]) return;
+        FILE *fp = fopen(f, "w");
+        if(!fp) return;
+        fprintf(fp, "player_yaw=%.1f camera_yaw=%.1f strafe=%d rmbheld=%d rmbdrag=%d\n",
+            player1 ? player1->yaw : -999, camera1 ? camera1->yaw : -999,
+            player1 ? player1->strafe : -99, rpg_rmbheld ? 1 : 0, rpg_rmbdrag ? 1 : 0);
+        fclose(fp);
+    });
     // Quest chain v1: talk to the selected NPC (F key on RPG maps). The server
     // runs the dialogue state machine; right-click stays auto-attack (never talk).
     ICOMMAND(rpgtalk, "", (),
@@ -384,7 +443,7 @@ namespace game
                 else if(!rpg_snapok) { rpg_snapok = 1; conoutf("rpgtestsnapwait: tracking"); }
             }
         }
-        if(!rpg::mapactive(getclientmap()) || !player1) return;
+        if((!rpg_testforce && !rpg::mapactive(getclientmap())) || !player1) return;
         int w, h; rpg_screenwh(w, h);
         if(w <= 0 || h <= 0) return;
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
@@ -412,6 +471,44 @@ namespace game
         {
             if(rpg::autoattacking()) { rpg::setautoattack(false); conoutf("rpg: auto-attack stopped (you died)"); }
             return;
+        }
+
+        // --- Playtest fix (Oct 19): A/D turning + right-drag steering ---
+        // A/D (strafe keys) rotate the follow camera on world maps; the
+        // character follows through the facing sync below, so W walks the
+        // new heading. The strafe slide is consumed (no sideways drift).
+        // Battleground maps are untouched (mouse-look owns the camera there).
+        if(player1->strafe)
+        {
+            camera1->yaw -= player1->strafe * rpg_turnrate * (curtime/1000.0f);
+            while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
+            while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+            player1->strafe = 0;
+        }
+        // Right-drag camera steering: once past the drag threshold the
+        // cursor is pinned to the press point (it can't wander off) and each
+        // frame's fresh mouse delta turns the camera (speed-following).
+        if(rpg_rmbheld)
+        {
+            float cx = 0, cy = 0; rpg::cursorget(cx, cy);
+            if(!rpg_rmbdrag)
+            {
+                if(fabsf(cx - rpg_rmbpx) > RPG_RMB_DRAGPX || fabsf(cy - rpg_rmbpy) > RPG_RMB_DRAGPX)
+                {
+                    rpg_rmbdrag = true;
+                    rpg_rmblx = cx; rpg_rmbly = cy;
+                    conoutf("rpg: steering camera (right-drag)");
+                }
+            }
+            else
+            {
+                float dx = cx - rpg_rmblx;
+                camera1->yaw += dx * RPG_RMB_STEERSENS;
+                while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
+                while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+                rpg::cursorset(rpg_rmbpx, rpg_rmbpy);
+                rpg_rmblx = rpg_rmbpx; rpg_rmbly = rpg_rmbpy;
+            }
         }
 
         // Follow-camera facing (user design, Oct 19): the character faces the
@@ -1245,7 +1342,7 @@ namespace game
     // menu is open and resumes when it closes.
     void cursormove(int dx, int dy)
     {
-        if(rpg::mapactive(getclientmap())) rpg::cursoraccum(dx, dy);
+        if(rpg_testforce || rpg::mapactive(getclientmap())) rpg::cursoraccum(dx, dy);
     }
 
     void changegamespeed(int val)

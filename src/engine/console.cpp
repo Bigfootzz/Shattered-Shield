@@ -9,7 +9,7 @@ reversequeue<cline, MAXCONLINES> conlines;
 int commandmillis = -1;
 string commandbuf;
 char *commandaction = NULL, *commandprompt = NULL;
-enum { CF_COMPLETE = 1<<0, CF_EXECUTE = 1<<1 };
+enum { CF_COMPLETE = 1<<0, CF_EXECUTE = 1<<1, CF_CHATBOX = 1<<2 };
 int commandflags = 0, commandpos = -1;
 
 // RPG chat-box tap (Shattered Shield, additive only): routes console chat and
@@ -17,6 +17,19 @@ int commandflags = 0, commandpos = -1;
 // server build; the tap itself is a no-op off RPG maps.
 #ifndef STANDALONE
 namespace game { extern void rpg_chat_tap(int type, const char *line); }
+// Chat surface (user ruling, Oct 19): the tabbed box is the chat surface on
+// EVERY map. While it is active, player chat (say/sayteam) and the chat input
+// live only in the box: the stock left-side feed and bottom-left input line
+// are suppressed. The full debug console (behind its key) is untouched.
+namespace game { extern bool chatboxactive(); }
+// Chat-box input surface: the game renders an input opened with the 'b'
+// inputcommand flag inside its own panel instead of the stock bottom-left
+// line. The typing/commit machinery (consolekey, hline::run) is unchanged.
+bool consoleinputisbox() { return commandmillis >= 0 && (commandflags & CF_CHATBOX) != 0; }
+const char *consoleinputbuf() { return commandmillis >= 0 ? commandbuf : ""; }
+ICOMMAND(getcommandbuf, "", (), result(consoleinputbuf()));
+const char *consoleinputprompt() { return commandmillis >= 0 && commandprompt ? commandprompt : ""; }
+int consoleinputpos() { return commandmillis >= 0 ? commandpos : -1; }
 #endif
 
 VARFP(maxcon, 10, 200, MAXCONLINES, { while(conlines.length() > maxcon) delete[] conlines.pop().line; });
@@ -91,6 +104,11 @@ ICOMMAND(toggleconsole, "", (), { fullconsole ^= 1; });
 int rendercommand(int x, int y, int w)
 {
     if(commandmillis < 0) return 0;
+#ifndef STANDALONE
+    // Shattered Shield: chat input renders inside the chat box panel
+    // (all maps); the stock bottom-left line stays dark for it.
+    if((commandflags & CF_CHATBOX) && game::chatboxactive()) return 0;
+#endif
 
     defformatstring(s)("%s %s", commandprompt ? commandprompt : ">", commandbuf);
     int width, height;
@@ -186,7 +204,16 @@ int renderconsole(int w, int h, int abovehud)                   // render buffer
 
     int y = drawconlines(conskip, fullconsole ? 0 : confade, conwidth, conheight, conpad+conoff, fullconsole ? fullconfilter : confilter);
     if(!fullconsole && (miniconsize && miniconwidth))
-        drawconlines(miniconskip, miniconfade, (miniconwidth*(w - 2*(conpad + conoff)))/100, min(FONTH*miniconsize, abovehud - y), conpad+conoff, miniconfilter, abovehud, -1);
+    {
+        int minifilter = miniconfilter;
+#ifndef STANDALONE
+        // Shattered Shield: while the chat box is the chat surface, player
+        // chat (CON_CHAT/CON_TEAMCHAT, see game.h) lives only in the box -
+        // mask it from the stock left-side feed. Full console unaffected.
+        if(game::chatboxactive()) minifilter &= ~((1<<8)|(1<<9));
+#endif
+        drawconlines(miniconskip, miniconfade, (miniconwidth*(w - 2*(conpad + conoff)))/100, min(FONTH*miniconsize, abovehud - y), conpad+conoff, minifilter, abovehud, -1);
+    }
     return fullconsole ? conheight + 2*(conpad + conoff) : y;
 }
 
@@ -306,6 +333,7 @@ void inputcommand(char *init, char *action = NULL, char *prompt = NULL, char *fl
         case 'c': commandflags |= CF_COMPLETE; break;
         case 'x': commandflags |= CF_EXECUTE; break;
         case 's': commandflags |= CF_COMPLETE|CF_EXECUTE; break;
+        case 'b': commandflags |= CF_CHATBOX; break; // Shattered Shield: render this input in the chat box panel
     }
     else if(init) commandflags |= CF_COMPLETE|CF_EXECUTE;
 }
