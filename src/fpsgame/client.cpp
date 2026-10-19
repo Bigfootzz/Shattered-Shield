@@ -1,5 +1,6 @@
 #include "game.h"
 #include "rpg/rpg.h"
+#include "rpg/abilities.h"
 #include "rpg/items.h"
 #include "auth.h"
 
@@ -145,6 +146,46 @@ namespace game
         defformatstring(s)("Weapon +%d dmg   Armor %d", wd, ar);
         result(s);
     });
+    // --- RPG: Shattered Shield character-screen data (window confinement pass).
+    // Read-only client-cache queries so the K screen can show real stats/tabs.
+    ICOMMAND(rpglevel, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(l); });
+    ICOMMAND(rpgxp, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(x); });
+    ICOMMAND(rpgweapondmg, "", (), {
+        rpg_refreshcl(); int wd = 0;
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.type == rpg::ITEM_WEAPON) wd += d.damage;
+        }
+        intret(wd);
+    });
+    ICOMMAND(rpgarmortotal, "", (), {
+        rpg_refreshcl(); int ar = 0;
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.type == rpg::ITEM_ARMOR) ar += d.armor;
+        }
+        intret(ar);
+    });
+    ICOMMAND(rpgeqarmor, "s", (char *s), {
+        rpg_refreshcl(); int id = rpg::slotid(s);
+        intret(id >= 0 && rpg_cleq[id] >= 0 ? rpg::item(rpg_cleq[id]).armor : 0);
+    });
+    ICOMMAND(rpgabname, "i", (int *i), { result(rpg::validability(*i) ? rpg::ability(*i).name : ""); });
+    ICOMMAND(rpgabdmg, "i", (int *i), { intret(rpg::validability(*i) ? rpg::ability(*i).damage : 0); });
+    ICOMMAND(rpgabmana, "i", (int *i), { intret(rpg::validability(*i) ? rpg::ability(*i).manacost : 0); });
+    ICOMMAND(rpgabcdstr, "i", (int *i), {
+        if(rpg::validability(*i))
+        {
+            int ms = rpg::ability(*i).cooldownms;
+            defformatstring(s)("%d.%ds", ms/1000, (ms%1000)/100);
+            result(s);
+        }
+        else result("");
+    });
+    ICOMMAND(rpgmana, "", (), { int m = 0; int mm = 0; rpg::getclientmana(m, mm); intret(m); });
+    ICOMMAND(rpgmaxmana, "", (), { int m = 0; int mm = 0; rpg::getclientmana(m, mm); intret(mm); });
 
     void switchname(const char *name)
     {
