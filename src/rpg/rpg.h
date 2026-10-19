@@ -209,7 +209,7 @@ namespace rpg
     // Selection + auto-attack are client intent; the server re-validates every
     // cast exactly as before. NPC selection rides alongside monster selection
     // (quest chain v1): selecting one clears the other.
-    enum { HOVER_DEFAULT = 0, HOVER_LOOT = 1, HOVER_HOSTILE = 2 };
+    enum { RPG_HOVER_DEFAULT = 0, RPG_HOVER_LOOT = 1, RPG_HOVER_HOSTILE = 2 };
     void cursoraccum(int dx, int dy);              // add relative motion to the free cursor
     void cursorget(float &x, float &y);            // raw accumulated cursor pos (screen px)
     void cursorset(float x, float y);

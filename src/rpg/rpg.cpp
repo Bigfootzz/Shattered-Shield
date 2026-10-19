@@ -820,7 +820,7 @@ namespace rpg
 
     // --- mouse & targeting v1: client presentation state (plain data) ---
     static float clcursorx = 640.0f, clcursory = 360.0f;
-    static int clhover = HOVER_DEFAULT;
+    static int clhover = RPG_HOVER_DEFAULT;
     static int clselclient = -1;
     static bool clautoattack = false;
 

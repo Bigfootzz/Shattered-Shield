@@ -391,13 +391,13 @@ namespace game
 
         // hover state (real pick every frame; logs transitions only)
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
-        int hov = rpg::HOVER_DEFAULT;
-        if(pk.kind == 2) hov = rpg::HOVER_HOSTILE;
-        else if(pk.kind == 1) hov = rpg::HOVER_LOOT;
+        int hov = rpg::RPG_HOVER_DEFAULT;
+        if(pk.kind == 2) hov = rpg::RPG_HOVER_HOSTILE;
+        else if(pk.kind == 1) hov = rpg::RPG_HOVER_LOOT;
         if(hov != rpg::hoverstate())
         {
             rpg::sethoverstate(hov);
-            conoutf("rpg: hover %s", hov == rpg::HOVER_HOSTILE ? "hostile" : (hov == rpg::HOVER_LOOT ? "loot" : "default"));
+            conoutf("rpg: hover %s", hov == rpg::RPG_HOVER_HOSTILE ? "hostile" : (hov == rpg::RPG_HOVER_LOOT ? "loot" : "default"));
         }
 
         // selection validity: target died or left -> deselect, stop auto-attack

@@ -2209,8 +2209,8 @@ namespace game
         float vx = cx*vscale - 8.0f*vscale, vy = cy*vscale - 8.0f*vscale;
         const char *tex = "packages/ui/rpg/cursors/cursor_default.png";
         int hov = rpg::hoverstate();
-        if(hov == rpg::HOVER_HOSTILE) tex = "packages/ui/rpg/cursors/cursor_attack.png";
-        else if(hov == rpg::HOVER_LOOT) tex = "packages/ui/rpg/cursors/cursor_glove.png";
+        if(hov == rpg::RPG_HOVER_HOSTILE) tex = "packages/ui/rpg/cursors/cursor_attack.png";
+        else if(hov == rpg::RPG_HOVER_LOOT) tex = "packages/ui/rpg/cursors/cursor_glove.png";
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
         rpg_drawtexuv(vx, vy, sz, sz, 0, 0, 1, 1);
     }
