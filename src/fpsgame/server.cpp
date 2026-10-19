@@ -3479,6 +3479,16 @@ namespace server
 
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         rpg::onconnect(ci->name);
+        // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
+        // The inline spawn inside sendinitclient() ran BEFORE the character was
+        // loaded, so a fresh connect on an RPG map left the client at the engine
+        // default 90/90 HP while the sheet said Max HP 100. Re-apply the derived
+        // HP now that the character is loaded, and sync the cap to the client.
+        if(rpg::mapactive(smapname))
+        {
+            rpg_applyspawnhealth(ci);
+            sendf(ci->clientnum, 1, "ri2", N_RPG_HPMAX, ci->state.maxhealth);
+        }
         rpg_syncinv(ci); // push level/xp + inventory so the client sheet is right on connect
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Everyone learns this client's equipped weapon model; the newcomer learns everyone's.
