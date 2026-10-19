@@ -235,3 +235,33 @@ characters; clipping nearly eliminated. Verified by 8 re-import renders
 posed for ranger_male — armor stays seated in motion) and a clean headless
 engine boot. Build scripts: /tmp/fit/{refit.py,verify_fit.py,render.py,iqm.py}
 (scratch; reproduce from these notes if needed).
+
+## SWAP rebuild (2026-10-18, user's design call)
+
+**Principle:** parts that cover a whole body region SWAP IN as replacements
+(remove base-body region, install outfit part), not layered over. Partial
+pieces (pauldron, bracer, belt, hood) stay layered with the 6a1ea16 flush fit.
+
+**Assembly per character:**
+- ranger_male/female: Body→tunic, Legs→pants, Feet→boots, Arms→sleeves (split
+  by material: skin forearms + cloth sleeves). Head/hands stay base body.
+- peasant_male: Body→shirt, Legs→pants, Feet→boots, Arms→split (skin + cloth).
+- peasant_female: Body→shirt, Legs→pants, Feet→boots, Arms→single cloth mesh
+  (pack's Arms is all-cloth, no skin material).
+
+**Region masking:** base body verts removed by dominant-bone + z-threshold
+from part extents (NOT proximity — tunic is smaller than torso, 77.9% of
+body torso verts test outside it).
+
+**Crunch fix:** the canonical rebind had straightened the Superhero spine
+(spine_03 14.27°→0.03°, neck −18.22%), reading as "crunched" chest/butt in
+side renders. The SWAP replaces torso/pelvis/legs with outfit parts authored
+for the UAL2 rest, so the distortion is gone for covered regions. Verified
+in side-profile renders: natural chest line and butt curve.
+
+**File format notes:** triangle indices are ABSOLUTE (file-wide); new parts
+written with flipped winding + outward normals (matches file convention);
+zero-normals artifact NOT reintroduced (normals recomputed).
+
+Build scripts: /tmp/swapdiag/{dump_parts.py,swaplib.py,mask.py,build_swap.py,
+assemble.py,write_iqm.py,build_all.py} (scratch; reproduce from these notes).
