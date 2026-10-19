@@ -688,6 +688,10 @@ enum
     N_RPG_MANA,    // s->c: mana update for the caster (mana, maxmana)
     N_RPG_CD,      // s->c: ability cooldown started (ability, waitms)
     N_RPG_HPMAX,   // s->c: RPG engine max-HP sync (maxhp)
+    // Shattered Shield quest chain v1 (additive)
+    N_RPG_TALK,    // c->s: talk/accept/turn-in with an NPC (npc index)
+    N_RPG_QMSG,    // s->c: quest dialogue/event line for the System tab (string)
+    N_RPG_QUEST,   // s->c: active-quest sync (qid, state, kills, need)
     NUMSV
 };
 
@@ -723,6 +727,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
     N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
+    N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5,
     -1
 };
 

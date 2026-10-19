@@ -55,6 +55,10 @@ namespace rpg
         loopi(SLOT_COUNT) cc.equipped[i] = -1;
     }
     static std::map<std::string, cachedchar> cache;
+    // quest chain v1: session view of rpg_quests (defined/loaded below)
+    struct qrow { int state; int kills; };
+    static std::map<std::string, std::map<int, qrow> > questcache;
+    static void questcacheload(const char *name);
 
     static cachedchar *findcached(const char *name)
     {
@@ -135,6 +139,13 @@ namespace rpg
                 "slot INTEGER NOT NULL,"
                 "item TEXT NOT NULL,"
                 "PRIMARY KEY(name, slot))");
+        // --- quest chain v1: per-character quest state (additive) ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_quests("
+                "name TEXT NOT NULL,"
+                "quest INTEGER NOT NULL,"
+                "state INTEGER NOT NULL DEFAULT 0,"
+                "kills INTEGER NOT NULL DEFAULT 0,"
+                "PRIMARY KEY(name, quest))");
         conoutf("rpg: character database open at %s (sqlite %s)", (const char *)dbfile, sqlite3_libversion());
     }
 
@@ -197,6 +208,8 @@ namespace rpg
         cache[std::string(name)] = cc;
         // --- inventory & equipment v1 (milestone step 4) ---
         loadinv(name); // rows into the session cache (no-op when none)
+        // --- quest chain v1: quest rows into the session cache (no-op when none) ---
+        questcacheload(name);
         if(!existed)
         {
             // starter kit: a stick in hand and two potions in the pack
@@ -274,6 +287,8 @@ namespace rpg
         if(!db || !name || !name[0]) return;
         savepos(name, map, x, y, z, yaw);
         saveinv(name); // milestone step 4: inventory + equipment persist with the character
+        // quest chain v1: quest rows are already write-through; drop the session view
+        questcache.erase(std::string(name));
         cache.erase(std::string(name));
         conoutf("rpg: saved character '%s'", name);
     }
@@ -803,15 +818,202 @@ namespace rpg
     }
     int hoverstate() { return clhover; }
     void sethoverstate(int s) { clhover = s; }
+    static int clnpcsel = -1;
     int selectedtarget() { return clselclient; }
-    void selecttarget(int clientnum) { clselclient = clientnum; }
+    void selecttarget(int clientnum) { clselclient = clientnum; if(clientnum >= 0) clnpcsel = -1; }
+    int selectednpc() { return clnpcsel; }
+    void selectnpc(int idx) { clnpcsel = idx; if(idx >= 0) clselclient = -1; }
     bool autoattacking() { return clautoattack; }
     void setautoattack(bool on) { clautoattack = on; }
-    void cleartargeting() { clselclient = -1; clautoattack = false; }
+    void cleartargeting() { clselclient = -1; clnpcsel = -1; clautoattack = false; }
 
-    // RPG radar marker sources. NPCs, quests, and gathering do not exist yet:
-    // return 0 today; they fill in automatically once those systems land.
-    int npcmarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
+    // RPG radar marker sources. Gathering does not exist yet: gathermarkers
+    // returns 0 today and lights up when that system lands. NPC markers are
+    // LIVE (quest chain v1). Quest-mob positions are dynamic, so the HUD
+    // enumerates them from AI state filtered by isquestmobtarget() (same
+    // pattern as the red hostile pass); questmobmarkers stays 0 by design.
+    int npcmarkers(float *out, int maxout)
+    {
+        int n = 0;
+        for(int i = 0; i < npccount() && n < maxout; i++)
+        {
+            const npcdef *nd = npcat(i);
+            if(!nd) continue;
+            out[3*n] = nd->x; out[3*n+1] = nd->y; out[3*n+2] = nd->z;
+            n++;
+        }
+        return n;
+    }
     int questmobmarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
     int gathermarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
+
+    // --- quest chain v1 ---
+    // Elder Maren stands in the spawn building on rpg_01, a few paces from
+    // the player start (2220, 1972), facing it. v1: one static NPC; the
+    // table is the single place a second quest giver slots in later.
+    static const npcdef NPCS[] =
+    {
+        { "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f },
+    };
+    static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
+
+    int npccount() { return NPC_COUNT; }
+    const npcdef *npcat(int i) { return (i >= 0 && i < NPC_COUNT) ? &NPCS[i] : NULL; }
+
+    static const questdef QUESTS[QUEST_DONE] =
+    {
+        { "", "", "", 0, 0, NULL }, // QUEST_NONE placeholder (index 0)
+        { "Cull the Undead", "Slay 5 zombies", "zombie", 5, 100, NULL },
+        { "The Dead Keep Coming", "Slay 8 zombies", "zombie", 8, 150, NULL },
+        { "The Rotting Champion", "Slay the Rotting Champion", "Rotting Champion", 1, 300, "imp_mace" },
+    };
+    const questdef &quest(int qid)
+    {
+        static const questdef empty = { "", "", "", 0, 0, NULL };
+        if(qid < QUEST_CULL || qid > QUEST_CHAMPION) return empty;
+        return QUESTS[qid];
+    }
+
+    // Champion display name (also the radar/client match string).
+    static const char *CHAMPION_NAME = "Rotting Champion";
+
+    // --- quest persistence: rpg_quests(name, quest, state, kills) ---
+    static void questcacheload(const char *name)
+    {
+        questcache[std::string(name)].clear();
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT quest, state, kills FROM rpg_quests WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            while(sqlite3_step(st) == SQLITE_ROW)
+            {
+                int q = sqlite3_column_int(st, 0);
+                qrow r; r.state = sqlite3_column_int(st, 1); r.kills = sqlite3_column_int(st, 2);
+                if(q >= QUEST_CULL && q <= QUEST_CHAMPION) questcache[std::string(name)][q] = r;
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
+    static void questsave(const char *name, int qid)
+    {
+        if(!db || !name || !name[0]) return;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        std::map<int, qrow>::iterator it = m.find(qid);
+        if(it == m.end()) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO rpg_quests(name, quest, state, kills) VALUES(?1, ?2, ?3, ?4)", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(st, 2, qid);
+            sqlite3_bind_int(st, 3, it->second.state);
+            sqlite3_bind_int(st, 4, it->second.kills);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+
+    int chainpos(const char *name)
+    {
+        if(!name || !name[0]) return QUEST_DONE;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        for(int q = QUEST_CULL; q <= QUEST_CHAMPION; q++)
+        {
+            std::map<int, qrow>::iterator it = m.find(q);
+            if(it == m.end() || it->second.state != QSTATE_COMPLETE) return q;
+        }
+        return QUEST_DONE;
+    }
+
+    int queststate(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return -1;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        std::map<int, qrow>::iterator it = m.find(qid);
+        return it == m.end() ? -1 : it->second.state;
+    }
+
+    int questkills(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return 0;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        std::map<int, qrow>::iterator it = m.find(qid);
+        return it == m.end() ? 0 : it->second.kills;
+    }
+
+    void questsetoffered(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        qrow r; r.state = QSTATE_OFFERED; r.kills = 0;
+        questcache[std::string(name)][qid] = r;
+        questsave(name, qid);
+    }
+
+    void questsetactive(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        qrow r; r.state = QSTATE_ACTIVE; r.kills = 0;
+        questcache[std::string(name)][qid] = r;
+        questsave(name, qid);
+    }
+
+    void questaddkill(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        std::map<int, qrow>::iterator it = m.find(qid);
+        if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // only while active
+        it->second.kills++;
+        questsave(name, qid);
+    }
+
+    void questsetcomplete(const char *name, int qid)
+    {
+        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        std::map<int, qrow> &m = questcache[std::string(name)];
+        std::map<int, qrow>::iterator it = m.find(qid);
+        if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // no double turn-in
+        it->second.state = QSTATE_COMPLETE;
+        questsave(name, qid);
+    }
+
+    // Champion tracking (server session state).
+    static int champion_clientnum = -1;
+    void setchampioncn(int cn) { champion_clientnum = cn; }
+    int championcn() { return champion_clientnum; }
+    void clearchampioncn() { champion_clientnum = -1; }
+
+    // Server kill-path hook. Counts only while the matching quest is ACTIVE;
+    // quest 3 counts only the tracked champion. Returns the quest id counted, else 0.
+    int questonkill(const char *name, int targetclientnum, bool ismonster)
+    {
+        if(!name || !name[0] || !ismonster) return 0;
+        int q = chainpos(name);
+        if(q < QUEST_CULL || q > QUEST_CHAMPION) return 0;
+        if(queststate(name, q) != QSTATE_ACTIVE) return 0;
+        if(q == QUEST_CHAMPION && targetclientnum != champion_clientnum) return 0;
+        questaddkill(name, q);
+        if(q == QUEST_CHAMPION) clearchampioncn(); // the champion is dead; stop tracking
+        return q;
+    }
+
+    // --- quest chain v1: client presentation caches (never authoritative) ---
+    static int clquest_id = QUEST_NONE, clquest_state = -1, clquest_kills = 0, clquest_need = 0;
+    void setclientquest(int qid, int state, int kills, int need)
+    {
+        clquest_id = qid; clquest_state = state; clquest_kills = kills; clquest_need = need;
+    }
+    bool getclientquest(int &qid, int &state, int &kills, int &need)
+    {
+        qid = clquest_id; state = clquest_state; kills = clquest_kills; need = clquest_need;
+        return clquest_state == QSTATE_ACTIVE;
+    }
+    bool isquestmobtarget(const char *monname)
+    {
+        if(clquest_state != QSTATE_ACTIVE || !monname || !monname[0]) return false;
+        if(clquest_id == QUEST_CHAMPION) return !strcmp(monname, CHAMPION_NAME);
+        if(clquest_id == QUEST_CULL || clquest_id == QUEST_WAVES) return true; // any zombie counts
+        return false;
+    }
 }

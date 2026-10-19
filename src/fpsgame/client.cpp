@@ -116,10 +116,10 @@ namespace game
         dist *= from.dist(to); // linecylinderintersect returns a fraction; we need world units // linecylinderintersect returns a fraction; we need world units
         return true;
     }
-    struct rpgpickresult { int kind; fpsent *mon; int lootidx; }; // kind: 0 none, 1 loot, 2 monster
+    struct rpgpickresult { int kind; fpsent *mon; int lootidx; int npci; }; // kind: 0 none, 1 loot, 2 monster, 3 npc
     static rpgpickresult rpg_pick(float cx, float cy, int w, int h)
     {
-        rpgpickresult r; r.kind = 0; r.mon = NULL; r.lootidx = -1;
+        rpgpickresult r; r.kind = 0; r.mon = NULL; r.lootidx = -1; r.npci = -1;
         if(!camera1 || !player1 || w <= 0 || h <= 0) return r;
         vec4 scr;
         scr.x = 2.0f*cx/w - 1.0f;
@@ -139,12 +139,24 @@ namespace game
         {
             fpsent *d = clients[i];
             if(!d || d == player1) continue;
-            // NPC hook: when NPCs exist, their entity check goes here alongside monsters.
             if(d->ai.type != ai::AI_TYPE_MONSTER) continue;
             if(d->state != CS_ALIVE) continue;
             float dist;
             if(!rpg_pickintersect(d, from, to, dist)) continue;
             if(dist < bestd) { best = d; bestd = dist; }
+        }
+        // NPC quest givers (quest chain v1): static cylinders from the shared
+        // NPC table; nearest pick wins against monsters/loot below.
+        int bestnpc = -1;
+        for(int ni = 0; ni < rpg::npccount(); ni++)
+        {
+            const rpg::npcdef *nd = rpg::npcat(ni);
+            if(!nd) continue;
+            vec bottom(nd->x, nd->y, nd->z), top(nd->x, nd->y, nd->z + 70.0f);
+            float dist;
+            if(!linecylinderintersect(from, to, bottom, top, 7.0f, dist)) continue;
+            dist *= from.dist(to);
+            if(dist < bestd) { best = NULL; bestnpc = ni; bestd = dist; }
         }
         rpg::lootdrop drops[64]; int nd = 0;
         int bestloot = -1; float bestld = 1e16f;
@@ -155,8 +167,9 @@ namespace game
             if(!linecylinderintersect(from, to, bottom, top, 2.5f, dist)) continue;
             if(dist < bestld) { bestld = dist; bestloot = drops[i].idx; }
         }
-        // nearest of monster/loot wins; the world occludes everything behind it
-        if(best && bestd < worldd && bestd <= bestld) { r.kind = 2; r.mon = best; }
+        // nearest of monster/npc/loot wins; the world occludes everything behind it
+        if(bestnpc >= 0 && bestd < worldd && bestd <= bestld) { r.kind = 3; r.npci = bestnpc; }
+        else if(best && bestd < worldd && bestd <= bestld) { r.kind = 2; r.mon = best; }
         else if(bestloot >= 0 && bestld < worldd) { r.kind = 1; r.lootidx = bestloot; }
         return r;
     }
@@ -223,8 +236,8 @@ namespace game
             }
             else
             {
-                if(rpg::autoattacking() || rpg::selectedtarget() >= 0) conoutf("rpg: auto-attack stopped");
-                rpg::selecttarget(-1); rpg::setautoattack(false);
+                if(rpg::autoattacking() || rpg::selectedtarget() >= 0 || rpg::selectednpc() >= 0) conoutf("rpg: auto-attack stopped");
+                rpg::selecttarget(-1); rpg::selectnpc(-1); rpg::setautoattack(false);
             }
         }
         else
@@ -234,19 +247,35 @@ namespace game
                 rpg::selecttarget(pk.mon->clientnum);
                 conoutf("rpg: selected '%s' (%d/%d hp)", pk.mon->name, pk.mon->health, pk.mon->maxhealth);
             }
+            else if(pk.kind == 3 && pk.npci >= 0)
+            {
+                const rpg::npcdef *nd = rpg::npcat(pk.npci);
+                rpg::selectnpc(pk.npci);
+                rpg::setautoattack(false);
+                conoutf("rpg: selected '%s'", nd ? nd->name : "npc");
+            }
             else if(pk.kind == 1)
             {
                 conoutf("rpg: loot here - walk over it to pick it up");
             }
             else
             {
-                if(rpg::selectedtarget() >= 0) conoutf("rpg: deselected");
-                rpg::selecttarget(-1); rpg::setautoattack(false);
+                if(rpg::selectedtarget() >= 0 || rpg::selectednpc() >= 0) conoutf("rpg: deselected");
+                rpg::selecttarget(-1); rpg::selectnpc(-1); rpg::setautoattack(false);
             }
         }
     }
     // "D" signature: acts on press only; the release re-fire is a no-op by design.
     ICOMMAND(rpgclick, "Di", (int *down, int *button), { if(*down) rpg_doclick(*button); });
+    // Quest chain v1: talk to the selected NPC (F key on RPG maps). The server
+    // runs the dialogue state machine; right-click stays auto-attack (never talk).
+    ICOMMAND(rpgtalk, "", (),
+    {
+        if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE) return;
+        int ni = rpg::selectednpc();
+        if(ni < 0) { conoutf("rpg: select someone to talk to first (left-click)"); return; }
+        addmsg(N_RPG_TALK, "ri", ni);
+    });
     ICOMMAND(rpgcleartarget, "", (), rpg::cleartargeting());
     // --- TEST-ONLY scaffolding (mouse & targeting v1 harness) ---
     // The headless harness cannot move the OS pointer, so these drive the same
@@ -2386,6 +2415,22 @@ namespace game
                     else if(player1->health > maxhp) player1->health = maxhp;
                     player1->maxhealth = maxhp;
                 }
+                break;
+            }
+            // --- RPG: Shattered Shield quest chain v1 (additive) ---
+            case N_RPG_QMSG:
+            {
+                string msg;
+                getstring(msg, p);
+                // quest dialogue / event lines print as "rpg: " lines, so the
+                // chat box System tab picks them up via the existing tap.
+                conoutf("rpg: %s", msg);
+                break;
+            }
+            case N_RPG_QUEST:
+            {
+                int qid = getint(p), st = getint(p), kills = getint(p), need = getint(p);
+                rpg::setclientquest(qid, st, kills, need);
                 break;
             }
 

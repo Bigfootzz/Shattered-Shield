@@ -320,6 +320,17 @@ namespace game
             renderplayer(d, getplayermodelinfo(d), team, fade, mainpass);
         }
         if(isthirdperson() && !followingplayer() && (player1->state!=CS_DEAD || !hidedead)) renderplayer(player1, getplayermodelinfo(player1), (teamskins || m_teammode) && !player1->isInfected() ? 1 : 0, player1->state==CS_DEAD? 1: 0.3, mainpass);
+        // --- RPG: Shattered Shield quest chain v1 (additive) ---
+        // NPC quest givers are static data (src/rpg), not entities: idle each
+        // one's model at its map position on RPG maps only. NULL light gets
+        // proper world lighting via lightreaching.
+        if(rpg::mapactive(getclientmap()))
+            for(int ni = 0; ni < rpg::npccount(); ni++)
+            {
+                const rpg::npcdef *nd = rpg::npcat(ni);
+                if(nd && nd->model && nd->model[0])
+                    rendermodel(NULL, nd->model, ANIM_IDLE|ANIM_LOOP, vec(nd->x, nd->y, nd->z), nd->yaw, 0);
+            }
         rendermovables();
         entities::renderentities();
         renderbouncers();

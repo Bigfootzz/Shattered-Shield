@@ -1878,6 +1878,17 @@ namespace game
         glColor4f(1, 1, 1, 1);
         drawquad(x, y, w, h, u0, v0, u1, v1, false, false);
     }
+    // Tinted solid quad via the 1x1 white texture: the HUD pipeline needs a
+    // bound texture for quads to rasterize (bare glVertex quads silently fail
+    // in drawrpgtarget's GL state), so solid bars go through this helper.
+    static void rpg_solidquad(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f)
+    {
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/blank.png")->id);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(r, g, b, a);
+        drawquad(x, y, w, h, 0, 0, 1, 1, false, false);
+        glColor4f(1, 1, 1, 1);
+    }
 
     // HUD text containment (user fix, Oct 19): draw strip text at an explicit
     // pixel height sized to its section (health recess, slot, hint line) so
@@ -2153,6 +2164,23 @@ namespace game
     void drawrpgtarget(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
+        float X = w*1800.0f/h;
+        float cx = X/2;
+        // NPC selection (quest chain v1): name + full gold bar + talk hint.
+        // NPCs are static data, not entities, so there is no clientnum to resolve.
+        int npci = rpg::selectednpc();
+        if(npci >= 0)
+        {
+            const rpg::npcdef *nd = rpg::npcat(npci);
+            if(!nd) { rpg::selectnpc(-1); return; }
+            float bw = 420.0f, bh = 20.0f, bx = cx - bw/2, by = 104.0f;
+            rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
+            rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
+            rpg_solidquad(bx, by, bw, bh, 0.95f, 0.75f, 0.25f, 1.0f); // NPC gold, full
+            rpg_hudtextc(nd->name, cx, 76, 40.0f);
+            rpg_hudtextc("Press F to talk", cx, 148, 26.0f);
+            return;
+        }
         int cn = rpg::selectedtarget();
         if(cn < 0) return;
         fpsent *d = NULL;
@@ -2162,9 +2190,6 @@ namespace game
             if(t && t->clientnum == cn) { d = t; break; }
         }
         if(!d || d->state == CS_DEAD) return;
-        float X = w*1800.0f/h;
-        float cx = X/2;
-        rpg_hudtextc(d->name, cx, 76, 40.0f);
         float bw = 420.0f, bh = 20.0f, bx = cx - bw/2, by = 104.0f;
         float hpf = d->maxhealth > 0 ? clamp(float(d->health)/float(d->maxhealth), 0.0f, 1.0f) : 0;
         float fr = 0.85f, fg = 0.12f, fb = 0.10f; // hostile red
@@ -2173,9 +2198,29 @@ namespace game
             fr = 0.95f; fg = 0.75f; fb = 0.25f;   // NPC gold
             if(d->ai.type == ai::AI_TYPE_NONE) { fr = 0.35f; fg = 0.90f; fb = 0.40f; } // player green
         }
-        rpg_fillrect(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
-        rpg_fillrect(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
-        if(hpf > 0) rpg_fillrect(bx, by, bw*hpf, bh, fr, fg, fb, 1.0f);
+        rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
+        rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
+        if(hpf > 0) rpg_solidquad(bx, by, bw*hpf, bh, fr, fg, fb, 1.0f);
+        rpg_hudtextc(d->name, cx, 76, 40.0f);
+    }
+
+    // Quest tracker (quest chain v1): current quest name + objective progress,
+    // tucked under the radar in the upper right. Only while a quest is ACTIVE.
+    void drawrpgquest(int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        int qid = 0, st = -1, kills = 0, need = 0;
+        if(!rpg::getclientquest(qid, st, kills, need)) return;
+        const rpg::questdef &qd = rpg::quest(qid);
+        if(!qd.name || !qd.name[0]) return;
+        float X = w*1800.0f/h;
+        int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
+        float ty = rs + rs/10 + 36.0f;
+        float nmw = float(strlen(qd.name))*0.5f*30.0f;
+        rpg_chattext(qd.name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
+        defformatstring(prog)("%d/%d", kills, need);
+        float pgw = float(strlen(prog))*0.5f*26.0f;
+        rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
     }
 
     void drawhudicons(fpsent *d, int w, int h)
@@ -2675,12 +2720,15 @@ namespace game
         // (When the quest system lands, quest mobs come out of the hostile pass.)
         n = rpg::questmobmarkers(m, 64);
         loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, qsize, 1.0f, 0.50f, 0.10f); }
-        // regular hostiles: red, enumerated live from AI state
+        // hostiles, enumerated live from AI state: current quest targets draw
+        // orange and larger (quest chain v1, via the client quest cache);
+        // everything else stays red.
         loopv(clients)
         {
             fpsent *e = clients[i];
             if(!e || e->ai.type != ai::AI_TYPE_MONSTER || e->state != CS_ALIVE) continue;
-            rpg_drawmarker(d, x, y, s, e->o, msize, 1.0f, 0.20f, 0.15f);
+            if(rpg::isquestmobtarget(e->name)) rpg_drawmarker(d, x, y, s, e->o, qsize, 1.0f, 0.50f, 0.10f);
+            else rpg_drawmarker(d, x, y, s, e->o, msize, 1.0f, 0.20f, 0.15f);
         }
         // gathering nodes: green
         n = rpg::gathermarkers(m, 64);
@@ -2788,7 +2836,7 @@ namespace game
             if(d->state!=CS_SPECTATOR) drawhudicons(d, w, h);
             if(d->state!=CS_SPECTATOR) drawrpghud(d, w, h);
             if(d->state!=CS_SPECTATOR) drawrpgchat(d, w, h);
-            if(d->state!=CS_SPECTATOR) { drawrpgtarget(w, h); drawrpgcursor(w, h); }
+            if(d->state!=CS_SPECTATOR) { drawrpgtarget(w, h); drawrpgquest(w, h); drawrpgcursor(w, h); }
             if(cmode) cmode->drawhud(d, w, h);
         }
 

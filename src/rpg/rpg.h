@@ -125,11 +125,61 @@ namespace rpg
     int questmobmarkers(float *out, int maxout); // 0 today: no quest system yet
     int gathermarkers(float *out, int maxout);    // 0 today: no gathering yet
 
+    // --- quest chain v1: NPC quest givers (static data, shared client+server) ---
+    // NPCs are NOT entities: one static table both sides read. The client
+    // renders each NPC's model idling at its map position, the pick code
+    // tests the same cylinders, the radar reads the same positions, and the
+    // server range-checks talk requests against the same coordinates.
+    struct npcdef
+    {
+        const char *name;   // display name ("Elder Maren")
+        const char *model;  // model path ("playermodels/peasant_female")
+        float x, y, z;      // feet position on the map
+        float yaw;          // facing (degrees, engine yaw convention)
+    };
+    int npccount();
+    const npcdef *npcat(int i); // NULL when out of range
+
+    // --- quest chain v1: quest definitions (static, shared) ---
+    enum { QUEST_NONE = 0, QUEST_CULL = 1, QUEST_WAVES = 2, QUEST_CHAMPION = 3, QUEST_DONE = 4 };
+    enum { QSTATE_OFFERED = 0, QSTATE_ACTIVE = 1, QSTATE_COMPLETE = 2 };
+    struct questdef
+    {
+        const char *name;        // "Cull the Undead"
+        const char *objective;   // "Slay 5 zombies"
+        const char *mobname;     // monster display name counted ("zombie"), or champion name
+        int need;                // kills required
+        int xpreward;            // XP on turn-in
+        const char *itemreward;  // item id granted on turn-in, or NULL
+    };
+    const questdef &quest(int qid); // qid 1..3; QUEST_NONE/QUEST_DONE return an empty def
+
+    // --- quest chain v1: server-side per-character state (persisted in rpg.db) ---
+    // chainpos: next quest id to offer (1..3), or QUEST_DONE when the chain
+    // is fully turned in. queststate: QSTATE_* or -1 when never offered.
+    int chainpos(const char *name);
+    int queststate(const char *name, int qid);
+    int questkills(const char *name, int qid);
+    void questsetoffered(const char *name, int qid);
+    void questsetactive(const char *name, int qid);   // (re)starts: kills reset to 0
+    void questaddkill(const char *name, int qid);     // kills++, write-through
+    void questsetcomplete(const char *name, int qid);
+    // Called from the server kill path for every monster kill by a player.
+    // Returns the quest id when the kill counted toward an active quest, else 0.
+    // Server-validated: only counts while that quest is ACTIVE; champion kills
+    // only count when the victim is the tracked champion clientnum.
+    int questonkill(const char *name, int targetclientnum, bool ismonster);
+    // Champion tracking (server-side session state; the champion is a real
+    // monster client spawned by the quest system, not a test spawn).
+    void setchampioncn(int cn);
+    int championcn();          // -1 when none tracked
+    void clearchampioncn();
+
     // --- mouse & targeting v1 (milestone step 6): client presentation state ---
     // Plain data only (no engine symbols) so the server link is unaffected.
     // Selection + auto-attack are client intent; the server re-validates every
-    // cast exactly as before. NPCs have no system yet: the pick code treats a
-    // (currently empty) NPC hook alongside monsters so they slot in later.
+    // cast exactly as before. NPC selection rides alongside monster selection
+    // (quest chain v1): selecting one clears the other.
     enum { HOVER_DEFAULT = 0, HOVER_LOOT = 1, HOVER_HOSTILE = 2 };
     void cursoraccum(int dx, int dy);              // add relative motion to the free cursor
     void cursorget(float &x, float &y);            // raw accumulated cursor pos (screen px)
@@ -137,6 +187,16 @@ namespace rpg
     void cursorclamp(float &x, float &y, int w, int h);
     int  hoverstate(); void sethoverstate(int s);  // HOVER_* above
     int  selectedtarget(); void selecttarget(int clientnum); // -1 = none
+    int  selectednpc(); void selectnpc(int idx);             // -1 = none (quest chain v1)
     bool autoattacking(); void setautoattack(bool on);
     void cleartargeting();                          // deselect + stop auto-attack (map change, death)
+
+    // --- quest chain v1: client presentation caches (never authoritative) ---
+    // Active-quest sync from the server (N_RPG_QUEST). Drives the on-screen
+    // quest tracker and the radar's orange quest-mob split.
+    void setclientquest(int qid, int state, int kills, int need);
+    bool getclientquest(int &qid, int &state, int &kills, int &need);
+    // True when a monster with this display name is a current quest target.
+    // Quest 1/2 count any zombie; quest 3 counts only the Rotting Champion.
+    bool isquestmobtarget(const char *monname);
 }
