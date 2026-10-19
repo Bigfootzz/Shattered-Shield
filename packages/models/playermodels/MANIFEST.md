@@ -204,3 +204,34 @@ details.
 on skin); garments show only outfit textures. Verified via re-import renders
 (stand + attack for rangers, stand for peasants) and headless client boot
 (zero IQM errors).
+
+## GARMENT-REFIT FIX (2026-10-18/19, user feedback)
+
+**Feedback:** armor floated "just in front of" the body — the skin-fix
+deformation transfer left garments ~7–28mm proud of the skin (median
+inner-shell gap; max ~84mm on hood/boots).
+
+**Fix:** surface refit applied directly to the final char.iqm rest pose, in
+place (POSITION/NORMAL/TANGENT arrays only; joints/weights/UVs/triangles
+byte-identical, verified by diff):
+1. Nearest-point projection of each garment vert onto the (body + hair)
+   surface; inner-shell verts (normal-alignment, smooth falloff) seated at
+   3.4mm clearance along the surface normal; displacement field smoothed over
+   mesh connectivity; 3 passes per character.
+2. Anti-clip clamp with raycast parity guard (pushes truly-inside verts to
+   0.85mm; rejects concave-region false positives).
+3. Recomputed smooth normals + tangents for ALL meshes (files carried
+   mostly-zero normals — latent lighting bug, engine uses them verbatim).
+
+**Winding note (important for future tooling):** the file's triangle winding
+is inverted vs Blender convention (geometric normals point inward); the
+engine's Y-negation on load restores correct winding in-game. The refit uses
+outward = negated BVH face normal. A first attempt seated garments INTO the
+body and was caught by numeric verification before rendering.
+
+**Result:** inner-shell medians 3.3–3.5mm on all garments, all four
+characters; clipping nearly eliminated. Verified by 8 re-import renders
+(tight front/side upper-body for rangers, stands for peasants, attack + walk
+posed for ranger_male — armor stays seated in motion) and a clean headless
+engine boot. Build scripts: /tmp/fit/{refit.py,verify_fit.py,render.py,iqm.py}
+(scratch; reproduce from these notes if needed).

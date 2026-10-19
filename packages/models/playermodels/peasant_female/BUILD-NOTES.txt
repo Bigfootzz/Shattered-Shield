@@ -50,3 +50,10 @@ SKIN-FIT FIX (2026-10-18):
   transfer from body during canonical rebind.
 - Rebuilt char.iqm + anims; updated iqm.cfg (removed skins for deleted meshes).
 - Verified: clean skin renders, zero IQM errors on headless boot.
+
+GARMENT-REFIT FIX (2026-10-18/19):
+- Refit garments flush: inner-shell gaps seated from ~7-28mm to ~3.3-3.5mm
+  median (3.4mm target clearance); anti-clip clamp; 3 passes.
+- Recomputed normals + tangents for all meshes (were mostly zero).
+- char.iqm patched in place (POS/NRM/TAN only); joints/weights/UVs/tris unchanged.
+- Verified: tight front/side renders + posed attack/walk (ranger_male), clean headless boot.
