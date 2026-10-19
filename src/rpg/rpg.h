@@ -175,6 +175,23 @@ namespace rpg
     bool togglemute(const char *owner, const char *target); // returns true when now muted
     bool isblocked(const char *owner, const char *target);
     bool toggleblock(const char *owner, const char *target); // returns true when now blocked
+    // --- clan system v1 (Oct 19): persisted in rpg.db, server-validated ---
+    // ranks: 0 = Leader, 1 = Officer, 2 = Member
+    enum { CLAN_RANK_LEADER = 0, CLAN_RANK_OFFICER = 1, CLAN_RANK_MEMBER = 2 };
+    int clan_create(const char *name, const char *tag, const char *leader); // returns id, -1 if name taken
+    int clan_of(const char *name); // clan id, 0 if none
+    int clan_rank(const char *name); // rank, -1 if none
+    bool clan_info(int id, char *name, char *tag, char *leader); // true if found
+    bool clan_addmember(int id, const char *name, int rank);
+    void clan_removemember(const char *name);
+    bool clan_setrank(const char *name, int rank);
+    void clan_disband(int id);
+    int clan_membercount(int id);
+    void clan_tagof(const char *name, char *tag); // empty if none
+    int clan_memberlist(int id, char names[][64], int *ranks, int max); // returns count
+    // --- clan system v1: client presentation cache (never authoritative) ---
+    void setclientclan(int id, int rank, const char *name, const char *tag);
+    bool getclientclan(int &id, int &rank, char *name, char *tag); // true when in a clan
     // Champion tracking (server-side session state; the champion is a real
     // monster client spawned by the quest system, not a test spawn).
     void setchampioncn(int cn);

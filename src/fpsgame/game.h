@@ -692,6 +692,9 @@ enum
     N_RPG_TALK,    // c->s: talk/accept/turn-in with an NPC (npc index)
     N_RPG_QMSG,    // s->c: quest dialogue/event line for the System tab (string)
     N_RPG_QUEST,   // s->c: active-quest sync (qid, state, kills, need)
+    // Shattered Shield clan system v1 (additive, Oct 19)
+    N_RPG_CLANCHAT, // s->c: clan chat line (sender cn, tag, text)
+    N_RPG_CLAN,     // s->c: clan membership sync (clan id, rank, name, tag; id 0 = none)
     NUMSV
 };
 
@@ -727,7 +730,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
     N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
-    N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5,
+    N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0,
     -1
 };
 

@@ -155,6 +155,17 @@ namespace rpg
                 "owner TEXT NOT NULL,"
                 "target TEXT NOT NULL,"
                 "PRIMARY KEY(owner, target))");
+        // --- clan system v1 (Oct 19) ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_clans("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "name TEXT NOT NULL UNIQUE,"
+                "tag TEXT NOT NULL,"
+                "leader TEXT NOT NULL,"
+                "created INTEGER NOT NULL DEFAULT 0)");
+        execsql("CREATE TABLE IF NOT EXISTS rpg_clan_members("
+                "clan_id INTEGER NOT NULL,"
+                "name TEXT NOT NULL PRIMARY KEY,"
+                "rank INTEGER NOT NULL DEFAULT 2)");
         conoutf("rpg: character database open at %s (sqlite %s)", (const char *)dbfile, sqlite3_libversion());
     }
 
@@ -1051,6 +1062,153 @@ namespace rpg
     bool togglemute(const char *owner, const char *target) { return togglerow("rpg_mutes", owner, target); }
     bool isblocked(const char *owner, const char *target) { return hasrow("rpg_blocks", owner, target); }
     bool toggleblock(const char *owner, const char *target) { return togglerow("rpg_blocks", owner, target); }
+
+    // --- clan system v1: persisted membership ---
+    int clan_create(const char *name, const char *tag, const char *leader)
+    {
+        if(!db || !name || !name[0] || !tag || !tag[0] || !leader || !leader[0]) return -1;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT INTO rpg_clans(name, tag, leader, created) VALUES(?,?,?,?)", -1, &st, NULL) != SQLITE_OK) return -1;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, tag, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 3, leader, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
+        int rc = sqlite3_step(st);
+        sqlite3_finalize(st);
+        if(rc != SQLITE_DONE) return -1; // name taken (UNIQUE) or other error
+        int id = (int)sqlite3_last_insert_rowid(db);
+        clan_addmember(id, leader, CLAN_RANK_LEADER);
+        return id;
+    }
+    int clan_of(const char *name)
+    {
+        if(!db || !name || !name[0]) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT clan_id FROM rpg_clan_members WHERE name=?", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        int id = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        sqlite3_finalize(st);
+        return id;
+    }
+    int clan_rank(const char *name)
+    {
+        if(!db || !name || !name[0]) return -1;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT rank FROM rpg_clan_members WHERE name=?", -1, &st, NULL) != SQLITE_OK) return -1;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        int r = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : -1;
+        sqlite3_finalize(st);
+        return r;
+    }
+    bool clan_info(int id, char *name, char *tag, char *leader)
+    {
+        if(!db || id <= 0) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT name, tag, leader FROM rpg_clans WHERE id=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok)
+        {
+            if(name) copystring(name, (const char *)sqlite3_column_text(st, 0));
+            if(tag) copystring(tag, (const char *)sqlite3_column_text(st, 1));
+            if(leader) copystring(leader, (const char *)sqlite3_column_text(st, 2));
+        }
+        sqlite3_finalize(st);
+        return ok;
+    }
+    bool clan_addmember(int id, const char *name, int rank)
+    {
+        if(!db || id <= 0 || !name || !name[0]) return false;
+        if(clan_of(name) != 0) return false; // one clan per character
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO rpg_clan_members(clan_id, name, rank) VALUES(?,?,?)", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 3, rank);
+        int rc = sqlite3_step(st);
+        sqlite3_finalize(st);
+        return rc == SQLITE_DONE;
+    }
+    void clan_removemember(const char *name)
+    {
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "DELETE FROM rpg_clan_members WHERE name=?", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+    bool clan_setrank(const char *name, int rank)
+    {
+        if(!db || !name || !name[0] || rank < 0 || rank > 2) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE rpg_clan_members SET rank=? WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, rank);
+        sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    void clan_disband(int id)
+    {
+        if(!db || id <= 0) return;
+        defformatstring(s1)("DELETE FROM rpg_clan_members WHERE clan_id=%d", id);
+        defformatstring(s2)("DELETE FROM rpg_clans WHERE id=%d", id);
+        execsql(s1); execsql(s2);
+    }
+    int clan_membercount(int id)
+    {
+        if(!db || id <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM rpg_clan_members WHERE clan_id=?", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_int(st, 1, id);
+        int n = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        sqlite3_finalize(st);
+        return n;
+    }
+    void clan_tagof(const char *name, char *tag)
+    {
+        if(tag) tag[0] = '\0';
+        if(!db || !name || !name[0] || !tag) return;
+        int id = clan_of(name);
+        if(id <= 0) return;
+        clan_info(id, NULL, tag, NULL);
+    }
+    int clan_memberlist(int id, char names[][64], int *ranks, int max)
+    {
+        if(!db || id <= 0 || !names || max <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT name, rank FROM rpg_clan_members WHERE clan_id=? ORDER BY rank, name", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_int(st, 1, id);
+        int n = 0;
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+            if(ranks) ranks[n] = sqlite3_column_int(st, 1);
+            n++;
+        }
+        sqlite3_finalize(st);
+        return n;
+    }
+
+    // --- clan system v1: client presentation cache ---
+    static int clclan_id = 0, clclan_rank = -1;
+    static string clclan_name, clclan_tag;
+    void setclientclan(int id, int rank, const char *name, const char *tag)
+    {
+        clclan_id = id; clclan_rank = rank;
+        copystring(clclan_name, name ? name : "");
+        copystring(clclan_tag, tag ? tag : "");
+    }
+    bool getclientclan(int &id, int &rank, char *name, char *tag)
+    {
+        id = clclan_id; rank = clclan_rank;
+        if(name) copystring(name, clclan_name);
+        if(tag) copystring(tag, clclan_tag);
+        return clclan_id > 0;
+    }
 
     // --- quest chain v1: client presentation caches (never authoritative) ---
     static int clquest_id = QUEST_NONE, clquest_state = -1, clquest_kills = 0, clquest_need = 0;

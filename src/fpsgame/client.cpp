@@ -2433,6 +2433,31 @@ namespace game
                 rpg::setclientquest(qid, st, kills, need);
                 break;
             }
+            case N_RPG_CLANCHAT:
+            {
+                // clan channel: [TAG] Sender: text -> Clan tab (green)
+                int scn = getint(p);
+                string tag, text;
+                getstring(tag, p);
+                getstring(text, p);
+                filtertext(text, text);
+                fpsent *d = getclient(scn);
+                if(d)
+                {
+                    if(tag[0]) conoutf(CON_TEAMCHAT, "[%s] %s:\\f1 %s", tag, colorname(d), text);
+                    else conoutf(CON_TEAMCHAT, "%s:\\f1 %s", colorname(d), text);
+                }
+                break;
+            }
+            case N_RPG_CLAN:
+            {
+                int id = getint(p), rank = getint(p);
+                string cname, ctag;
+                getstring(cname, p);
+                getstring(ctag, p);
+                rpg::setclientclan(id, rank, cname, ctag);
+                break;
+            }
 
             case N_BUY:
             {

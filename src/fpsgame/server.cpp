@@ -865,6 +865,48 @@ namespace server
         n--;
         return true;
     }
+    // --- clan system v1: in-memory invites (membership persists in rpg.db) ---
+    struct rpg_claninvite { int clan_id; string target; string inviter; };
+    static vector<rpg_claninvite> rpg_claninvites;
+    static void rpg_syncclan(clientinfo *cq)
+    {
+        if(!cq) return;
+        int id = rpg::clan_of(cq->name);
+        int rank = id > 0 ? rpg::clan_rank(cq->name) : -1;
+        string cname, ctag;
+        cname[0] = ctag[0] = '\0';
+        if(id > 0) rpg::clan_info(id, cname, ctag, NULL);
+        sendf(cq->clientnum, 1, "ri3ss", N_RPG_CLAN, id, rank, cname, ctag);
+    }
+    static void rpg_clan_broadcast(int clan_id, const char *line, clientinfo *except = NULL)
+    {
+        if(clan_id <= 0 || !line) return;
+        char names[32][64]; int ranks[32];
+        int n = rpg::clan_memberlist(clan_id, names, ranks, 32);
+        loopi(n)
+        {
+            clientinfo *m = rpg_findclient(names[i]);
+            if(m && m != except) rpg_qmsg(m, line);
+        }
+    }
+    static void rpg_clan_roster(clientinfo *cq)
+    {
+        int id = rpg::clan_of(cq->name);
+        if(id <= 0) { rpg_qmsg(cq, "You are not in a clan. (/clancreate <name> <tag>)"); return; }
+        string cname, ctag, cleader;
+        rpg::clan_info(id, cname, ctag, cleader);
+        defformatstring(head)("Clan %s [%s] (leader: %s):", cname, ctag, cleader);
+        rpg_qmsg(cq, head);
+        char names[32][64]; int ranks[32];
+        int n = rpg::clan_memberlist(id, names, ranks, 32);
+        const char *rnames[] = { "Leader", "Officer", "Member" };
+        loopi(n)
+        {
+            bool online = rpg_findclient(names[i]) != NULL;
+            defformatstring(ml)("  %s — %s (%s)", names[i], rnames[clamp(ranks[i], 0, 2)], online ? "online" : "offline");
+            rpg_qmsg(cq, ml);
+        }
+    }
 
     static void rpg_syncquest(clientinfo *cq); // quest chain v1, defined below
     void rpg_talk(clientinfo *cq, int npcidx); // quest chain v1, defined below
@@ -2887,6 +2929,8 @@ namespace server
         {
             rpg_qmsg(cq, "Party: /pinvite <name> /paccept /pdecline /pleave /proster");
             rpg_qmsg(cq, "Safety: /mute <name> (toggle) /block <name> (toggle) /report <name> [reason]");
+            rpg_qmsg(cq, "Clan: /clancreate <name> <tag> /claninvite <name> /clanaccept /clandecline");
+            rpg_qmsg(cq, "Clan: /clanleave /clankick <name> /clanpromote|/clandemote <name> /clandisband /clanroster");
             return true;
         }
         // ---- /pinvite ----
@@ -2976,6 +3020,155 @@ namespace server
         if(!strcmp(cmd, "/proster") || !strcmp(cmd, "/party"))
         {
             rpg_party_roster(cq);
+            return true;
+        }
+        // ---- /clancreate ----
+        if(!strcmp(cmd, "/clancreate"))
+        {
+            // /clancreate <name> <tag>
+            string cname, ctag;
+            const char *sp2 = strchr(args, ' ');
+            if(!sp2) { rpg_qmsg(cq, "Usage: /clancreate <name> <tag>  (tag 2-5 chars)"); return true; }
+            copystring(cname, args, min(int(sp2 - args) + 1, (int)sizeof(cname)));
+            copystring(ctag, sp2 + 1);
+            if(rpg::clan_of(cq->name) != 0) { rpg_qmsg(cq, "You are already in a clan."); return true; }
+            if(strlen(cname) < 3 || strlen(cname) > 32) { rpg_qmsg(cq, "Clan name must be 3-32 chars."); return true; }
+            if(strlen(ctag) < 2 || strlen(ctag) > 5) { rpg_qmsg(cq, "Clan tag must be 2-5 chars."); return true; }
+            int id = rpg::clan_create(cname, ctag, cq->name);
+            if(id < 0) { rpg_qmsg(cq, "That clan name is taken."); return true; }
+            defformatstring(m)("Clan %s [%s] founded. You are the Leader.", cname, ctag);
+            rpg_qmsg(cq, m);
+            conoutf("rpg: clan #%d '%s' [%s] created by %s", id, cname, ctag, cq->name);
+            rpg_syncclan(cq);
+            return true;
+        }
+        // ---- /claninvite ----
+        if(!strcmp(cmd, "/claninvite"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /claninvite <name>"); return true; }
+            int id = rpg::clan_of(cq->name);
+            if(id <= 0) { rpg_qmsg(cq, "You are not in a clan."); return true; }
+            int rk = rpg::clan_rank(cq->name);
+            if(rk != rpg::CLAN_RANK_LEADER && rk != rpg::CLAN_RANK_OFFICER) { rpg_qmsg(cq, "Only Leader/Officer can invite."); return true; }
+            clientinfo *t = rpg_findclient(args);
+            if(!t) { defformatstring(m)("No player named '%s' is online.", args); rpg_qmsg(cq, m); return true; }
+            if(rpg::clan_of(t->name) != 0) { rpg_qmsg(cq, "They are already in a clan."); return true; }
+            loopv(rpg_claninvites) if(rpg_claninvites[i].clan_id == id && !strcmp(rpg_claninvites[i].target, t->name)) { rpg_qmsg(cq, "Invite already pending."); return true; }
+            rpg_claninvite inv; inv.clan_id = id; copystring(inv.target, t->name); copystring(inv.inviter, cq->name);
+            rpg_claninvites.add(inv);
+            string cname, ctag; rpg::clan_info(id, cname, ctag, NULL);
+            defformatstring(m)("Clan invite sent to %s.", t->name); rpg_qmsg(cq, m);
+            defformatstring(im)("%s invites you to clan %s [%s]. (/clanaccept or /clandecline)", cq->name, cname, ctag);
+            rpg_qmsg(t, im);
+            return true;
+        }
+        // ---- /clanaccept ----
+        if(!strcmp(cmd, "/clanaccept"))
+        {
+            if(rpg::clan_of(cq->name) != 0) { rpg_qmsg(cq, "You are already in a clan."); return true; }
+            loopv(rpg_claninvites) if(!strcmp(rpg_claninvites[i].target, cq->name))
+            {
+                int id = rpg_claninvites[i].clan_id;
+                rpg_claninvites.remove(i);
+                if(!rpg::clan_addmember(id, cq->name, rpg::CLAN_RANK_MEMBER)) { rpg_qmsg(cq, "Could not join (already in a clan?)."); return true; }
+                string cname, ctag; rpg::clan_info(id, cname, ctag, NULL);
+                defformatstring(m)("%s joined the clan.", cq->name);
+                rpg_clan_broadcast(id, m);
+                defformatstring(w)("Welcome to %s [%s]!", cname, ctag); rpg_qmsg(cq, w);
+                rpg_syncclan(cq);
+                return true;
+            }
+            rpg_qmsg(cq, "No pending clan invite.");
+            return true;
+        }
+        // ---- /clandecline ----
+        if(!strcmp(cmd, "/clandecline"))
+        {
+            loopv(rpg_claninvites) if(!strcmp(rpg_claninvites[i].target, cq->name))
+            {
+                clientinfo *inv = rpg_findclient(rpg_claninvites[i].inviter);
+                rpg_claninvites.remove(i);
+                if(inv) { defformatstring(m)("%s declined your clan invite.", cq->name); rpg_qmsg(inv, m); }
+                rpg_qmsg(cq, "Invite declined.");
+                return true;
+            }
+            rpg_qmsg(cq, "No pending clan invite.");
+            return true;
+        }
+        // ---- /clanleave ----
+        if(!strcmp(cmd, "/clanleave"))
+        {
+            int id = rpg::clan_of(cq->name);
+            if(id <= 0) { rpg_qmsg(cq, "You are not in a clan."); return true; }
+            int rk = rpg::clan_rank(cq->name);
+            if(rk == rpg::CLAN_RANK_LEADER) { rpg_qmsg(cq, "Leaders cannot leave — /clandisband or promote someone first."); return true; }
+            rpg::clan_removemember(cq->name);
+            defformatstring(m)("%s left the clan.", cq->name);
+            rpg_clan_broadcast(id, m);
+            rpg_qmsg(cq, "You left the clan.");
+            rpg_syncclan(cq);
+            return true;
+        }
+        // ---- /clankick ----
+        if(!strcmp(cmd, "/clankick"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /clankick <name>"); return true; }
+            int id = rpg::clan_of(cq->name);
+            if(id <= 0) { rpg_qmsg(cq, "You are not in a clan."); return true; }
+            int rk = rpg::clan_rank(cq->name);
+            if(rk != rpg::CLAN_RANK_LEADER && rk != rpg::CLAN_RANK_OFFICER) { rpg_qmsg(cq, "Only Leader/Officer can kick."); return true; }
+            if(rpg::clan_of(args) != id) { rpg_qmsg(cq, "They are not in your clan."); return true; }
+            int trk = rpg::clan_rank(args);
+            if(trk == rpg::CLAN_RANK_LEADER) { rpg_qmsg(cq, "You cannot kick the Leader."); return true; }
+            if(rk == rpg::CLAN_RANK_OFFICER && trk == rpg::CLAN_RANK_OFFICER) { rpg_qmsg(cq, "Officers cannot kick other Officers."); return true; }
+            rpg::clan_removemember(args);
+            defformatstring(m)("%s was kicked from the clan.", args);
+            rpg_clan_broadcast(id, m);
+            clientinfo *t = rpg_findclient(args);
+            if(t) { rpg_qmsg(t, "You were kicked from the clan."); rpg_syncclan(t); }
+            return true;
+        }
+        // ---- /clanpromote /clandemote ----
+        if(!strcmp(cmd, "/clanpromote") || !strcmp(cmd, "/clandemote"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /clanpromote|/clandemote <name>"); return true; }
+            int id = rpg::clan_of(cq->name);
+            if(id <= 0) { rpg_qmsg(cq, "You are not in a clan."); return true; }
+            if(rpg::clan_rank(cq->name) != rpg::CLAN_RANK_LEADER) { rpg_qmsg(cq, "Only the Leader can change ranks."); return true; }
+            if(rpg::clan_of(args) != id) { rpg_qmsg(cq, "They are not in your clan."); return true; }
+            if(!strcmp(args, cq->name)) { rpg_qmsg(cq, "You cannot change your own rank."); return true; }
+            int trk = rpg::clan_rank(args);
+            int nrk = !strcmp(cmd, "/clanpromote") ? trk - 1 : trk + 1;
+            if(nrk < rpg::CLAN_RANK_OFFICER || nrk > rpg::CLAN_RANK_MEMBER) { rpg_qmsg(cq, "Nothing to do (already at that rank, or cannot promote to Leader)."); return true; }
+            rpg::clan_setrank(args, nrk);
+            const char *rnames[] = { "Leader", "Officer", "Member" };
+            defformatstring(m)("%s is now %s.", args, rnames[nrk]);
+            rpg_clan_broadcast(id, m);
+            clientinfo *t = rpg_findclient(args);
+            if(t) rpg_syncclan(t);
+            return true;
+        }
+        // ---- /clandisband ----
+        if(!strcmp(cmd, "/clandisband"))
+        {
+            int id = rpg::clan_of(cq->name);
+            if(id <= 0) { rpg_qmsg(cq, "You are not in a clan."); return true; }
+            if(rpg::clan_rank(cq->name) != rpg::CLAN_RANK_LEADER) { rpg_qmsg(cq, "Only the Leader can disband."); return true; }
+            if(strcmp(args, "confirm")) { rpg_qmsg(cq, "Disband the clan? Type /clandisband confirm."); return true; }
+            string cname; rpg::clan_info(id, cname, NULL, NULL);
+            // notify online members first, then wipe
+            char names[32][64]; int n = rpg::clan_memberlist(id, names, NULL, 32);
+            loopi(n) { clientinfo *m = rpg_findclient(names[i]); if(m) { rpg_qmsg(m, "The clan has been disbanded."); rpg_syncclan(m); } }
+            // drop pending invites
+            loopvrev(rpg_claninvites) if(rpg_claninvites[i].clan_id == id) rpg_claninvites.remove(i);
+            rpg::clan_disband(id);
+            conoutf("rpg: clan '%s' disbanded by %s", cname, cq->name);
+            return true;
+        }
+        // ---- /clanroster ----
+        if(!strcmp(cmd, "/clanroster") || !strcmp(cmd, "/clan"))
+        {
+            rpg_clan_roster(cq);
             return true;
         }
         // ---- /mute ----
@@ -3269,6 +3462,7 @@ namespace server
         }
         sendf(cq->clientnum, 1, "riiiss", N_RPG_INV, level, xp, invs, eqs);
         rpg_syncquest(cq); // quest chain v1: tracker + radar stay in sync
+        rpg_syncclan(cq); // clan system v1: membership sync
     }
 
     static void rpg_sendvwep(clientinfo *cq) // broadcast this client's equipped weapon model
@@ -4702,6 +4896,27 @@ namespace server
             case N_SAYTEAM:
             {
                 getstring(text, p);
+                // RPG: Clan tab repoints from teamsay to the real clan channel.
+                // On RPG maps, a clan member's Clan-tab line goes to online clan
+                // members only (with [TAG]); non-members keep stock team behavior.
+                if(rpg::mapactive(smapname))
+                {
+                    int clanid = rpg::clan_of(cq->name);
+                    if(clanid > 0)
+                    {
+                        string ctag; rpg::clan_tagof(cq->name, ctag);
+                        char names[32][64]; int n = rpg::clan_memberlist(clanid, names, NULL, 32);
+                        loopi(n)
+                        {
+                            clientinfo *t = rpg_findclient(names[i]);
+                            if(!t || t->state.state == CS_SPECTATOR) continue;
+                            if(rpg::ismuted(t->name, cq->name)) continue;
+                            sendf(t->clientnum, 1, "riiss", N_RPG_CLANCHAT, cq->clientnum, ctag, text);
+                        }
+                        break;
+                    }
+                    // no clan: fall through to stock team chat
+                }
                 if(!ci || !cq || (ci->state.state==CS_SPECTATOR && !ci->local && ci->privilege < PRIV_MASTER) || !m_teammode || !cq->team[0]) break;
                 loopv(clients)
                 {
