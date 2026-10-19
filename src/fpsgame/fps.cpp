@@ -1851,8 +1851,9 @@ namespace game
         rpg::getclientmana(mana, maxmana);
         float hppct = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
         float mpct = maxmana > 0 ? float(mana) / float(maxmana) : 0;
-        float bx = 60, bw = 420, bh = 30;
-        float by = 1800 - 220;
+        // bar_frame.png is 492x32: draw at native aspect (was 420x30)
+        float bx = 60, bw = 492, bh = 32;
+        float by = 1800 - 260;
         // health bar
         Texture *frame = rpg_loadtex("packages/ui/rpg/hud/bar_frame.png");
         glBindTexture(GL_TEXTURE_2D, frame->id);
@@ -1902,8 +1903,9 @@ namespace game
     {
         if(d->state!=CS_DEAD)
         {
-            // draw guts
-            if(true)
+            // draw guts (RPG: hidden on RPG maps - the RPG HUD bars replace
+            // the FPS readouts there; FPS/battleground modes are untouched)
+            if(!rpg::mapactive(getclientmap()))
             {
                 int guts = (d==player1)? d->guts: lastguts;
                 defformatstring(gutss)("\f1Guts: \f3%d", guts);
