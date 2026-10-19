@@ -884,6 +884,84 @@ namespace server
         conoutf("rpgspawnmonster: '%s' (hp %d) at caster '%s'", mi->name, mi->state.health, caster->name);
     }
     COMMANDN(rpgspawnmonster, rpgspawnmonster_cmd, "iV");
+    // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+    static void rpg_syncinv(clientinfo *cq); // defined with the other inventory ops below
+    // TEST-ONLY debug commands (server console only, like rpgspawnmonster).
+    void rpggive_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 2 || !rpg::connected()) { conoutf("usage: rpggive <name> <itemid> [count]"); return; }
+        const char *name = args[0].getstr(), *itemid = args[1].getstr();
+        int count = numargs >= 3 ? max(args[2].getint(), 1) : 1;
+        if(rpg::additem(name, itemid, count))
+        {
+            conoutf("rpggive: %s +%d %s", name, count, itemid);
+            loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_NONE && !strcmp(clients[i]->name, name)) rpg_syncinv(clients[i]);
+        }
+        else conoutf("rpggive: failed (unknown item or character)");
+    }
+    COMMANDN(rpggive, rpggive_cmd, "ssiV");
+    void rpgforceloot_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 1 || !rpg::connected()) { conoutf("usage: rpgforceloot <itemid> [dist_ahead]"); return; }
+        int id = rpg::finditem(args[0].getstr());
+        if(id < 0) { conoutf("rpgforceloot: unknown item"); return; }
+        float dist = numargs >= 2 ? args[1].getfloat() : 0;
+        clientinfo *caster = NULL;
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
+        }
+        if(!caster) { conoutf("rpgforceloot: no live player"); return; }
+        vec ahead;
+        // test-only: read the local player's facing (in-process listen server)
+        vecfromyawpitch(game::player1 ? game::player1->yaw : 0, 0, 1, 0, ahead);
+        float dx = caster->state.o.x + ahead.x*dist, dy = caster->state.o.y + ahead.y*dist;
+        int idx = rpg::spoilloot(id, dx, dy, caster->state.o.z);
+        rpg::setlootborn(idx, totalmillis);
+        sendf(-1, 1, "ri6", N_RPG_LOOT, idx, id,
+              int(dx*DMF), int(dy*DMF), int(caster->state.o.z*DMF));
+        conoutf("rpgforceloot: drop #%d (%s) at '%s' (%.1f ahead)", idx, rpg::itemname(id), caster->name, dist);
+    }
+    COMMANDN(rpgforceloot, rpgforceloot_cmd, "sfV");
+    // Drives the REAL server dodamage() with a monster as the attacker, so the armor
+    // hook is exercised through the genuine code path (only the monster's decision
+    // to attack is scripted; the damage math, armor absorption and sync are real).
+    void rpgmonsterdmg_cmd(tagval *args, int numargs)
+    {
+        if(numargs < 2 || !rpg::connected()) { conoutf("usage: rpgmonsterdmg <name> <amount>"); return; }
+        const char *name = args[0].getstr();
+        int amount = max(args[1].getint(), 1);
+        clientinfo *victim = NULL, *monster = NULL;
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->state.ai.type == ai::AI_TYPE_NONE && !strcmp(ci->name, name) && ci->state.state == CS_ALIVE) victim = ci;
+            if(ci->state.ai.type == ai::AI_TYPE_MONSTER && ci->state.state == CS_ALIVE && !monster) monster = ci;
+        }
+        if(!victim) { conoutf("rpgmonsterdmg: no live player '%s'", name); return; }
+        if(!monster) { conoutf("rpgmonsterdmg: no live monster (spawn one with rpgspawnmonster first)"); return; }
+        int hpbefore = victim->state.health;
+        vec push(0, 0, 0);
+        dodamage(victim, monster, amount, WEAP_FIST, push, false);
+        conoutf("rpgmonsterdmg: '%s' %d -> %d hp (raw %d)", name, hpbefore, victim->state.health, amount);
+    }
+    COMMANDN(rpgmonsterdmg, rpgmonsterdmg_cmd, "siV");
+    // TEST-ONLY: dump player + loot positions for the walk-over diagnostic.
+    void rpgwhere_cmd(tagval *args, int numargs)
+    {
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->state.ai.type != ai::AI_TYPE_NONE) continue;
+            conoutf("rpgwhere: player '%s' at (%.1f, %.1f, %.1f) state %d", ci->name, ci->state.o.x, ci->state.o.y, ci->state.o.z, ci->state.state);
+        }
+        rpg::lootdrop drops[64]; int nd = 0;
+        rpg::getlootdrops(drops, 64, nd);
+        loopi(nd) conoutf("rpgwhere: drop #%d (%s) at (%.1f, %.1f, %.1f)", drops[i].idx, rpg::itemname(drops[i].item), drops[i].x, drops[i].y, drops[i].z);
+        if(game::player1) conoutf("rpgwhere: client player1 at (%.1f, %.1f, %.1f) yaw %.1f", game::player1->o.x, game::player1->o.y, game::player1->o.z, game::player1->yaw);
+    }
+    COMMANDN(rpgwhere, rpgwhere_cmd, "V");
 
     void resetitems()
     {
@@ -2337,6 +2415,23 @@ namespace server
 
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // Equipped armor absorbs MONSTER damage on RPG maps only. PvP damage,
+        // gun damage between players, and FPS modes are never touched: the
+        // attacker must be a monster and the map must be an RPG map.
+        if(damage > 0 && rpg::connected() && target && target->state.ai.type == ai::AI_TYPE_NONE &&
+           actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
+           rpg::mapactive(smapname))
+        {
+            int red = rpg::armorvalue(target->name);
+            if(red > 0)
+            {
+                int newdmg = damage - red;
+                if(newdmg < 1) newdmg = 1;
+                if(newdmg != damage) conoutf("rpg: armor absorbs %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
+                damage = newdmg;
+            }
+        }
         // survival damage upgrade: bought damage levels scale a human's outgoing damage (dmsp only)
         if(actor && actor!=target && m_dmsp && actor->state.ai.type==ai::AI_TYPE_NONE && actor->dmgmult > 100)
             damage = damage*actor->dmgmult/100;
@@ -2367,6 +2462,22 @@ namespace server
                 bool rpg_leveled = false;
                 int rpg_newlevel = rpg::awardxp(actor->name, rpg::XP_PER_MONSTER_KILL, &rpg_leveled);
                 if(rpg_leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", actor->name, rpg_newlevel);
+                // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+                // Loot drops roll on RPG maps only, so FPS modes never see item drops.
+                if(rpg::mapactive(smapname))
+                {
+                    int loot = rpg::rollloot();
+                    if(loot >= 0)
+                    {
+                        int idx = rpg::spoilloot(loot, target->state.o.x, target->state.o.y, target->state.o.z);
+                        rpg::setlootborn(idx, totalmillis);
+                        sendf(-1, 1, "ri6", N_RPG_LOOT, idx, loot,
+                              int(target->state.o.x*DMF), int(target->state.o.y*DMF), int(target->state.o.z*DMF));
+                        sendservmsgf("\f2%s \f7dropped from \f2%s\f7!", rpg::itemname(loot), target->name);
+                        conoutf("rpg: loot drop #%d (%s) at (%.1f, %.1f, %.1f)", idx, rpg::itemname(loot),
+                                target->state.o.x, target->state.o.y, target->state.o.z);
+                    }
+                }
             }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
@@ -2505,10 +2616,128 @@ namespace server
         push.z = 0;
         if(push.squaredlen() > 0.01f) push.normalize();
         int hpbefore = target->state.health;
-        dodamage(target, cq, ab.damage, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
-        conoutf("rpg: '%s' casts %s on '%s' for %d (%d -> %d hp)", cq->name, ab.name, target->name, ab.damage, hpbefore, target->state.health);
-        defformatstring(msg)("\f2%s \f7hits %s for %d damage.", ab.name, target->name, ab.damage);
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // An equipped mainhand weapon adds its damage to MELEE abilities (Power
+        // Strike). Spells (Spark Bolt) are unaffected. RPG maps only.
+        int castdmg = ab.damage;
+        if(ab.melee && rpg::mapactive(smapname)) castdmg += rpg::weapondamage(cq->name);
+        dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
+        conoutf("rpg: '%s' casts %s on '%s' for %d (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, hpbefore, target->state.health);
+        defformatstring(msg)("\f2%s \f7hits %s for %d damage.", ab.name, target->name, castdmg);
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        // push fresh mana + cooldown to the caster for the RPG HUD
+        rpg::getmana(cq->name, mana, maxmana);
+        sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
+        sendf(cq->clientnum, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+    }
+
+    // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+    // Server-authoritative inventory operations. The client only names an item
+    // id / slot; every validation happens here. Equipment effects never leak
+    // into FPS modes: the RPG map gate (rpg::mapactive) is checked on every op.
+
+    static bool rpg_checkinv(clientinfo *cq) // shared validation for inventory ops
+    {
+        if(!rpg::connected()) return false;
+        if(!cq || cq->state.ai.type != ai::AI_TYPE_NONE) return false;
+        int level = 1, xp = 0;
+        if(!rpg::getstats(cq->name, level, xp)) return false; // character must be loaded
+        if(!rpg::mapactive(smapname)) return false;           // RPG maps only
+        return true;
+    }
+
+    static void rpg_syncinv(clientinfo *cq) // push inventory+equipment state to one client
+    {
+        if(!rpg::connected()) return;
+        rpg::itemstack inv[64];
+        int n = 0, level = 1, xp = 0;
+        if(!rpg::getinventory(cq->name, inv, 64, n)) return;
+        rpg::getstats(cq->name, level, xp);
+        string invs, eqs;
+        invs[0] = eqs[0] = '\0';
+        loopi(n)
+        {
+            defformatstring(e)("%s:%d;", rpg::item(inv[i].item).id, inv[i].count);
+            concatstring(invs, e);
+        }
+        loopi(rpg::SLOT_COUNT)
+        {
+            int id = rpg::equippeditem(cq->name, i);
+            if(id >= 0)
+            {
+                defformatstring(e)("%d:%s;", i, rpg::item(id).id);
+                concatstring(eqs, e);
+            }
+        }
+        sendf(cq->clientnum, 1, "riiiss", N_RPG_INV, level, xp, invs, eqs);
+    }
+
+    static void rpg_sendvwep(clientinfo *cq) // broadcast this client's equipped weapon model
+    {
+        const char *path = rpg::equippedvwep(cq->name);
+        sendf(-1, 1, "riis", N_RPG_VWEP, cq->clientnum, path ? path : "");
+        conoutf("rpg: vwep for '%s' -> %s", cq->name, path && path[0] ? path : "(model default)");
+    }
+
+    void rpg_equip(clientinfo *cq, const char *itemid)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to equip."); return; }
+        int id = rpg::finditem(itemid);
+        if(rpg::equipitem(cq->name, itemid))
+        {
+            defformatstring(msg)("\f2%s \f7equipped.", rpg::itemname(id));
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            rpg_sendvwep(cq); // weapon model swap is visible to everyone
+            rpg_syncinv(cq);
+        }
+        else sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Cannot equip that.");
+    }
+
+    void rpg_unequip(clientinfo *cq, int slot)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(rpg::unequipslot(cq->name, slot))
+        {
+            rpg_sendvwep(cq);
+            rpg_syncinv(cq);
+        }
+        else sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Nothing equipped there.");
+    }
+
+    void rpg_use(clientinfo *cq, const char *itemid)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to use that."); return; }
+        int id = rpg::finditem(itemid);
+        int heal = rpg::usestack(cq->name, itemid);
+        if(heal < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Cannot use that."); return; }
+        gamestate &gs = cq->state;
+        gs.health = min(gs.maxhealth, gs.health + heal);
+        defformatstring(msg)("\f2%s \f7used: +%d health.", rpg::itemname(id), heal);
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        conoutf("rpg: '%s' uses %s (+%d hp -> %d)", cq->name, rpg::itemname(id), heal, gs.health);
+        rpg_syncinv(cq);
+    }
+
+    void rpg_dropitem(clientinfo *cq, const char *itemid)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) return;
+        int id = rpg::finditem(itemid);
+        if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
+        // strip it from the body first (it moves to the pack), then drop from the pack
+        loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id) rpg::unequipslot(cq->name, i);
+        if(!rpg::removeitem(cq->name, itemid, 1)) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
+        int idx = rpg::spoilloot(id, cq->state.o.x, cq->state.o.y, cq->state.o.z);
+        rpg::setlootborn(idx, totalmillis);
+        sendf(-1, 1, "ri6", N_RPG_LOOT, idx, id,
+              int(cq->state.o.x*DMF), int(cq->state.o.y*DMF), int(cq->state.o.z*DMF));
+        defformatstring(msg)("\f2%s \f7dropped.", rpg::itemname(id));
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        conoutf("rpg: '%s' drops %s (drop #%d)", cq->name, rpg::itemname(id), idx);
+        rpg_sendvwep(cq);
+        rpg_syncinv(cq);
     }
 
     void suicide(clientinfo *ci, int type = 0)
@@ -2715,6 +2944,57 @@ namespace server
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
         rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // Loot: server-validated walk-over pickup + expiry, RPG maps only.
+        if(rpg::connected() && rpg::mapactive(smapname))
+        {
+            rpg::lootdrop drops[64];
+            int nd = 0;
+            rpg::getlootdrops(drops, 64, nd);
+            if(nd > 0) loopv(clients)
+            {
+                clientinfo *cq = clients[i];
+                if(cq->state.ai.type != ai::AI_TYPE_NONE || cq->state.state != CS_ALIVE) continue;
+                int level = 1, xp = 0;
+                if(!rpg::getstats(cq->name, level, xp)) continue;
+                loopj(nd)
+                {
+                    vec delta(drops[j].x - cq->state.o.x, drops[j].y - cq->state.o.y, drops[j].z - cq->state.o.z);
+                    if(delta.magnitude() <= rpg::LOOT_PICKUP_DIST)
+                    {
+                        int id = drops[j].item, idx = drops[j].idx;
+                        if(rpg::takeloot(idx) && rpg::additem(cq->name, rpg::item(id).id, 1))
+                        {
+                            sendf(-1, 1, "ri2", N_RPG_UNLOOT, idx);
+                            sendservmsgf("\f2%s \f7picks up \f2%s\f7.", cq->name, rpg::itemname(id));
+                            conoutf("rpg: '%s' picks up %s (drop #%d)", cq->name, rpg::itemname(id), idx);
+                            rpg_syncinv(cq);
+                        }
+                        break; // one pickup per client per tick
+                    }
+                }
+            }
+            int expired[64], nexp = 0;
+            rpg::updateloot(totalmillis, expired, 64, nexp);
+            loopi(nexp) sendf(-1, 1, "ri2", N_RPG_UNLOOT, expired[i]);
+        }
+        // mana push for the RPG HUD (once a second is plenty)
+        if(rpg::connected())
+        {
+            static int rpg_lastmanapush = 0;
+            if(totalmillis - rpg_lastmanapush >= 1000)
+            {
+                rpg_lastmanapush = totalmillis;
+                loopv(clients)
+                {
+                    clientinfo *cq = clients[i];
+                    if(cq->state.ai.type != ai::AI_TYPE_NONE) continue;
+                    int mana = 0, maxmana = 0;
+                    if(rpg::getmana(cq->name, mana, maxmana))
+                        sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
+                }
+            }
+        }
         static int rpg_lastautosave = 0;
         if(totalmillis - rpg_lastautosave >= 60000)
         {
@@ -3121,6 +3401,16 @@ namespace server
 
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         rpg::onconnect(ci->name);
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // Everyone learns this client's equipped weapon model; the newcomer learns everyone's.
+        rpg_sendvwep(ci);
+        loopv(clients)
+        {
+            clientinfo *other = clients[i];
+            if(other == ci) continue;
+            const char *path = rpg::equippedvwep(other->name);
+            sendf(ci->clientnum, 1, "riis", N_RPG_VWEP, other->clientnum, path ? path : "");
+        }
 
         #ifdef SERVER
         if(false && lua::pushEvent("client.connect"))
@@ -3656,6 +3946,36 @@ namespace server
             {
                 int ability = getint(p), yaw = getint(p);
                 if(cq) rpg_cast(cq, ability, yaw);
+                break;
+            }
+            // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+            case N_RPG_EQUIP:
+            {
+                string itemid; getstring(itemid, p);
+                if(cq) rpg_equip(cq, itemid);
+                break;
+            }
+            case N_RPG_UNEQUIP:
+            {
+                int slot = getint(p);
+                if(cq) rpg_unequip(cq, slot);
+                break;
+            }
+            case N_RPG_USE:
+            {
+                string itemid; getstring(itemid, p);
+                if(cq) rpg_use(cq, itemid);
+                break;
+            }
+            case N_RPG_DROP:
+            {
+                string itemid; getstring(itemid, p);
+                if(cq) rpg_dropitem(cq, itemid);
+                break;
+            }
+            case N_RPG_INVL:
+            {
+                if(cq) rpg_syncinv(cq);
                 break;
             }
 

@@ -1,4 +1,7 @@
 #include "game.h"
+#include "rpg/rpg.h"
+#include "rpg/abilities.h"
+#include "rpg/items.h"
 #include "engine.h"
 #include "version.h"
 
@@ -788,6 +791,21 @@ namespace game
                 entities::checktriggers();
             }
             else if(cmode) cmode->checkitems(player1);
+        }
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // Loot drops render a sparkle + name label, RPG maps only.
+        if(rpg::mapactive(getclientmap()))
+        {
+            rpg::lootdrop drops[64];
+            int nd = 0;
+            rpg::getlootdrops(drops, 64, nd);
+            loopi(nd)
+            {
+                vec o(drops[i].x, drops[i].y, drops[i].z);
+                regular_particle_splash(PART_SPARK, 1, 60, o, 0xFFD24A, 2.5f, 50, -150);
+                particle_textcopy(o, rpg::itemname(drops[i].item), PART_TEXT, 1, 0xFFD24A, 2.0f, 0);
+                particle_flare(o, o, 0, PART_LFLARE, 0xFFD24A, 1.2f);
+            }
         }
         if(player1->clientnum>=0) c2sinfo();   // do this last, to reduce the effective frame lag
         if(intermission && !shownvotes && (totalmillis-lastinterm) > 10000) { showscores(false); showgui("votesetup"); shownvotes = true; }
@@ -1808,6 +1826,78 @@ namespace game
     int lastguts=0, lastgutschangemillis=0, lastgutschange=0;
     FVARP(h_body_scale, 0, 1, 100);
 
+    // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+    // RPG HUD overlay, drawn on RPG maps only: health + mana bars skinned with
+    // the kit art, the two ability icons with live cooldown feedback. This
+    // replaces the FPS ammo/health readouts while in RPG play (those are gated
+    // off on RPG maps below); the FPS HUD is untouched everywhere else.
+    static Texture *rpg_loadtex(const char *path) { return textureload(path, 3, true, false); }
+    static void rpg_fillrect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f)
+    {
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(r, g, b, a);
+        glBegin(GL_QUADS);
+        glVertex2f(x, y); glVertex2f(x+w, y); glVertex2f(x+w, y+h); glVertex2f(x, y+h);
+        glEnd();
+    }
+    // TEST-ONLY: direct walk control (the `forward` console command does not move the headless player; this sets the physics flag directly).
+    ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
+
+    void drawrpghud(fpsent *d, int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        int mana = 0, maxmana = 0;
+        rpg::getclientmana(mana, maxmana);
+        float hppct = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
+        float mpct = maxmana > 0 ? float(mana) / float(maxmana) : 0;
+        float bx = 60, bw = 420, bh = 30;
+        float by = 1800 - 220;
+        // health bar
+        Texture *frame = rpg_loadtex("packages/ui/rpg/hud/bar_frame.png");
+        glBindTexture(GL_TEXTURE_2D, frame->id);
+        glColor4f(1, 1, 1, 1);
+        drawtexture(bx, by, bw, bh);
+        if(hppct > 0) rpg_fillrect(bx + 12, by + 6, (bw - 24) * hppct, bh - 12, 0.85f, 0.15f, 0.15f);
+        defformatstring(hps)("HP %d/%d", d->health, d->maxhealth);
+        draw_text(hps, int(bx), int(by - 36));
+        // mana bar
+        float my = by + bh + 44;
+        glBindTexture(GL_TEXTURE_2D, frame->id);
+        glColor4f(1, 1, 1, 1);
+        drawtexture(bx, my, bw, bh);
+        if(mpct > 0) rpg_fillrect(bx + 12, my + 6, (bw - 24) * mpct, bh - 12, 0.2f, 0.4f, 0.95f);
+        defformatstring(mps)("MP %d/%d", mana, maxmana);
+        draw_text(mps, int(bx), int(my - 36));
+        // ability icons, bottom-right, with cooldown feedback
+        float ix = w*1800/h - 260, iy = 1800 - 220, isz = 96;
+        Texture *ps = rpg_loadtex("packages/ui/rpg/hud/icon_powerstrike.png");
+        glBindTexture(GL_TEXTURE_2D, ps->id);
+        glColor4f(1, 1, 1, 1);
+        drawtexture(ix, iy, isz, isz);
+        int cd0 = rpg::cooldownleft(0, totalmillis);
+        if(cd0 > 0)
+        {
+            rpg_fillrect(ix, iy, isz, isz, 0.0f, 0.0f, 0.0f, 0.65f);
+            defformatstring(cds)("%.1f", cd0/1000.0f);
+            draw_text(cds, int(ix + 28), int(iy + 30));
+        }
+        else draw_text("1", int(ix + 4), int(iy - 30));
+        Texture *sb = rpg_loadtex("packages/ui/rpg/hud/icon_sparkbolt.png");
+        glBindTexture(GL_TEXTURE_2D, sb->id);
+        glColor4f(1, 1, 1, 1);
+        drawtexture(ix + isz + 20, iy, isz, isz);
+        int cd1 = rpg::cooldownleft(1, totalmillis);
+        if(cd1 > 0)
+        {
+            rpg_fillrect(ix + isz + 20, iy, isz, isz, 0.0f, 0.0f, 0.0f, 0.65f);
+            defformatstring(cds2)("%.1f", cd1/1000.0f);
+            draw_text(cds2, int(ix + isz + 48), int(iy + 30));
+        }
+        else draw_text("2", int(ix + isz + 24), int(iy - 30));
+        draw_text("[U] inventory  [K] character", int(w*1800/h/2 - 260), int(1800 - 70));
+    }
+
     void drawhudicons(fpsent *d, int w, int h)
     {
         if(d->state!=CS_DEAD)
@@ -1836,7 +1926,7 @@ namespace game
 
             // draw ammo
             if(d->quadmillis) drawicon(HICON_QUAD, 80, 1200);
-            if(ammohud) drawammohud(d, w, h);
+            if(ammohud && !rpg::mapactive(getclientmap())) drawammohud(d, w, h);
             if(cmode && cmode->getRound() > 0) drawroundicon(w,h);
             if(shopopen())
             {
@@ -1845,7 +1935,8 @@ namespace game
             }
             if(!d->isInfected()) drawcrosshairhud(d, w, h);
 
-            if (!m_insta)
+            // --- RPG: Shattered Shield inventory (milestone step 4): the FPS health body is hidden on RPG maps (the RPG bars replace it) ---
+            if (!m_insta && !rpg::mapactive(getclientmap()))
             {
                 static Texture *h_body_fire = NULL, *h_body = NULL, *h_body_white = NULL;
                 if (d->isInfected())
@@ -2340,6 +2431,7 @@ namespace game
         if(d->state!=CS_EDITING)
         {
             if(d->state!=CS_SPECTATOR) drawhudicons(d, w, h);
+            if(d->state!=CS_SPECTATOR) drawrpghud(d, w, h);
             if(cmode) cmode->drawhud(d, w, h);
         }
 

@@ -675,6 +675,18 @@ enum
     N_SERVER_COMMAND,
     N_DEMOPACKET,
     N_RPG_CAST, // Shattered Shield: client->server ability cast request (ability id, client-advisory yaw)
+    // Shattered Shield inventory & equipment v1 (milestone step 4, additive)
+    N_RPG_EQUIP,   // c->s: equip request (item id string)
+    N_RPG_UNEQUIP, // c->s: unequip request (slot int)
+    N_RPG_USE,     // c->s: use consumable (item id string)
+    N_RPG_DROP,    // c->s: drop item into the world (item id string)
+    N_RPG_INVL,    // c->s: request inventory+equipment sync (no args)
+    N_RPG_INV,     // s->c: inventory sync (inv string, equip string)
+    N_RPG_LOOT,    // s->c: loot drop spawned (idx, item, x, y, z as DMF ints)
+    N_RPG_UNLOOT,  // s->c: loot drop removed (idx)
+    N_RPG_VWEP,    // s->c: equipped weapon model for a client (clientnum, path; "" clears)
+    N_RPG_MANA,    // s->c: mana update for the caster (mana, maxmana)
+    N_RPG_CD,      // s->c: ability cooldown started (ability, waitms)
     NUMSV
 };
 
@@ -708,6 +720,8 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_GUTS, 3, N_BUY, 0, N_SHOPOPEN, 2, N_SERVER_COMMAND, 0,
     N_DEMOPACKET, 0,
     N_RPG_CAST, 3,
+    N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
+    N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3,
     -1
 };
 

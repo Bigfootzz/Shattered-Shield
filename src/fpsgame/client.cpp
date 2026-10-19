@@ -1,4 +1,6 @@
 #include "game.h"
+#include "rpg/rpg.h"
+#include "rpg/items.h"
 #include "auth.h"
 
 namespace game
@@ -54,6 +56,95 @@ namespace game
     // for the melee front-cone check only. Bindable, e.g. bind Q ability1.
     ICOMMAND(ability1, "", (), addmsg(N_RPG_CAST, "ri2", 0, int(player1->yaw)));
     ICOMMAND(ability2, "", (), addmsg(N_RPG_CAST, "ri2", 1, int(player1->yaw)));
+
+    // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
+    // The client only ASKS (item id / slot); the server validates and pushes
+    // fresh state (N_RPG_INV) after every mutation. The GUIs in
+    // data/menus/rpg.cfg read the client cache live (re-executed every frame).
+    ICOMMAND(isrpgmap, "", (), intret(rpg::mapactive(getclientmap()) ? 1 : 0));
+    ICOMMAND(rpginventory, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpginv"); });
+    ICOMMAND(rpgcharacter, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpgchar"); });
+    ICOMMAND(rpgequip, "s", (char *s), addmsg(N_RPG_EQUIP, "rs", s));
+    ICOMMAND(rpgunequip, "s", (char *s), addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)));
+    ICOMMAND(rpguse, "s", (char *s), addmsg(N_RPG_USE, "rs", s));
+    ICOMMAND(rpgdrop, "s", (char *s), addmsg(N_RPG_DROP, "rs", s));
+    // client cache queries for the GUIs (never authoritative)
+    static int rpg_cln = 0;
+    static rpg::itemstack rpg_clinv[64];
+    static int rpg_cleq[rpg::SLOT_COUNT];
+    static void rpg_refreshcl() { rpg::getclientinv(rpg_clinv, 64, rpg_cln, rpg_cleq); }
+    ICOMMAND(rpginvcount, "", (), { rpg_refreshcl(); intret(rpg_cln); });
+    ICOMMAND(rpginvid, "i", (int *i), { rpg_refreshcl(); result(*i >= 0 && *i < rpg_cln ? rpg::item(rpg_clinv[*i].item).id : ""); });
+    ICOMMAND(rpginvname, "i", (int *i), { rpg_refreshcl(); result(*i >= 0 && *i < rpg_cln ? rpg::itemname(rpg_clinv[*i].item) : ""); });
+    ICOMMAND(rpginvicon, "i", (int *i), { rpg_refreshcl(); result(*i >= 0 && *i < rpg_cln ? rpg::item(rpg_clinv[*i].item).icon : ""); });
+    ICOMMAND(rpginvnum, "i", (int *i), { rpg_refreshcl(); intret(*i >= 0 && *i < rpg_cln ? rpg_clinv[*i].count : 0); });
+    ICOMMAND(rpginvtype, "i", (int *i), { rpg_refreshcl(); intret(*i >= 0 && *i < rpg_cln ? rpg::item(rpg_clinv[*i].item).type : -1); });
+    ICOMMAND(rpgeqid, "s", (char *s), { rpg_refreshcl(); int id = rpg::slotid(s); result(id >= 0 && rpg_cleq[id] >= 0 ? rpg::item(rpg_cleq[id]).id : ""); });
+    ICOMMAND(rpgeqname, "s", (char *s), { rpg_refreshcl(); int id = rpg::slotid(s); result(id >= 0 && rpg_cleq[id] >= 0 ? rpg::itemname(rpg_cleq[id]) : "(empty)"); });
+    ICOMMAND(rpgeqicon, "s", (char *s), { rpg_refreshcl(); int id = rpg::slotid(s); result(id >= 0 && rpg_cleq[id] >= 0 ? rpg::item(rpg_cleq[id]).icon : "packages/ui/rpg/icons/icon_empty.png"); });
+    ICOMMAND(rpgcharline, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("Level %d   XP %d", l, x); result(s); });
+    ICOMMAND(rpgcdleft, "i", (int *i), intret(rpg::cooldownleft(*i, totalmillis)));
+    ICOMMAND(rpgcell, "i", (int *i), {
+        rpg_refreshcl();
+        static string p;
+        if(*i >= 0 && *i < rpg_cln)
+        {
+            const char *id = rpg::item(rpg_clinv[*i].item).id;
+            const char *base = strchr(id, '_');
+            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base ? base + 1 : id);
+            result(p);
+        }
+        else result("packages/ui/rpg/slots/slot.png");
+    });
+    ICOMMAND(rpgeqcell, "s", (char *s), {
+        rpg_refreshcl();
+        int id = rpg::slotid(s);
+        static string p;
+        if(id >= 0 && rpg_cleq[id] >= 0)
+        {
+            const char *iid = rpg::item(rpg_cleq[id]).id;
+            const char *base = strchr(iid, '_');
+            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base ? base + 1 : iid);
+            result(p);
+        }
+        else result("packages/ui/rpg/slots/slot.png");
+    });
+    ICOMMAND(rpginvstat, "i", (int *i), {
+        rpg_refreshcl();
+        static string s; s[0] = 0;
+        if(*i >= 0 && *i < rpg_cln)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_clinv[*i].item);
+            if(d.type == rpg::ITEM_WEAPON) formatstring(s)("+%d damage", d.damage);
+            else if(d.type == rpg::ITEM_ARMOR) formatstring(s)("Armor %d", d.armor);
+            else if(d.type == rpg::ITEM_CONSUMABLE) formatstring(s)("Heals %d", d.heal);
+        }
+        result(s);
+    });
+    ICOMMAND(rpgeqstat, "s", (char *s), {
+        rpg_refreshcl();
+        int id = rpg::slotid(s);
+        static string r; r[0] = 0;
+        if(id >= 0 && rpg_cleq[id] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[id]);
+            if(d.type == rpg::ITEM_WEAPON) formatstring(r)("+%d damage", d.damage);
+            else if(d.type == rpg::ITEM_ARMOR) formatstring(r)("Armor %d", d.armor);
+        }
+        result(r);
+    });
+    ICOMMAND(rpgeqtotal, "", (), {
+        rpg_refreshcl();
+        int wd = 0; int ar = 0;
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.type == rpg::ITEM_WEAPON) wd += d.damage;
+            else if(d.type == rpg::ITEM_ARMOR) ar += d.armor;
+        }
+        defformatstring(s)("Weapon +%d dmg   Armor %d", wd, ar);
+        result(s);
+    });
 
     void switchname(const char *name)
     {
@@ -1767,6 +1858,48 @@ namespace game
                 fpsent *cn = getclient(getint(p));
                 int guts = getint(p);
                 if (cn) printf("N_GUTS %i\n", cn->guts = guts);
+                break;
+            }
+
+            // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+            case N_RPG_INV:
+            {
+                int level = getint(p), xp = getint(p);
+                string invs, eqs;
+                getstring(invs, p);
+                getstring(eqs, p);
+                rpg::setinv(invs, eqs, level, xp);
+                break;
+            }
+            case N_RPG_LOOT:
+            {
+                int idx = getint(p), item = getint(p);
+                float x = getint(p)/DMF, y = getint(p)/DMF, z = getint(p)/DMF;
+                rpg::setloot(idx, item, x, y, z);
+                break;
+            }
+            case N_RPG_UNLOOT:
+            {
+                rpg::removeloot(getint(p));
+                break;
+            }
+            case N_RPG_VWEP:
+            {
+                int cn = getint(p);
+                string path; getstring(path, p);
+                rpg::setvwep(cn, path);
+                break;
+            }
+            case N_RPG_MANA:
+            {
+                int mana = getint(p), maxmana = getint(p);
+                rpg::setmana(mana, maxmana);
+                break;
+            }
+            case N_RPG_CD:
+            {
+                int ability = getint(p), waitms = getint(p);
+                rpg::setcooldown(ability, waitms, totalmillis);
                 break;
             }
 

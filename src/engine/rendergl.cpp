@@ -1,6 +1,7 @@
 // rendergl.cpp: core opengl rendering stuff
 
 #include "engine.h"
+#include "rpg/rpg.h"
 #include "version.h"
 #include "jsonNews.h"
 
@@ -2686,9 +2687,11 @@ void drawcrosshair(int w, int h)
     Texture *crosshair;
     if(windowhit)
     {
-        static Texture *cursor = NULL;
+        static Texture *cursor = NULL, *rpgcursor = NULL;
         if(!cursor) cursor = textureload("data/gui/guicursor.png", 3, true);
-        crosshair = cursor;
+        // --- RPG: Shattered Shield inventory (milestone step 4): the kit pointer cursor over GUI windows, RPG maps only ---
+        if(!rpgcursor) rpgcursor = textureload("packages/ui/rpg/cursors/cursor_default.png", 3, true);
+        crosshair = rpg::mapactive(game::getclientmap()) ? rpgcursor : cursor;
         chsize = cursorsize*w/900.0f;
         g3d_cursorpos(cx, cy);
     }

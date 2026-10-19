@@ -1,4 +1,5 @@
 #include "game.h"
+#include "rpg/rpg.h"
 
 #if defined(WITH_BULLET) && WITH_BULLET
 //extern vec ballPosition;
@@ -146,7 +147,10 @@ namespace game
         modelattach a[5];
         static const char * const vweps[] = {"playermodels/vwep/fist", "playermodels/vwep/shotg", "playermodels/vwep/chaing", "playermodels/vwep/rocket", "playermodels/vwep/rifle", "playermodels/vwep/flameg", "playermodels/vwep/cbow", "playermodels/vwep/gl", "playermodels/vwep/healer", "playermodels/vwep/mortar", "playermodels/vwep/pistol", "playermodels/vwep/hand"};
         int ai = 0;
-        if((!mdl.vwep || d->gunselect!=WEAP_FIST) && d->gunselect<=WEAP_PISTOL && !d->isInfected())
+        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
+        // An equipped RPG weapon is always shown (even with fists selected, the normal RPG state).
+        const char *rpgvwep = rpg::mapactive(getclientmap()) ? rpg::vwepfor(d->clientnum) : NULL;
+        if(((rpgvwep && rpgvwep[0]) || !mdl.vwep || d->gunselect!=WEAP_FIST) && d->gunselect<=WEAP_PISTOL && !d->isInfected())
         {
             int vanim = ANIM_VWEP_IDLE|ANIM_LOOP, vtime = 0;
             if(lastaction && d->lastattackgun==d->gunselect && lastmillis < lastaction + delay)
@@ -154,9 +158,10 @@ namespace game
                 vanim = ANIM_VWEP_SHOOT;
                 vtime = lastaction;
             }
-            a[ai++] = modelattach("tag_weapon", mdl.vwep ? mdl.vwep : vweps[
+            // RPG vwep (computed above) overrides the model default; falls back to model/gun vwep.
+            a[ai++] = modelattach("tag_weapon", rpgvwep && rpgvwep[0] ? rpgvwep : (mdl.vwep ? mdl.vwep : vweps[
                 d->gunselect + (d->gunselect == WEAP_FIST && d->ammo[d->gunselect] < 1 ? sizeof(vweps)/sizeof(vweps[0]) - 1 : 0)
-            ], vanim, vtime);
+            ]), vanim, vtime);
         }
         if(d->state==CS_ALIVE)
         {
