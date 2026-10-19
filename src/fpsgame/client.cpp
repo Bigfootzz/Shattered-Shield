@@ -1,6 +1,7 @@
 #include "game.h"
 #include "rpg/rpg.h"
 #include "rpg/abilities.h"
+#include "rpg/stats.h"
 #include "rpg/items.h"
 #include "auth.h"
 
@@ -186,6 +187,38 @@ namespace game
     });
     ICOMMAND(rpgmana, "", (), { int m = 0; int mm = 0; rpg::getclientmana(m, mm); intret(m); });
     ICOMMAND(rpgmaxmana, "", (), { int m = 0; int mm = 0; rpg::getclientmana(m, mm); intret(mm); });
+    // --- stat system (milestone step 5): read-only client-cache queries for the K screen ---
+    // Attributes derive from the client-known level (automatic growth); no protocol change.
+    ICOMMAND(rpgmaxhp, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(rpg::stat_maxhp(l)); });
+    ICOMMAND(rpgattrname, "i", (int *i), { result(rpg::attrname(*i)); });
+    ICOMMAND(rpgattr, "i", (int *i), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(rpg::attrscore(l, *i)); });
+    ICOMMAND(rpgcritchance, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("%.1f%%", rpg::stat_critchance(l)); result(s); });
+    ICOMMAND(rpgcritmult, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("x%.2f", rpg::stat_critmult(l)); result(s); });
+    ICOMMAND(rpgarmorred, "", (), {
+        rpg_refreshcl(); int ar = 0;
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.type == rpg::ITEM_ARMOR) ar += d.armor;
+        }
+        defformatstring(s)("%d%%", rpg::stat_armorreductionpct(ar)); result(s);
+    });
+    ICOMMAND(rpgresistname, "i", (int *i), { result(rpg::resistname(*i)); });
+    // data only: all resists are 0 until typed monster damage arrives (no behavior).
+    ICOMMAND(rpgresist, "i", (int *i), { intret(0); });
+    ICOMMAND(rpgabtype, "i", (int *i), { result(rpg::validability(*i) ? rpg::ability(*i).damagetype : ""); });
+    // Attribute-derived ability damage for the Offense tab (Power Strike adds weapon + STR).
+    ICOMMAND(rpgabstatdmg, "i", (int *i), {
+        if(!rpg::validability(*i)) { intret(0); return; }
+        int l = 1; int x = 0; rpg::getclientstats(l, x);
+        int wd = 0; rpg_refreshcl();
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.type == rpg::ITEM_WEAPON) wd += d.damage;
+        }
+        intret(rpg::ability(*i).melee ? rpg::stat_powerstrike(l, wd) : rpg::stat_sparkbolt(l));
+    });
 
     void switchname(const char *name)
     {
@@ -1941,6 +1974,20 @@ namespace game
             {
                 int ability = getint(p), waitms = getint(p);
                 rpg::setcooldown(ability, waitms, totalmillis);
+                break;
+            }
+            case N_RPG_HPMAX:
+            {
+                // RPG: engine max HP follows the stat formula (server-authoritative).
+                // Same keep-current-HP rule as the server: full heal only when the
+                // character was already full, clamp down otherwise.
+                int maxhp = getint(p);
+                if(player1 && maxhp > 0)
+                {
+                    if(player1->health >= player1->maxhealth) player1->health = maxhp;
+                    else if(player1->health > maxhp) player1->health = maxhp;
+                    player1->maxhealth = maxhp;
+                }
                 break;
             }
 

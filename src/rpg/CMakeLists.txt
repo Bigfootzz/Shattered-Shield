@@ -5,6 +5,7 @@
 add_library(rpg STATIC
     rpg.cpp
     abilities.cpp
+    stats.cpp
     items.cpp
     sqlite3.c)
 

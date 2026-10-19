@@ -687,6 +687,7 @@ enum
     N_RPG_VWEP,    // s->c: equipped weapon model for a client (clientnum, path; "" clears)
     N_RPG_MANA,    // s->c: mana update for the caster (mana, maxmana)
     N_RPG_CD,      // s->c: ability cooldown started (ability, waitms)
+    N_RPG_HPMAX,   // s->c: RPG engine max-HP sync (maxhp)
     NUMSV
 };
 
@@ -721,7 +722,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_DEMOPACKET, 0,
     N_RPG_CAST, 3,
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
-    N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3,
+    N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     -1
 };
 

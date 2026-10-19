@@ -1896,7 +1896,7 @@ namespace game
             draw_text(cds2, int(ix + isz + 48), int(iy + 30));
         }
         else draw_text("2", int(ix + isz + 24), int(iy - 30));
-        draw_text("[U] inventory  [K] character", int(w*1800/h/2 - 260), int(1800 - 70));
+        draw_text("[I] inventory  [C] character", int(w*1800/h/2 - 260), int(1800 - 70));
     }
 
     void drawhudicons(fpsent *d, int w, int h)

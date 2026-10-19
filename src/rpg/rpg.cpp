@@ -2,6 +2,7 @@
 // + ability session state (milestone step 3).
 // SQLite-backed character store. Identity = player name for now.
 #include "rpg.h"
+#include "stats.h"
 #include "abilities.h"
 #include "items.h"
 #include "sqlite3.h"
@@ -362,7 +363,7 @@ namespace rpg
             if(dt >= 1000)
             {
                 int cap = maxmana(cc.level);
-                cc.mana = min(cap, cc.mana + dt*MANA_REGEN_PER_SEC/1000);
+                cc.mana = min(cap, cc.mana + dt*stat_manaregen(cc.level)/1000);
                 cc.lastregen = now;
             }
         }

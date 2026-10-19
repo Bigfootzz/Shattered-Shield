@@ -23,8 +23,13 @@ struct menu : g3d_callback
     char *name, *header;
     uint *contents, *initscript, *onclear;
     bool showtab;
+    // Shattered Shield RPG UI: when true, the engine menu skin (dark backdrop
+    // rect, title-bar skin, watermark) is not drawn for this menu, so only the
+    // menu's own art shows over the live world. Per-menu: other menus keep
+    // their skin.
+    bool noskin;
 
-    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true) {}
+    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true), noskin(false) {}
 
     void gui(g3d_gui &g, bool firstpass)
     {
@@ -234,6 +239,22 @@ void guionclear(char *action)
     menu *m = guistack.last();
     if(m->onclear) { freecode(m->onclear); m->onclear = NULL; } 
     if(action[0]) m->onclear = compilecode(action);
+}
+
+// Shattered Shield RPG UI: marks the top menu as skinless (see menu::noskin).
+// Intended for a menu's init script, which pushgui() runs right after the
+// menu is pushed, so guistack.last() is the menu being opened.
+void guinoskin()
+{
+    if(guistack.empty()) return;
+    guistack.last()->noskin = true;
+}
+
+// 3dgui render path asks this per frame: true while the menu currently being
+// rendered asked for its engine skin to be suppressed.
+bool guimenuskindisabled()
+{
+    return currentMenu && currentMenu->noskin;
 }
 
 void guistayopen(uint *contents)
@@ -592,6 +613,7 @@ COMMAND(showgui, "s");
 COMMAND(hidegui, "s");
 COMMAND(togglegui, "s"); // RR
 COMMAND(guionclear, "s");
+COMMAND(guinoskin, "");
 COMMAND(guistayopen, "e");
 COMMAND(guinoautotab, "e");
 COMMAND(guitextscale, "fe");

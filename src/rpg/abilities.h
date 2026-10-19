@@ -16,8 +16,9 @@ namespace rpg
         int cooldownms;    // server-enforced cooldown between successful casts
         int manacost;      // mana cost (0 = free)
         float range;       // max target distance, world units
-        int damage;        // flat damage, applied through the engine damage path
+        int damage;        // base damage, applied through the engine damage path
         bool melee;        // true: front-cone target check; false: line-of-sight check
+        const char *damagetype; // data only (behavior later): "slash", "spark" ...
     };
 
     const int ABILITY_COUNT = 2;
@@ -28,6 +29,6 @@ namespace rpg
     bool validability(int id);
 
     // --- mana model (session state only, NOT persisted — see BUILD-STEP-3.md) ---
-    int maxmana(int level);            // 40 + 10 * level  (lvl 1: 50, lvl 10: 140)
-    const int MANA_REGEN_PER_SEC = 5;  // server-side regen for connected characters
+    // Formulas live in stats.h (milestone step 5): stat_maxmana / stat_manaregen.
+    int maxmana(int level);            // stat_maxmana: 40 + 10*level + 10*Wisdom
 }

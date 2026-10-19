@@ -4,6 +4,7 @@
 // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
 #include "rpg/rpg.h"
 #include "rpg/abilities.h"
+#include "rpg/stats.h"
 
 #ifdef SERVER
 #include "server/lua.h"
@@ -827,6 +828,7 @@ namespace server
     }
     COMMANDN(rpgstats, rpgstats_cmd, "sV");
 
+    static void rpg_syncinv(clientinfo *cq); // defined with the inventory ops below
     void rpggrantxp_cmd(tagval *args, int numargs)
     {
         if(numargs < 2) { conoutf("usage: rpggrantxp <name> <amount>"); return; }
@@ -835,7 +837,22 @@ namespace server
         int newlevel = rpg::awardxp(args[0].getstr(), args[1].getint(), &leveled);
         if(newlevel < 0) { conoutf("rpggrantxp: no character named '%s'", args[0].getstr()); return; }
         conoutf("rpggrantxp: %s +%d xp (level %d)", args[0].getstr(), args[1].getint(), newlevel);
-        if(leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", args[0].getstr(), newlevel);
+        if(leveled)
+        {
+            sendservmsgf("\f2%s \f7reached RPG level \f2%d!", args[0].getstr(), newlevel);
+            loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_NONE && !strcmp(clients[i]->name, args[0].getstr()))
+            {
+                clientinfo *lc = clients[i];
+                rpg_syncinv(lc); // refresh level/xp on the client sheet
+                if(rpg::mapactive(smapname)) // max HP follows the formula; keep current HP
+                {
+                    int maxhp = rpg::stat_maxhp(newlevel);
+                    if(lc->state.health > maxhp) lc->state.health = maxhp;
+                    lc->state.maxhealth = maxhp;
+                    sendf(lc->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
+                }
+            }
+        }
     }
     COMMANDN(rpggrantxp, rpggrantxp_cmd, "siV");
 
@@ -924,6 +941,12 @@ namespace server
         conoutf("rpgforceloot: drop #%d (%s) at '%s' (%.1f ahead)", idx, rpg::itemname(id), caster->name, dist);
     }
     COMMANDN(rpgforceloot, rpgforceloot_cmd, "sfV");
+    // TEST-ONLY (fenced): force the next melee ability cast to crit, so the
+    // crit multiplier is harness-observable without hundreds of casts at 5.5%.
+    // Never game code: the server roll is the real path; this just pins it.
+    static bool rpg_forcecrit = false;
+    void rpgforcecrit_cmd() { rpg_forcecrit = true; conoutf("rpgforcecrit: next melee cast will crit"); }
+    COMMANDN(rpgforcecrit, rpgforcecrit_cmd, "");
     // Drives the REAL server dodamage() with a monster as the attacker, so the armor
     // hook is exercised through the genuine code path (only the monster's decision
     // to attack is scripted; the damage math, armor absorption and sync are real).
@@ -1958,10 +1981,28 @@ namespace server
         gs.lifesequence = (gs.lifesequence + 1)&0x7F;
     }
 
+    // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
+    // Engine max health follows the RPG formula on RPG maps only. Fresh spawn: full
+    // heal, the engine convention (health == maxhealth after spawnstate). Otherwise
+    // clamp down only, never silently heal. Called from BOTH first-spawn paths:
+    // sendspawn() (respawns) and the inline spawn inside sendinitclient().
+    static void rpg_applyspawnhealth(clientinfo *ci)
+    {
+        if(!rpg::connected() || !rpg::mapactive(smapname)) return;
+        int rpg_lvl = 1, rpg_xp = 0;
+        if(!rpg::getstats(ci->name, rpg_lvl, rpg_xp)) return;
+        gamestate &gs = ci->state;
+        int maxhp = rpg::stat_maxhp(rpg_lvl);
+        if(gs.health >= gs.maxhealth) gs.health = maxhp;
+        else if(gs.health > maxhp) gs.health = maxhp;
+        gs.maxhealth = maxhp;
+    }
+
     void sendspawn(clientinfo *ci)
     {
         gamestate &gs = ci->state;
         spawnstate(ci);
+        rpg_applyspawnhealth(ci);
         sendf(ci->ownernum, 1, "ri2i9v", N_SPAWNSTATE, ci->clientnum, gs.lifesequence, gs.guts,
             gs.health, gs.maxhealth,
             gs.armour, gs.armourtype,
@@ -2093,6 +2134,7 @@ namespace server
             {
                 gamestate &gs = ci->state;
                 spawnstate(ci);
+                rpg_applyspawnhealth(ci); // RPG: formula max HP on first spawn too
                 putint(p, N_SPAWNSTATE);
                 putint(p, ci->clientnum);
                 sendstate(gs, p);
@@ -2216,6 +2258,19 @@ namespace server
         interm = 0;
         nextexceeded = 0;
         copystring(smapname, s);
+        // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
+        // A listen-server `map` command changes smapname after clients connected,
+        // so the connect-time spawn ran before the map was an RPG map; apply the
+        // formula max HP now. Position updates (sendstate) sync it to clients.
+        loopv(clients)
+        {
+            clientinfo *mci = clients[i];
+            if(mci->connectionState == CONNECTION_STATE_CONNECTED && mci->state.ai.type == ai::AI_TYPE_NONE)
+            {
+                rpg_applyspawnhealth(mci);
+                sendf(mci->clientnum, 1, "ri2", N_RPG_HPMAX, mci->state.maxhealth);
+            }
+        }
         loaditems();
         scores.shrink(0);
         shouldcheckteamkills = false;
@@ -2415,22 +2470,17 @@ namespace server
 
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
-        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
-        // Equipped armor absorbs MONSTER damage on RPG maps only. PvP damage,
-        // gun damage between players, and FPS modes are never touched: the
-        // attacker must be a monster and the map must be an RPG map.
+        // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
+        // DDO-style PERCENTAGE mitigation: taken = raw*100/(100 + armor*10).
+        // Same gating as before (monster attacker + RPG map only): PvP damage,
+        // gun damage between players, and FPS modes are never touched.
         if(damage > 0 && rpg::connected() && target && target->state.ai.type == ai::AI_TYPE_NONE &&
            actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
            rpg::mapactive(smapname))
         {
-            int red = rpg::armorvalue(target->name);
-            if(red > 0)
-            {
-                int newdmg = damage - red;
-                if(newdmg < 1) newdmg = 1;
-                if(newdmg != damage) conoutf("rpg: armor absorbs %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
-                damage = newdmg;
-            }
+            int newdmg = rpg::stat_mitigate(damage, rpg::armorvalue(target->name));
+            if(newdmg != damage) conoutf("rpg: armor reduces %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
+            damage = newdmg;
         }
         // survival damage upgrade: bought damage levels scale a human's outgoing damage (dmsp only)
         if(actor && actor!=target && m_dmsp && actor->state.ai.type==ai::AI_TYPE_NONE && actor->dmgmult > 100)
@@ -2461,7 +2511,22 @@ namespace server
                 rpg::unpinmonster(target->clientnum); // test pin ends with the monster
                 bool rpg_leveled = false;
                 int rpg_newlevel = rpg::awardxp(actor->name, rpg::XP_PER_MONSTER_KILL, &rpg_leveled);
-                if(rpg_leveled) sendservmsgf("\f2%s \f7reached RPG level \f2%d!", actor->name, rpg_newlevel);
+                if(rpg_leveled)
+                {
+                    sendservmsgf("\f2%s \f7reached RPG level \f2%d!", actor->name, rpg_newlevel);
+                    // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
+                    // Max health follows the formula on RPG maps. Current HP is
+                    // kept (no silent full heal); the client learns the new cap via
+                    // N_RPG_HPMAX and refreshes its stat cache via rpg_syncinv.
+                    if(rpg::mapactive(smapname))
+                    {
+                        int maxhp = rpg::stat_maxhp(rpg_newlevel);
+                        if(actor->state.health > maxhp) actor->state.health = maxhp;
+                        actor->state.maxhealth = maxhp;
+                        sendf(actor->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
+                    }
+                    rpg_syncinv(actor); // refresh level/xp on the client sheet
+                }
                 // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
                 // Loot drops roll on RPG maps only, so FPS modes never see item drops.
                 if(rpg::mapactive(smapname))
@@ -2616,14 +2681,27 @@ namespace server
         push.z = 0;
         if(push.squaredlen() > 0.01f) push.normalize();
         int hpbefore = target->state.health;
-        // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
-        // An equipped mainhand weapon adds its damage to MELEE abilities (Power
-        // Strike). Spells (Spark Bolt) are unaffected. RPG maps only.
+        // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
+        // Ability damage derives from attributes (automatic growth from level).
+        // Melee: 35 + weapon + Strength. Spell: 50 + 2*Knowledge. RPG maps only.
+        // Melee abilities can crit: the SERVER rolls (never the client) and the
+        // crit is announced in the cast message so it is harness-observable.
         int castdmg = ab.damage;
-        if(ab.melee && rpg::mapactive(smapname)) castdmg += rpg::weapondamage(cq->name);
+        bool crit = false;
+        if(rpg::mapactive(smapname))
+        {
+            if(ab.melee) castdmg = rpg::stat_powerstrike(level, rpg::weapondamage(cq->name));
+            else castdmg = rpg::stat_sparkbolt(level);
+            if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
+            {
+                crit = true;
+                castdmg = int(castdmg*rpg::stat_critmult(level) + 0.5f);
+            }
+            rpg_forcecrit = false; // one-shot: the hook never leaks into real casts
+        }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
-        conoutf("rpg: '%s' casts %s on '%s' for %d (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, hpbefore, target->state.health);
-        defformatstring(msg)("\f2%s \f7hits %s for %d damage.", ab.name, target->name, castdmg);
+        conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
+        defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
         // push fresh mana + cooldown to the caster for the RPG HUD
         rpg::getmana(cq->name, mana, maxmana);
@@ -3401,6 +3479,7 @@ namespace server
 
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         rpg::onconnect(ci->name);
+        rpg_syncinv(ci); // push level/xp + inventory so the client sheet is right on connect
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Everyone learns this client's equipped weapon model; the newcomer learns everyone's.
         rpg_sendvwep(ci);
