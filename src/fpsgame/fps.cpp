@@ -1839,21 +1839,22 @@ namespace game
     static Texture *rpg_loadtex(const char *path) { return textureload(path, 3, true, false); }
     static void rpg_fillrect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f)
     {
+        glDisable(GL_TEXTURE_2D);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(r, g, b, a);
         glBegin(GL_QUADS);
         glVertex2f(x, y); glVertex2f(x+w, y); glVertex2f(x+w, y+h); glVertex2f(x, y+h);
         glEnd();
+        glEnable(GL_TEXTURE_2D);
     }
     // TEST-ONLY: direct walk control (the `forward` console command does not move the headless player; this sets the physics flag directly).
     ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
 
-    // Kit-strip RPG HUD (user design, Oct 19): one bottom-center strip built from
-    // the kit's window_hud art. Blue orb (left) = mana, yellow/green orb
-    // (right) = XP, red bar across the middle recess = health, 10 action slots
-    // (keys 1-0) in the lower recess. All fills are REAL continuous UV crops of
-    // the kit art (no fake segments). RPG maps only; FPS/battleground maps keep
-    // the stock HUD untouched.
+    // Kit-strip RPG HUD (user design, Oct 19; gauge swap Oct 19): one bottom-center
+    // strip. Blue orb (left) = mana, RED orb (right) = health with cur/max numerals,
+    // yellow/green bar across the middle recess = XP (level progress). 10 action
+    // slots (keys 1-0) in the lower recess. Color language: blue=mana, red=health,
+    // yellow/green=XP. RPG maps only; FPS/battleground maps keep the stock HUD untouched.
     static void rpg_drawtexuv(float x, float y, float w, float h, float u0, float v0, float u1, float v1)
     {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1916,18 +1917,22 @@ namespace game
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_mana.png")->id);
         if(mpf > 0) rpg_drawtexuv(ox, oy + osz*(1-mpf), osz, osz*mpf, 0, 1-mpf, 1, 1);
 
-        // xp orb (right), native circle (883,12,132,132)
+        // health orb (right), native circle (883,12,132,132): red fill grows from bottom
+        // User design change Oct 19: right orb is HEALTH (was XP); numerals on the orb.
         float xx = sx + 883*s, xy = sy + 12*s;
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_xp.png")->id);
-        if(xpf > 0) rpg_drawtexuv(xx, xy + osz*(1-xpf), osz, osz*xpf, 0, 1-xpf, 1, 1);
-
-        // health bar (middle thin recess), native x 153-870, y 28-48
-        float bx0 = sx + 153*s, by0 = sy + 28*s, bw = (870-153)*s, bh = (48-28)*s;
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/bar_hp.png")->id);
-        if(hpf > 0) rpg_drawtexuv(bx0, by0, bw*hpf, bh, 0, 0, hpf, 1);
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/globe_hp.png")->id);
+        if(hpf > 0) rpg_drawtexuv(xx, xy + osz*(1-hpf), osz, osz*hpf, 0, 1-hpf, 1, 1);
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        // numerals contained in the thin health recess (72% of its height)
-        rpg_hudtextc(hps, bx0 + bw/2, by0 + bh/2, bh*0.72f);
+        // health numerals centered on the orb (20% of orb diameter fits "100/100")
+        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.20f);
+
+        // experience bar (middle thin recess), native x 153-870, y 28-48
+        // User design change Oct 19: center bar is XP (was health); fills toward level-up.
+        float bx0 = sx + 153*s, by0 = sy + 28*s, bw = (870-153)*s, bh = (48-28)*s;
+        // XP bar uses the yellow/green bar_xp.png (matches globe_xp orb).
+        // Red is reserved for health only.
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/bar_xp.png")->id);
+        if(xpf > 0) rpg_drawtexuv(bx0, by0, bw*xpf, bh, 0, 0, xpf, 1);
 
         // action slots (lower recess): 10 slots on keys 1-0; slot 1 = Power
         // Strike, slot 2 = Spark Bolt, slots 3-0 are empty kit frames.

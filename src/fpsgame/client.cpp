@@ -310,6 +310,7 @@ namespace game
     ICOMMAND(rpgtargetmaxhp, "", (), { fpsent *d = rpg_selmon(); intret(d ? d->maxhealth : 0); });
 
     static int rpg_testforcerange = 0; // TEST-ONLY: bypass auto-attack client range check
+    ICOMMAND(rpgtestsetxp, "i", (int *v), { rpg::setclientxp(*v); conoutf("rpgtestsetxp: %d", *v); });
     ICOMMAND(rpgtestforcerange, "i", (int *v), { rpg_testforcerange = *v ? 1 : 0; conoutf("rpgtestforcerange: %s", rpg_testforcerange ? "ON" : "OFF"); });
     // Per-frame targeting maintenance. Called from updateworld() on RPG maps.
     void updatetargeting()

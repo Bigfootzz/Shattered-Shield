@@ -106,6 +106,7 @@ namespace rpg
     void setinv(const char *invstr, const char *equipstr, int level, int xp); // "id:count;..." / "slot:id;..."
     bool getclientinv(itemstack *out, int maxout, int &n, int equipped[SLOT_COUNT]);
     bool getclientstats(int &level, int &xp); // level/xp from the last N_RPG_INV
+    void setclientxp(int xp); // TEST-ONLY: set client XP for HUD verification
     void setloot(int idx, int item, float x, float y, float z);
     void removeloot(int idx);
     void clearloot();

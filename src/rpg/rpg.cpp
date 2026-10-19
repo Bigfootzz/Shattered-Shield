@@ -682,6 +682,8 @@ namespace rpg
 
     static int cllevel = 1, clxp = 0;
 
+    // TEST-ONLY: set client-side XP directly for HUD verification screenshots
+    void setclientxp(int xp) { initclient(); clxp = xp; }
     bool getclientstats(int &level, int &xp)
     {
         initclient();
