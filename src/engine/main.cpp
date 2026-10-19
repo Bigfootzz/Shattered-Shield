@@ -263,14 +263,10 @@ void renderbackground(const char *caption, Texture *mapshot, Texture *bgshot, co
         glEnd();
         float lh = 0.5f*min(w, h), lw = lh*2,
               lx = 0.5f*(w - lw), ly = 0.5f*(h*0.5f - lh);
-        settexture((maxtexsize ? min(maxtexsize, hwtexsize) : hwtexsize) >= 1024 && (scr_w > 1280 || scr_h > 800) ? "data/gui/logo_1024.png" : "data/gui/logo.png", 3);
-        glColor4f(1, 1, 1, 1);
-        glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0, 0); glVertex2f(lx,    ly);
-        glTexCoord2f(1, 0); glVertex2f(lx+lw, ly);
-        glTexCoord2f(0, 1); glVertex2f(lx,    ly+lh);
-        glTexCoord2f(1, 1); glVertex2f(lx+lw, ly+lh);
-        glEnd();
+        // Shattered Shield (ITEM 5): the Revelade logo overlay is skipped -
+        // our full-bleed backdrop/loadscreen art already carries the branding
+        // (the menu GUI draws the logo as its title treatment).
+        // (The lx/ly/lw/lh rect is kept: the mapshot block below reuses ly+lh.)
 
         if(caption)
         {

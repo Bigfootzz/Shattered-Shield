@@ -1868,7 +1868,16 @@ namespace game
     ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
 
     // --- character select (ITEM 5): CubeScript bindings for the menu ---
-    // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2
+    // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2 (dir name) and rpg_charmodelidx0..2 (playermodel INDEX for guiplayerpreview; mapping must match data/game_fps.cfg playermodeldir0..3)
+    static int rpg_modelidx(const char *modeldir)
+    {
+        if(!modeldir || !modeldir[0]) return 0;
+        if(!strcmp(modeldir, "ranger_male"))    return 0;
+        if(!strcmp(modeldir, "ranger_female"))  return 1;
+        if(!strcmp(modeldir, "peasant_male"))   return 2;
+        if(!strcmp(modeldir, "peasant_female")) return 3;
+        return 0;
+    }
     ICOMMAND(rpg_charlist, "", (),
     {
         char names[3][64]; int levels[3]; char archs[3][32]; char models[3][64];
@@ -1881,6 +1890,7 @@ namespace game
             defformatstring(al)("alias rpg_charlevel%d %d", i, i < n ? levels[i] : 0); execute(al);
             defformatstring(aa)("alias rpg_chararch%d (concatword \"%s\")", i, i < n ? archs[i] : ""); execute(aa);
             defformatstring(am)("alias rpg_charmodel%d (concatword \"%s\")", i, i < n ? models[i] : ""); execute(am);
+            defformatstring(mi)("alias rpg_charmodelidx%d %d", i, i < n ? rpg_modelidx(models[i]) : 0); execute(mi);
         }
     });
     ICOMMAND(rpg_createchar, "ss", (char *name, char *model),
@@ -1899,9 +1909,11 @@ namespace game
     {
         if(!name || !name[0]) return;
         // character name is the persistence key
-        setvar("name", 0); // noop guard
         string cname; copystring(cname, name);
-        // use the engine name var
+        // ITEM 5 fix: the server reads player1->name (sent in N_CONNECT),
+        // not the persisted "name" var — setsvar alone left the stale name.
+        // switchname() updates the live entity (and persists the var too).
+        switchname(cname);
         setsvar("name", cname);
         const char *srv = getalias("__char_server");
         if(!srv || !srv[0] || !strcmp(srv, "local"))
@@ -2469,7 +2481,7 @@ namespace game
         float size = flagblip ? 0.1f : 0.05f,
               xoffset = flagblip ? -2*(3/32.0f)*size : -size,
               yoffset = flagblip ? -2*(1 - 3/32.0f)*size : -size,
-              dist = dir.magnitude2(), maxdist = 1 - 0.05f - 0.05f;
+              dist = dir.magnitude2(), maxdist = 0.86f; // new frame art: stay inside the 0.83-opening brass rim
         if(dist >= maxdist) dir.mul(maxdist/dist);
         dir.rotate_around_z(-camera1->yaw*RAD);
         drawradar(x + s*0.5f*(1.0f + dir.x + xoffset), y + s*0.5f*(1.0f + dir.y + yoffset), size*s);
@@ -2649,7 +2661,12 @@ namespace game
         settexture("data/hud/radarping.png", 3);
         glColor4f(1, 1, 1, fade > 0.75f ? 0.75f : fade);
         drawradar(x - roffset + rpoffset, y - roffset + rpoffset, rsize*blend);
-        settexture("data/hud/radar.png", 3);
+        // Shattered Shield frame (user-approved Oct 19): the same stone-ring
+        // art as the RPG radar. Cosmetic only — markers, compass and mode
+        // logic are untouched. (Revelade Revolution keeps stock radar.png;
+        // separate product.)
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1, 1, 1, radartexalpha);
         drawradar(x - roffset, y - roffset, rsize);
         loopi(2)
@@ -2661,7 +2678,10 @@ namespace game
             glRotatef(camera1->yaw + 180, 0, 0, -1);
             if(i) glColor4f(1, 1, 1, radartexalpha);
             else glColor4f(colorteam[dteamnum(d)][0], colorteam[dteamnum(d)][1], colorteam[dteamnum(d)][2], 1.f);
-            drawradar(-0.5f*rsize, -0.5f*rsize, rsize);
+            // Dial sits inside the new frame's interior opening (0.83 of the
+            // frame rect), so it draws slightly smaller than the frame.
+            float crsize = rsize*0.89f;
+            drawradar(-0.5f*crsize, -0.5f*crsize, crsize);
             glPopMatrix();
         }
 
@@ -2736,10 +2756,10 @@ namespace game
         float scale = calcradarscale();
         vec dir = d->o;
         dir.sub(pos).div(scale);
-        // Marker clamp tightened for the new frame art (Oct 19): the ornate
-        // ring's interior opening is 0.81 of the rect half-width (vs 0.92 stock),
-        // so edge markers are pulled slightly inward to stay visible.
-        float dist = dir.magnitude2(), maxdist = 0.76f;
+        // Marker clamp for the frame art (Oct 19): the stone ring's interior
+        // opening is 0.83 of the rect half-width (vs 0.92 stock), so edge
+        // markers are pulled slightly inward to stay inside the brass rim.
+        float dist = dir.magnitude2(), maxdist = 0.78f;
         if(dist >= maxdist) dir.mul(maxdist/dist);
         dir.rotate_around_z(-camera1->yaw*RAD);
         glColor4f(r, g, b, 1.0f);
@@ -2759,10 +2779,9 @@ namespace game
         bindminimap();
         drawminimap(d, x, y, s);
         if(minimapalpha >= 1) glEnable(GL_BLEND);
-        // RPG frame art (user-supplied Oct 19): ornate silver ring + shield studs,
-        // converted from the baked-checkerboard JPEG to a real alpha PNG
-        // (packages/ui/rpg/hud/radar_frame.png). Replaces the stock radar.png
-        // frame on RPG maps only; the FPS/battleground radar is untouched.
+        // RPG frame art (Oct 19): dark stone ring, rope border, silver studs,
+        // brass inner rim (packages/ui/rpg/hud/radar_frame.png) — the user's
+        // approved replacement for the rejected silver fang-ring art.
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1, 1, 1, radartexalpha);
