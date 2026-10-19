@@ -830,6 +830,42 @@ namespace server
 
     static void rpg_syncinv(clientinfo *cq); // defined with the inventory ops below
     static void rpg_qmsg(clientinfo *cq, const char *line); // quest chain v1, defined below
+    struct rpg_party;
+    static rpg_party *rpg_findparty(const char *name);
+    static clientinfo *rpg_findclient(const char *name);
+    #define RPG_PARTY_MAX 5
+    struct rpg_party
+    {
+        int id;
+        string leader;                  // character name
+        string members[RPG_PARTY_MAX];  // includes leader
+        int nmembers;
+        string invites[RPG_PARTY_MAX];  // pending invitee names
+        int ninvites;
+    };
+    static vector<rpg_party> rpg_parties;
+    static int rpg_nextpartyid = 1;
+    // fixed-array slot helpers (string is char[260]; no vector<string>)
+    static int rpg_pslot_find(string *arr, int n, const char *name)
+    {
+        loopi(n) if(!strcmp(arr[i], name)) return i;
+        return -1;
+    }
+    static bool rpg_pslot_add(string *arr, int &n, const char *name)
+    {
+        if(n >= RPG_PARTY_MAX || rpg_pslot_find(arr, n, name) >= 0) return false;
+        copystring(arr[n++], name);
+        return true;
+    }
+    static bool rpg_pslot_del(string *arr, int &n, const char *name)
+    {
+        int idx = rpg_pslot_find(arr, n, name);
+        if(idx < 0) return false;
+        for(int k = idx; k < n - 1; k++) copystring(arr[k], arr[k+1]);
+        n--;
+        return true;
+    }
+
     static void rpg_syncquest(clientinfo *cq); // quest chain v1, defined below
     void rpg_talk(clientinfo *cq, int npcidx); // quest chain v1, defined below
     void rpggrantxp_cmd(tagval *args, int numargs)
@@ -2588,6 +2624,32 @@ namespace server
                         }
                         rpg_syncquest(actor);
                     }
+                    // RPG: party shared quest credit (v1). A kill by any member
+                    // counts toward the same active quest objective of every OTHER
+                    // member who has that quest active. Same map is implicit (one
+                    // map per server); no distance check in v1. XP stays with the
+                    // killer (existing per-kill behavior). Turn-in stays individual.
+                    rpg_party *pp = rpg_findparty(actor->name);
+                    if(pp) loopi(pp->nmembers)
+                    {
+                        if(!strcmp(pp->members[i], actor->name)) continue;
+                        clientinfo *m = rpg_findclient(pp->members[i]);
+                        if(!m) continue; // offline: no live tracker to update
+                        int mq = rpg::questonkill(m->name, target->clientnum, true);
+                        if(mq > 0)
+                        {
+                            conoutf("rpg: party credit: %s quest %d (killer %s)", m->name, mq, actor->name);
+                            const rpg::questdef &mqqd = rpg::quest(mq);
+                            int mqk = rpg::questkills(m->name, mq);
+                            if(mqk >= mqqd.need) rpg_qmsg(m, "Objective complete — return to Elder Maren.");
+                            else
+                            {
+                                defformatstring(mqprog)("%s: %d/%d slain. (party credit from %s)", mqqd.name, mqk, mqqd.need, actor->name);
+                                rpg_qmsg(m, mqprog);
+                            }
+                            rpg_syncquest(m);
+                        }
+                    }
                 }
                 // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
                 // Loot drops roll on RPG maps only, so FPS modes never see item drops.
@@ -2748,6 +2810,215 @@ namespace server
             need = rpg::quest(q).need;
         }
         sendf(cq->clientnum, 1, "ri5", N_RPG_QUEST, q, st, kills, need);
+    }
+
+    // --- RPG: Party + safety v1 (Oct 19, additive) ---
+    // Server-managed parties for RPG play. Parties are session state (not
+    // persisted); mute/block lists persist in rpg.db via rpg::ismuted etc.
+    // Commands are chat lines starting with '/' (typed in the World tab or
+    // console via say): /pinvite /paccept /pdecline /pleave /proster,
+    // /mute /block /report, /phelp. All feedback goes to the System tab
+    // via rpg_qmsg.
+
+    static rpg_party *rpg_findparty(const char *name)
+    {
+        if(!name || !name[0]) return NULL;
+        loopv(rpg_parties)
+        {
+            rpg_party &p = rpg_parties[i];
+            if(rpg_pslot_find(p.members, p.nmembers, name) >= 0) return &p;
+        }
+        return NULL;
+    }
+    static clientinfo *rpg_findclient(const char *name)
+    {
+        if(!name || !name[0]) return NULL;
+        loopv(clients)
+        {
+            clientinfo *t = clients[i];
+            if(t->state.ai.type != ai::AI_TYPE_NONE) continue;
+            if(!strcmp(t->name, name)) return t;
+        }
+        return NULL;
+    }
+    static void rpg_party_say(rpg_party *p, const char *line, clientinfo *except = NULL)
+    {
+        if(!p || !line) return;
+        loopi(p->nmembers)
+        {
+            clientinfo *m = rpg_findclient(p->members[i]);
+            if(m && m != except) rpg_qmsg(m, line);
+        }
+    }
+    static void rpg_party_roster(clientinfo *cq)
+    {
+        rpg_party *p = rpg_findparty(cq->name);
+        if(!p) { rpg_qmsg(cq, "Party: you are not in a party. (/pinvite <name> to start one)"); return; }
+        string buf;
+        formatstring(buf)("Party #%d (leader: %s):", p->id, p->leader);
+        loopi(p->nmembers)
+        {
+            if(i) concatstring(buf, ",");
+            concatstring(buf, " ");
+            concatstring(buf, p->members[i]);
+            if(!strcmp(p->members[i], p->leader)) concatstring(buf, " [L]");
+        }
+        rpg_qmsg(cq, buf);
+    }
+    static void rpg_party_disband(rpg_party *p, const char *reason)
+    {
+        if(!p) return;
+        defformatstring(msg)("Party #%d disbanded (%s).", p->id, reason ? reason : "leader left");
+        rpg_party_say(p, msg);
+        int pid = p->id;
+        loopv(rpg_parties) if(rpg_parties[i].id == pid) { rpg_parties.remove(i); break; }
+    }
+    // Chat command dispatcher. Returns true when the line was a command.
+    static bool rpg_chatcmd(clientinfo *cq, const char *text)
+    {
+        if(!cq || !text || text[0] != '/') return false;
+        // split "/cmd args..."
+        string cmd, args;
+        const char *sp = strchr(text, ' ');
+        if(sp) { copystring(cmd, text, min(int(sp - text) + 1, (int)sizeof(cmd))); copystring(args, sp + 1); }
+        else { copystring(cmd, text); args[0] = '\0'; }
+        // ---- /phelp ----
+        if(!strcmp(cmd, "/phelp"))
+        {
+            rpg_qmsg(cq, "Party: /pinvite <name> /paccept /pdecline /pleave /proster");
+            rpg_qmsg(cq, "Safety: /mute <name> (toggle) /block <name> (toggle) /report <name> [reason]");
+            return true;
+        }
+        // ---- /pinvite ----
+        if(!strcmp(cmd, "/pinvite"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /pinvite <name>"); return true; }
+            clientinfo *t = rpg_findclient(args);
+            if(!t) { defformatstring(m)("No player named '%s' is online.", args); rpg_qmsg(cq, m); return true; }
+            if(t == cq) { rpg_qmsg(cq, "You can't invite yourself."); return true; }
+            if(rpg::isblocked(t->name, cq->name)) { rpg_qmsg(cq, "That player is not accepting your invites."); return true; }
+            if(rpg_findparty(t->name)) { rpg_qmsg(cq, "They are already in a party."); return true; }
+            rpg_party *p = rpg_findparty(cq->name);
+            if(!p)
+            {
+                rpg_party np; np.id = rpg_nextpartyid++;
+                copystring(np.leader, cq->name);
+                np.nmembers = 0; np.ninvites = 0;
+                rpg_pslot_add(np.members, np.nmembers, cq->name);
+                rpg_parties.add(np); p = &rpg_parties.last();
+                defformatstring(m)("Party #%d formed. You are the leader.", p->id); rpg_qmsg(cq, m);
+            }
+            if(p->nmembers >= RPG_PARTY_MAX) { rpg_qmsg(cq, "Party is full (5)."); return true; }
+            if(rpg_pslot_find(p->invites, p->ninvites, t->name) >= 0) { rpg_qmsg(cq, "Invite already pending."); return true; }
+            rpg_pslot_add(p->invites, p->ninvites, t->name);
+            defformatstring(m)("Party invite sent to %s.", t->name); rpg_qmsg(cq, m);
+            defformatstring(im)("%s invites you to Party #%d. (/paccept or /pdecline)", cq->name, p->id);
+            rpg_qmsg(t, im);
+            return true;
+        }
+        // ---- /paccept ----
+        if(!strcmp(cmd, "/paccept"))
+        {
+            if(rpg_findparty(cq->name)) { rpg_qmsg(cq, "You are already in a party."); return true; }
+            loopv(rpg_parties)
+            {
+                rpg_party &p = rpg_parties[i];
+                if(rpg_pslot_find(p.invites, p.ninvites, cq->name) >= 0)
+                {
+                    rpg_pslot_del(p.invites, p.ninvites, cq->name);
+                    if(p.nmembers >= RPG_PARTY_MAX) { rpg_qmsg(cq, "That party is full."); return true; }
+                    rpg_pslot_add(p.members, p.nmembers, cq->name);
+                    defformatstring(m)("%s joined Party #%d.", cq->name, p.id);
+                    rpg_party_say(&p, m);
+                    rpg_party_roster(cq);
+                    return true;
+                }
+            }
+            rpg_qmsg(cq, "No pending party invite.");
+            return true;
+        }
+        // ---- /pdecline ----
+        if(!strcmp(cmd, "/pdecline"))
+        {
+            loopv(rpg_parties)
+            {
+                rpg_party &p = rpg_parties[i];
+                if(rpg_pslot_find(p.invites, p.ninvites, cq->name) >= 0)
+                {
+                    rpg_pslot_del(p.invites, p.ninvites, cq->name);
+                    defformatstring(m)("%s declined your party invite.", cq->name);
+                    clientinfo *l = rpg_findclient(p.leader);
+                    if(l) rpg_qmsg(l, m);
+                    rpg_qmsg(cq, "Invite declined.");
+                    return true;
+                }
+            }
+            rpg_qmsg(cq, "No pending party invite.");
+            return true;
+        }
+        // ---- /pleave ----
+        if(!strcmp(cmd, "/pleave"))
+        {
+            rpg_party *p = rpg_findparty(cq->name);
+            if(!p) { rpg_qmsg(cq, "You are not in a party."); return true; }
+            if(!strcmp(p->leader, cq->name)) { rpg_party_disband(p, "leader left"); return true; }
+            defformatstring(m)("%s left the party.", cq->name);
+            // remove member, then announce (p may be reallocated; find again)
+            int pid = p->id;
+            rpg_pslot_del(p->members, p->nmembers, cq->name);
+            rpg_party *p2 = NULL;
+            loopv(rpg_parties) if(rpg_parties[i].id == pid) { p2 = &rpg_parties[i]; break; }
+            if(p2) rpg_party_say(p2, m);
+            rpg_qmsg(cq, "You left the party.");
+            return true;
+        }
+        // ---- /proster ----
+        if(!strcmp(cmd, "/proster") || !strcmp(cmd, "/party"))
+        {
+            rpg_party_roster(cq);
+            return true;
+        }
+        // ---- /mute ----
+        if(!strcmp(cmd, "/mute"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /mute <name> (toggles)"); return true; }
+            if(!strcmp(args, cq->name)) { rpg_qmsg(cq, "You can't mute yourself."); return true; }
+            bool now = rpg::togglemute(cq->name, args);
+            defformatstring(m)("%s %s.", args, now ? "muted — their World/Clan lines will no longer reach you" : "unmuted");
+            rpg_qmsg(cq, m);
+            return true;
+        }
+        // ---- /block ----
+        if(!strcmp(cmd, "/block"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /block <name> (toggles; block = mute + no party invites)"); return true; }
+            if(!strcmp(args, cq->name)) { rpg_qmsg(cq, "You can't block yourself."); return true; }
+            bool now = rpg::toggleblock(cq->name, args);
+            // block implies mute: enabling a block ensures the mute is on too;
+            // removing a block leaves the mute list untouched.
+            if(now && !rpg::ismuted(cq->name, args)) rpg::togglemute(cq->name, args);
+            defformatstring(m)("%s %s.", args, now ? "blocked — muted and cannot party-invite you" : "unblocked");
+            rpg_qmsg(cq, m);
+            return true;
+        }
+        // ---- /report ----
+        if(!strcmp(cmd, "/report"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /report <name> [reason]"); return true; }
+            string target, reason;
+            const char *rsp = strchr(args, ' ');
+            if(rsp) { copystring(target, args, min(int(rsp - args) + 1, (int)sizeof(target))); copystring(reason, rsp + 1); }
+            else { copystring(target, args); reason[0] = '\0'; }
+            // server log (stdout + logfile via conoutf)
+            if(reason[0]) conoutf("rpg: REPORT by %s against %s: %s", cq->name, target, reason);
+            else conoutf("rpg: REPORT by %s against %s (no reason given)", cq->name, target);
+            defformatstring(m)("Report against %s logged. Thank you.", target);
+            rpg_qmsg(cq, m);
+            return true;
+        }
+        defformatstring(m)("Unknown command '%s'. (/phelp for the list)", cmd);
+        rpg_qmsg(cq, m);
+        return true;
     }
 
     static void rpg_questoffer(clientinfo *cq, int q)
@@ -4399,9 +4670,31 @@ namespace server
             case N_TEXT:
             {
                 QUEUE_AI;
-                QUEUE_MSG;
                 getstring(text, p);
                 filtertext(text, text);
+                // RPG: '/' chat commands (party + safety v1). Handled here and
+                // never broadcast. Non-RPG maps keep stock behavior below.
+                if(text[0] == '/' && rpg::mapactive(smapname))
+                {
+                    rpg_chatcmd(cq, text);
+                    break;
+                }
+                if(rpg::mapactive(smapname))
+                {
+                    // RPG: World-tab broadcast with per-recipient mute filtering.
+                    // Mirrors the stock worldstate fan-out (sender gets no echo;
+                    // they already saw the line via the local conoutf in say).
+                    loopv(clients)
+                    {
+                        clientinfo *t = clients[i];
+                        if(t == cq || t->state.ai.type != ai::AI_TYPE_NONE) continue;
+                        if(t->state.state == CS_SPECTATOR) continue;
+                        if(rpg::ismuted(t->name, cq->name)) continue; // muted: line never reaches them
+                        sendf(t->clientnum, 1, "riis", N_TEXT, cq->clientnum, text);
+                    }
+                    break;
+                }
+                QUEUE_MSG;
                 QUEUE_STR(text);
                 break;
             }
@@ -4414,6 +4707,7 @@ namespace server
                 {
                     clientinfo *t = clients[i];
                     if(t==cq || t->state.state==CS_SPECTATOR || t->state.ai.type != ai::AI_TYPE_NONE || strcmp(cq->team, t->team)) continue;
+                    if(rpg::mapactive(smapname) && rpg::ismuted(t->name, cq->name)) continue; // RPG mute applies to Clan too
                     sendf(t->clientnum, 1, "riis", N_SAYTEAM, cq->clientnum, text);
                 }
                 break;

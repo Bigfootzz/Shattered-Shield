@@ -169,6 +169,12 @@ namespace rpg
     // Server-validated: only counts while that quest is ACTIVE; champion kills
     // only count when the victim is the tracked champion clientnum.
     int questonkill(const char *name, int targetclientnum, bool ismonster);
+    // --- party + safety v1 (Oct 19): per-player mute/block lists, persisted ---
+    // in rpg.db (additive tables rpg_mutes / rpg_blocks). Used server-side.
+    bool ismuted(const char *owner, const char *target);
+    bool togglemute(const char *owner, const char *target); // returns true when now muted
+    bool isblocked(const char *owner, const char *target);
+    bool toggleblock(const char *owner, const char *target); // returns true when now blocked
     // Champion tracking (server-side session state; the champion is a real
     // monster client spawned by the quest system, not a test spawn).
     void setchampioncn(int cn);

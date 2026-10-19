@@ -146,6 +146,15 @@ namespace rpg
                 "state INTEGER NOT NULL DEFAULT 0,"
                 "kills INTEGER NOT NULL DEFAULT 0,"
                 "PRIMARY KEY(name, quest))");
+        // --- party + safety v1 (Oct 19): mute/block lists, additive ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_mutes("
+                "owner TEXT NOT NULL,"
+                "target TEXT NOT NULL,"
+                "PRIMARY KEY(owner, target))");
+        execsql("CREATE TABLE IF NOT EXISTS rpg_blocks("
+                "owner TEXT NOT NULL,"
+                "target TEXT NOT NULL,"
+                "PRIMARY KEY(owner, target))");
         conoutf("rpg: character database open at %s (sqlite %s)", (const char *)dbfile, sqlite3_libversion());
     }
 
@@ -997,6 +1006,51 @@ namespace rpg
         if(q == QUEST_CHAMPION) clearchampioncn(); // the champion is dead; stop tracking
         return q;
     }
+
+    // --- party + safety v1: mute/block lists (server-side) ---
+    static bool hasrow(const char *table, const char *owner, const char *target)
+    {
+        if(!db || !owner || !owner[0] || !target || !target[0]) return false;
+        sqlite3_stmt *st = NULL;
+        defformatstring(sql)("SELECT 1 FROM %s WHERE owner=? AND target=?", table);
+        if(sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        bool found = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+        return found;
+    }
+    static bool togglerow(const char *table, const char *owner, const char *target)
+    {
+        if(!db || !owner || !owner[0] || !target || !target[0]) return false;
+        if(hasrow(table, owner, target))
+        {
+            defformatstring(sql)("DELETE FROM %s WHERE owner=? AND target=?", table);
+            sqlite3_stmt *st = NULL;
+            if(sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK)
+            {
+                sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+                sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+            return false; // now unmuted/unblocked
+        }
+        defformatstring(sql)("INSERT INTO %s(owner, target) VALUES(?, ?)", table);
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+        return true; // now muted/blocked
+    }
+    bool ismuted(const char *owner, const char *target) { return hasrow("rpg_mutes", owner, target); }
+    bool togglemute(const char *owner, const char *target) { return togglerow("rpg_mutes", owner, target); }
+    bool isblocked(const char *owner, const char *target) { return hasrow("rpg_blocks", owner, target); }
+    bool toggleblock(const char *owner, const char *target) { return togglerow("rpg_blocks", owner, target); }
 
     // --- quest chain v1: client presentation caches (never authoritative) ---
     static int clquest_id = QUEST_NONE, clquest_state = -1, clquest_kills = 0, clquest_need = 0;
