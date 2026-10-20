@@ -1220,6 +1220,13 @@ namespace game
         entities::resetspawns();
         copystring(clientmap, name ? name : "");
 
+        // World maps: the engine generates the minimap texture inside
+        // drawtextures(), which runs BEFORE startmap (clientmap still holds
+        // the previous map name), so needminimap() is false there and the
+        // RPG radar gets a black interior. Regenerate now that the name is
+        // known; ::drawminimap() re-checks needminimap() itself.
+        if(rpg::mapactive(name)) ::drawminimap();
+
         sendmapinfo();
     }
 
