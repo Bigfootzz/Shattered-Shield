@@ -21,10 +21,13 @@ namespace rpg
         const char *damagetype; // data only (behavior later): "slash", "spark" ...
     };
 
-    const int ABILITY_COUNT = 2;
+    const int ABILITY_COUNT = 3;
 
     // Melee: short range, free, fast cooldown.
     // Spell: long range, costs mana, slower cooldown.
+    // Index 2 is the basic weapon swing (CLEANUP item 8): the generic
+    // attack the right-click auto-attack loop uses. No mana, short
+    // cooldown, damage = ability base (0) + weapon + Strength.
     const abilitydef &ability(int id); // id in [0, ABILITY_COUNT)
     bool validability(int id);
 

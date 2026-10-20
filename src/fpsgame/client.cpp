@@ -230,11 +230,19 @@ namespace game
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
-            if(pk.kind == 2 && pk.mon)
+                if(pk.kind == 2 && pk.mon)
             {
+                // CLEANUP item 8: right-click engages only within basic
+                // attack range. Out of range the click just selects - no
+                // auto-attack loop, no repeated 'no target' server spam.
                 rpg::selecttarget(pk.mon->clientnum);
-                rpg::setautoattack(true);
-                conoutf("rpg: auto-attacking '%s'", pk.mon->name);
+                vec delta(pk.mon->o); delta.sub(player1->o);
+                if(delta.magnitude() <= rpg::ability(2).range)
+                {
+                    rpg::setautoattack(true);
+                    conoutf("rpg: auto-attacking '%s'", pk.mon->name);
+                }
+                else conoutf("rpg: '%s' is too far away to attack", pk.mon->name);
             }
             else
             {
@@ -596,9 +604,10 @@ namespace game
             else player1->yaw = camera1->yaw;
         }
 
-        // auto-attack: repeated Power Strike (ability 0) through the real,
-        // server-validated cast path. Client-side pre-checks only avoid chat
-        // spam; cooldown/mana/range/line-of-sight are enforced by the server.
+        // auto-attack: repeated Basic Attack (ability 2, CLEANUP item 8)
+        // through the real, server-validated cast path. Client-side
+        // pre-checks only avoid chat spam; cooldown/mana/range/line-of-sight
+        // are enforced by the server.
         // Out of range: HOLD in place (no teleport, no auto-path) and say so.
         if(rpg::autoattacking() && sel)
         {
@@ -607,7 +616,7 @@ namespace game
             if(totalmillis - lasttry >= 250)
             {
                 lasttry = totalmillis;
-                const rpg::abilitydef &ab = rpg::ability(0);
+                const rpg::abilitydef &ab = rpg::ability(2);
                 vec delta(sel->o); delta.sub(player1->o);
                 bool inrange = rpg_testforcerange || delta.magnitude() <= ab.range; // TEST-ONLY
                 if(!inrange)
@@ -619,7 +628,7 @@ namespace game
                     }
                     washolding = true;
                 }
-                else if(rpg::cooldownleft(0, totalmillis) > 0) washolding = false;
+                else if(rpg::cooldownleft(2, totalmillis) > 0) washolding = false;
                 else
                 {
                     int mana = 0, maxmana = 0;
@@ -629,7 +638,7 @@ namespace game
                         if(washolding) conoutf("rpg: auto-attack resumed");
                         washolding = false;
                         conoutf("rpg: auto-attack tick -> '%s' (hp %d/%d)", sel->name, sel->health, sel->maxhealth);
-                        rpg_castability(0);
+                        rpg_castability(2);
                     }
                     else if(!washolding || totalmillis - lastholdlog > 5000)
                     {

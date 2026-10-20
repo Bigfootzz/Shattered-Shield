@@ -3698,14 +3698,16 @@ namespace server
         int hpbefore = target->state.health;
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // Ability damage derives from attributes (automatic growth from level).
-        // Melee: 35 + weapon + Strength. Spell: 50 + 2*Knowledge. RPG maps only.
+        // Melee: ability base + weapon + Strength (Power Strike's base is 35,
+        // the basic swing's is 0 - CLEANUP item 8). Spell: 50 + 2*Knowledge.
+        // RPG maps only.
         // Melee abilities can crit: the SERVER rolls (never the client) and the
         // crit is announced in the cast message so it is harness-observable.
         int castdmg = ab.damage;
         bool crit = false;
         if(rpg::mapactive(smapname))
         {
-            if(ab.melee) castdmg = rpg::stat_powerstrike(level, rpg::weapondamage(cq->name));
+            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::attrscore(level, rpg::ATTR_STRENGTH);
             else castdmg = rpg::stat_sparkbolt(level);
             if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
             {
