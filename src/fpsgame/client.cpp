@@ -272,7 +272,7 @@ namespace game
     // A/D (the strafe keys) ROTATE the character and the follow camera at a
     // smooth turn rate instead of strafing; W then walks the new heading.
     // Right-mouse: press arms a pending click; motion beyond RPG_RMB_DRAGPX
-    // while held becomes camera steering (cursor pinned+hidden); release
+    // while held becomes camera pitch (cursor pinned+hidden); release
     // without a drag fires the classic right-click (select + auto-attack),
     // release after a drag just ends steering and NEVER attacks.
     static float rpg_turnrate = 150.0f; // deg/sec, MMO-standard smooth turn
@@ -547,9 +547,9 @@ namespace game
             while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
         }
         if(player1->strafe) player1->strafe = 0;
-        // Right-drag camera steering: once past the drag threshold the
+        // Right-drag camera pitch: once past the drag threshold the
         // cursor is pinned to the press point (it can't wander off) and each
-        // frame's fresh mouse delta turns the camera (speed-following).
+        // frame's fresh mouse delta pitches the camera (speed-following).
         if(rpg_rmbheld)
         {
             float cx = 0, cy = 0; rpg::cursorget(cx, cy);
@@ -564,11 +564,10 @@ namespace game
             }
             else
             {
-                float dx = cx - rpg_rmblx;
                 float dy = cy - rpg_rmbly;
-                camera1->yaw += dx * RPG_RMB_STEERSENS;
-                while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
-                while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+                // CLEANUP item 7: horizontal drag no longer steers the
+                // camera (it fought the A/D turn keys); right-drag is
+                // pitch-only. A/D turning and wheel zoom are unchanged.
                 // Vertical drag pitches the view, stock mouse feel: drag up
                 // (dy < 0) looks up, exactly like the stock mousemove path.
                 rpg_campitch = clamp(rpg_campitch - dy * RPG_RMB_STEERSENS, RPG_CAM_PITCH_MIN, RPG_CAM_PITCH_MAX);
