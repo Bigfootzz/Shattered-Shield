@@ -2635,7 +2635,7 @@ namespace server
             if (target->state.isInfected() && monster::providesGuts(&target->state))
             {
                 const ::monster::MonsterType &zt = ::monster::getMonsterType(target->state.getMonsterType());
-                actor->state.guts += zt.classInfo.maxhealth/zt.freq*2;
+                actor->state.guts += zt.classInfo.maxhealth/(zt.freq > 0 ? zt.freq : 1)*2; // freq 0 = named-only types (imp/puglin; also stock rat/juggernaut): guard the division
                 sendf(actor->ownernum, 1, "ri3", N_GUTS, actor->clientnum, actor->state.guts);
             }
             // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
@@ -3289,10 +3289,16 @@ namespace server
 
     static int rpg_resolvespawntype(const char *type)
     {
-        // "zombie" (or empty) = random zombie type. When bestiary types land
-        // in monster.cpp, their keys resolve here — a data change, not a
-        // rewrite (the spawn table in src/rpg/rpg.cpp just names them).
-        if(!type || !strcmp(type, "zombie")) return monster::getRandomType();
+        // Named bestiary types ("imp", "puglin") resolve by their class name
+        // in the monster table. "zombie" (or anything unmatched) keeps the
+        // original behavior: a random zombie variant. The named types carry
+        // freq 0 in monster.cpp, so they never leak into that random pool;
+        // they spawn only where the RPG spawn table names them.
+        if(type && type[0])
+        {
+            loopi(monster::NUMMONSTERTYPES)
+                if(!strcmp(monster::getMonsterType(i).classInfo.name, type)) return i;
+        }
         return monster::getRandomType();
     }
 

@@ -56,6 +56,22 @@ namespace monster
             { {WEAP_SLIME, WEAP_BITE, WEAP_NONE, WEAP_NONE}, 400,    A_YELLOW,   100,    28,         "juggernaut", 0},
                0,       0,      100,    400,    1,          S_PAINH,    S_DEATHH, MONSTER_TYPE_TRAIT_BOSS,
             { "playermodels/zombies/juggernaut",NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "juggernaut",   NULL,       NULL,       "hudguns/zombie",   false,      true,       7.0f,   22.0f,      3.0f,       0 },
+        },
+        {
+            // Bestiary (Shattered Shield): fast skirmisher, between a zombie
+            // (180 HP) and the Rotting Champion (400 HP). freq 0: named types
+            // never enter the random "zombie" pool; they spawn only where the
+            // RPG spawn table names them (rpg_resolvespawntype).
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 200,    0,          0,      100,        "imp",      0},
+               0,       0,      100,    400,    1,          S_PAINB,    S_DEATHB, 0,
+            { "playermodels/imp",               NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "imp",          NULL,       NULL,       "hudguns/zombie",   false,      true,       3.2f,   14.0f,      1.0f,       0 },
+        },
+        {
+            // Bestiary (Shattered Shield): slow brute, tankier than a zombie,
+            // below the champion. freq 0 for the same reason as the imp.
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 300,    0,          0,      58,         "puglin",   0},
+               0,       0,      100,    400,    1,          S_PAINH,    S_DEATHH, 0,
+            { "playermodels/puglin",            NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "puglin",       NULL,       NULL,       "hudguns/zombie",   false,      true,       4.2f,   13.0f,      1.0f,       0 },
         }
         /* TODO
         { 

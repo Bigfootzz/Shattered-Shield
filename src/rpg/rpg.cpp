@@ -884,20 +884,24 @@ namespace rpg
     // 12 points around the village outskirts — never on the player spawn at
     // (2220,1972) or on Maren at (2228,1980); a new player meets the first
     // zombies a short walk out. z is the measured ground height at (x,y).
-    // Density: 12 live zombies with a 60s respawn comfortably feeds q1
+    // Density: 12 live monsters with a 60s respawn comfortably feeds q1
     // (5 kills) and q2 (8 kills) for 2-10 players sharing the world.
+    // Mix: 8 zombie rows near the village (q1/q2 fodder — questonkill counts
+    // any monster kill, but the chain reads as a zombie cull, so the rows
+    // nearest the village stay zombie), 2 imp rows east, 2 puglin rows at
+    // the far west/northwest. Types resolve by name in rpg_resolvespawntype.
     static const spawndef SPAWNS[] =
     {
         { "zombie", 2150.0f, 1450.0f, 2344.0f, "south fields" },
         { "zombie", 2380.0f, 1600.0f, 2277.0f, "south fields east" },
         { "zombie", 1980.0f, 1280.0f, 2373.0f, "south fields west" },
         { "zombie", 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
-        { "zombie", 1120.0f, 2420.0f, 2181.0f, "west forest" },
+        { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
         { "zombie", 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
-        { "zombie", 3080.0f, 2280.0f, 2188.0f, "east clearing" },
-        { "zombie", 3050.0f, 2600.0f, 2116.0f, "east homesteads" },
+        { "imp",    3080.0f, 2280.0f, 2188.0f, "east clearing" },
+        { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
         { "zombie", 2200.0f, 3350.0f, 2116.0f, "north road" },
-        { "zombie", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
+        { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
         { "zombie", 2600.0f, 1300.0f, 2383.0f, "southeast field" },
         { "zombie", 1500.0f, 1500.0f, 2381.0f, "southwest field" },
     };
