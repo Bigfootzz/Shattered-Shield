@@ -2289,6 +2289,11 @@ namespace game
         int hov = rpg::hoverstate();
         if(hov == rpg::RPG_HOVER_HOSTILE) tex = "packages/ui/rpg/cursors/cursor_attack.png";
         else if(hov == rpg::RPG_HOVER_LOOT) tex = "packages/ui/rpg/cursors/cursor_glove.png";
+        // CLEANUP item 4: quest-giver hovers - "?" when the NPC has a quest
+        // for you, "!" when you can turn one in. (cursor_quest.png /
+        // cursor_turnin.png are new art made for this pass.)
+        else if(hov == rpg::RPG_HOVER_QUEST) tex = "packages/ui/rpg/cursors/cursor_quest.png";
+        else if(hov == rpg::RPG_HOVER_TURNIN) tex = "packages/ui/rpg/cursors/cursor_turnin.png";
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
         rpg_drawtexuv(vx, vy, sz, sz, 0, 0, 1, 1);
     }

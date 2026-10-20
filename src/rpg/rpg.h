@@ -177,7 +177,12 @@ namespace rpg
     const spawndef *spawnpoint(int i); // NULL when out of range
 
     // --- quest chain v1: quest definitions (static, shared) ---
-    enum { QUEST_NONE = 0, QUEST_CULL = 1, QUEST_WAVES = 2, QUEST_CHAMPION = 3, QUEST_DONE = 4 };
+    enum { QUEST_NONE = 0, QUEST_CULL = 1, QUEST_WAVES = 2, QUEST_CHAMPION = 3, QUEST_DONE = 4, QUEST_ERRAND = 5 };
+    // CLEANUP item 6: QUEST_ERRAND is the starter delivery quest. It keeps id
+    // 5 (ids 1..3 and the QUEST_DONE sentinel are unchanged) but runs FIRST
+    // in the chain - see chainorder() in rpg.cpp. validquest() is the single
+    // range test every quest guard uses.
+    bool validquest(int qid);
     enum { QSTATE_OFFERED = 0, QSTATE_ACTIVE = 1, QSTATE_COMPLETE = 2 };
     struct questdef
     {
@@ -245,7 +250,7 @@ namespace rpg
     // Selection + auto-attack are client intent; the server re-validates every
     // cast exactly as before. NPC selection rides alongside monster selection
     // (quest chain v1): selecting one clears the other.
-    enum { RPG_HOVER_DEFAULT = 0, RPG_HOVER_LOOT = 1, RPG_HOVER_HOSTILE = 2 };
+    enum { RPG_HOVER_DEFAULT = 0, RPG_HOVER_LOOT = 1, RPG_HOVER_HOSTILE = 2, RPG_HOVER_QUEST = 3, RPG_HOVER_TURNIN = 4 };
     void cursoraccum(int dx, int dy);              // add relative motion to the free cursor
     void cursorget(float &x, float &y);            // raw accumulated cursor pos (screen px)
     void cursorset(float x, float y);

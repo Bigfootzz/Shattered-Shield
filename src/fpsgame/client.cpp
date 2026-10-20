@@ -380,15 +380,27 @@ namespace game
             player1 ? player1->health : -1, player1 ? (int)player1->state : -1, player1 ? player1->deaths : -1);
         fclose(fp);
     });
-    // Quest chain v1: talk to the selected NPC (F key on RPG maps). The server
-    // runs the dialogue state machine; right-click stays auto-attack (never talk).
-    ICOMMAND(rpgtalk, "", (),
+    // Quest chain: talk (F key on RPG maps). The server runs the dialogue
+    // state machine; right-click stays auto-attack (never talk).
+    // CLEANUP item 4: no prior selection step. F talks to the NPC in the
+    // player's sights; with nobody in sights it sends -1 and the server
+    // resolves the nearest NPC inside talk range (and re-validates the
+    // distance itself). A left-click selection, when one exists, still wins.
+    // (plain function: the ICOMMAND macro parser splits on bare commas)
+    static void rpg_dtalk()
     {
         if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE) return;
         int ni = rpg::selectednpc();
-        if(ni < 0) { conoutf("rpg: select someone to talk to first (left-click)"); return; }
+        if(ni < 0)
+        {
+            int w = 0; int h = 0; rpg_screenwh(w, h);
+            float cx = 0; float cy = 0; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
+            rpgpickresult pk = rpg_pick(cx, cy, w, h);
+            if(pk.kind == 3 && pk.npci >= 0) ni = pk.npci;
+        }
         addmsg(N_RPG_TALK, "ri", ni);
-    });
+    }
+    ICOMMAND(rpgtalk, "", (), rpg_dtalk());
     ICOMMAND(rpgcleartarget, "", (), rpg::cleartargeting());
     // --- TEST-ONLY scaffolding (mouse & targeting v1 harness) ---
     // The headless harness cannot move the OS pointer, so these drive the same
@@ -484,6 +496,45 @@ namespace game
     static int rpg_testforcerange = 0; // TEST-ONLY: bypass auto-attack client range check
     ICOMMAND(rpgtestsetxp, "i", (int *v), { rpg::setclientxp(*v); conoutf("rpgtestsetxp: %d", *v); });
     ICOMMAND(rpgtestforcerange, "i", (int *v), { rpg_testforcerange = *v ? 1 : 0; conoutf("rpgtestforcerange: %s", rpg_testforcerange ? "ON" : "OFF"); });
+    // CLEANUP item 4: which cursor an NPC shows. Driven by the client quest
+    // cache (server-synced; display only - the server re-validates on talk).
+    // Maren (npc 0) is the chain giver: "?" while she has a quest to offer,
+    // "!" when the active quest can be turned in to her. Tomas (npc 1) only
+    // matters during the errand: "!" while you carry the tonic to him.
+    static int rpg_potioncount()
+    {
+        rpg::itemstack inv[64];
+        int n = 0, eq[rpg::SLOT_COUNT];
+        if(!rpg::getclientinv(inv, 64, n, eq)) return 0;
+        int pi = rpg::finditem("health_potion");
+        if(pi < 0) return 0;
+        int c = 0;
+        loopi(n) if(inv[i].item == pi) c += inv[i].count;
+        return c;
+    }
+
+    static int rpg_npchover(int npci)
+    {
+        int qid = 0, st = -1, kills = 0, need = 0;
+        bool active = rpg::getclientquest(qid, st, kills, need); // true only when ACTIVE
+        if(npci == 0) // Elder Maren
+        {
+            if(qid == rpg::QUEST_DONE) return rpg::RPG_HOVER_DEFAULT;
+            if(active)
+            {
+                if(qid == rpg::QUEST_ERRAND) return rpg_potioncount() == 0 ? rpg::RPG_HOVER_QUEST : rpg::RPG_HOVER_DEFAULT; // a replacement tonic waits
+                return kills >= need ? rpg::RPG_HOVER_TURNIN : rpg::RPG_HOVER_DEFAULT;
+            }
+            return rpg::RPG_HOVER_QUEST; // offered or not yet offered: she has work for you
+        }
+        if(npci == 1) // Tomas
+        {
+            if(active && qid == rpg::QUEST_ERRAND && rpg_potioncount() > 0) return rpg::RPG_HOVER_TURNIN;
+            return rpg::RPG_HOVER_DEFAULT;
+        }
+        return rpg::RPG_HOVER_DEFAULT;
+    }
+
     // Per-frame targeting maintenance. Called from updateworld() on RPG maps.
     void updatetargeting()
     {
@@ -513,10 +564,11 @@ namespace game
         int hov = rpg::RPG_HOVER_DEFAULT;
         if(pk.kind == 2) hov = rpg::RPG_HOVER_HOSTILE;
         else if(pk.kind == 1) hov = rpg::RPG_HOVER_LOOT;
+        else if(pk.kind == 3 && pk.npci >= 0) hov = rpg_npchover(pk.npci);
         if(hov != rpg::hoverstate())
         {
             rpg::sethoverstate(hov);
-            conoutf("rpg: hover %s", hov == rpg::RPG_HOVER_HOSTILE ? "hostile" : (hov == rpg::RPG_HOVER_LOOT ? "loot" : "default"));
+            conoutf("rpg: hover %s", hov == rpg::RPG_HOVER_HOSTILE ? "hostile" : (hov == rpg::RPG_HOVER_LOOT ? "loot" : (hov == rpg::RPG_HOVER_QUEST ? "quest" : (hov == rpg::RPG_HOVER_TURNIN ? "turnin" : "default"))));
         }
 
         // selection validity: target died or left -> deselect, stop auto-attack

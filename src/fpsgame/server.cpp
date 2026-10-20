@@ -3573,6 +3573,21 @@ namespace server
         if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players talk
         if(!rpg::mapactive(smapname)) return;
         if(cq->state.state != CS_ALIVE) { rpg_qmsg(cq, "You must be alive to talk."); return; }
+        if(npcidx < 0)
+        {
+            // CLEANUP item 4: the client sent no specific NPC (F pressed with
+            // nobody selected or in sights) - resolve the nearest NPC inside
+            // talk range here; the distance check below re-validates it.
+            float best = 12.0f;
+            loopi(rpg::npccount())
+            {
+                const rpg::npcdef *cand = rpg::npcat(i);
+                if(!cand) continue;
+                float d = cq->state.o.dist(vec(cand->x, cand->y, cand->z));
+                if(d <= best) { best = d; npcidx = i; }
+            }
+            if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
+        }
         const rpg::npcdef *nd = rpg::npcat(npcidx);
         if(!nd) return;
         if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
