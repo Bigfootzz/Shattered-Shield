@@ -324,6 +324,8 @@ namespace game
         fprintf(fp, "player_yaw=%.1f camera_yaw=%.1f strafe=%d rmbheld=%d rmbdrag=%d\n",
             player1 ? player1->yaw : -999, camera1 ? camera1->yaw : -999,
             player1 ? player1->strafe : -99, rpg_rmbheld ? 1 : 0, rpg_rmbdrag ? 1 : 0);
+        fprintf(fp, "health=%d state=%d deaths=%d\n",
+            player1 ? player1->health : -1, player1 ? (int)player1->state : -1, player1 ? player1->deaths : -1);
         fclose(fp);
     });
     // Quest chain v1: talk to the selected NPC (F key on RPG maps). The server
@@ -473,18 +475,28 @@ namespace game
             return;
         }
 
-        // --- Playtest fix (Oct 19): A/D turning + right-drag steering ---
+        // --- Playtest fix (Oct 19; stutter fixed Oct 20): A/D turning ---
+        // TURN IS STATE-DRIVEN: the held-key flags (k_left/k_right, maintained
+        // by the engine's left/right commands) are read every frame and the yaw
+        // is integrated with frametime, so rotation starts on the first frame
+        // and stays continuous while held. The original code consumed
+        // player1->strafe, which is only written by key press/release EVENTS:
+        // with in-engine key repeat disabled, a held key re-fires 'left' only
+        // via OS key repeats — one twitch on press, a ~500ms hitch (the OS
+        // repeat delay), then steppy repeat-rate rotation. That was the
+        // reported start stutter. Held-state integration removes it.
         // A/D (strafe keys) rotate the follow camera on world maps; the
         // character follows through the facing sync below, so W walks the
         // new heading. The strafe slide is consumed (no sideways drift).
         // Battleground maps are untouched (mouse-look owns the camera there).
-        if(player1->strafe)
+        int turndir = (player1->k_left ? 1 : 0) - (player1->k_right ? 1 : 0);
+        if(turndir)
         {
-            camera1->yaw -= player1->strafe * rpg_turnrate * (curtime/1000.0f);
+            camera1->yaw -= turndir * rpg_turnrate * (curtime/1000.0f);
             while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
             while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
-            player1->strafe = 0;
         }
+        if(player1->strafe) player1->strafe = 0;
         // Right-drag camera steering: once past the drag threshold the
         // cursor is pinned to the press point (it can't wander off) and each
         // frame's fresh mouse delta turns the camera (speed-following).
