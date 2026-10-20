@@ -316,6 +316,8 @@ namespace game
     // mapactive gate so turning/steering can be exercised on stock maps when
     // the RPG maps won't load in the harness environment.
     ICOMMAND(rpgteststrafe, "i", (int *v), { if(player1) player1->strafe = *v; });
+    // TEST-ONLY (harness): place the player at an exact position (radar proofs).
+    ICOMMAND(rpgtestteleport, "fff", (float *x, float *y, float *z), { if(player1) { player1->o = vec(*x, *y, *z); player1->vel = vec(0, 0, 0); } });
     ICOMMAND(rpgtestwritestate, "s", (char *f),
     {
         if(!f || !f[0]) return;

@@ -2265,8 +2265,11 @@ namespace game
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h);
         float vscale = 1800.0f/h;
         float sz = 64.0f*vscale;
-        // hotspot: the arrow tip sits ~(8,8)px inside the 64px cell
-        float vx = cx*vscale - 8.0f*vscale, vy = cy*vscale - 8.0f*vscale;
+        // hotspot: the arrow tip sits at the cell CENTER (32,32) in the 64px art
+        // (measured on default/attack/glove textures); the old (8,8) value was the
+        // stock-cursor convention and drew the visual tip ~24 cell-px down-right
+        // of the real pick point (same defect as the menu cursor in rendergl.cpp).
+        float vx = cx*vscale - 32.0f*vscale, vy = cy*vscale - 32.0f*vscale;
         const char *tex = "packages/ui/rpg/cursors/cursor_default.png";
         int hov = rpg::hoverstate();
         if(hov == rpg::RPG_HOVER_HOSTILE) tex = "packages/ui/rpg/cursors/cursor_attack.png";
@@ -2510,15 +2513,17 @@ namespace game
     // RPG (world/PvE) radar scale: the whole map fits inside the stone ring
     // (user, Oct 19: the zoomed-in view showed only a neighborhood). The
     // ring's interior opening is 0.83 of the rect half-width, so dividing the
-    // map half-extent by 0.80 seats the full map inside the opening with a
-    // small margin. Markers (rpg_drawmarker) use this same scale so they
+    // map half-extent by 0.72 seats the full map inside the opening at ~90%
+    // (user, Oct 19: ring size is perfect, but the map image should sit a
+    // touch smaller inside it with a small margin rather than bleeding to
+    // the rim). Markers (rpg_drawmarker) use this same scale so they
     // plot in the same coordinate space as the terrain - truthful positions.
     // Battleground/stock radar path (drawblip/drawradarfull) untouched.
     float rpg_radarscale()
     {
         // Guard against a zero radius (minimap not generated yet): markers
         // divide by this scale, so it must never be 0.
-        return max(max(minimapradius.x, minimapradius.y), 1.0f)/0.80f;
+        return max(max(minimapradius.x, minimapradius.y), 1.0f)/0.72f;
     }
 
     void drawminimap(fpsent *d, float x, float y, float s)
@@ -2905,6 +2910,37 @@ namespace game
         // gathering nodes: green
         n = rpg::gathermarkers(m, 64);
         loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, msize, 0.35f, 1.0f, 0.40f); }
+
+        // Player indicator (user, Oct 19): a bright cyan arrowhead at the
+        // player's true position, pointing in the player's facing direction.
+        // Direction convention (same as the marker transform above): a world
+        // direction u appears on screen along -rotate(u,-camyaw), with
+        // screen-up = camera-forward. Cyan is unused by the marker color
+        // ladder (red/gold/orange/green); the icon is larger than the blips
+        // so the player is unmistakable on the full-map view. Textured path
+        // (untextured triangles do not rasterize in this HUD spot for reasons
+        // still under investigation; the textured fan/blips do).
+        {
+            vec pf; vecfromyawpitch(d->yaw, 0, 1, 0, pf); pf.z = 0;
+            if(pf.magnitude2() > 1e-8f) pf.normalize(); else pf = vec(0, -1, 0);
+            vec td(pf); td.rotate_around_z(-camera1->yaw*RAD); td.z = 0;
+            if(td.magnitude2() > 1e-8f) td.normalize(); else td = vec(0, -1, 0);
+            td.x = -td.x; td.y = -td.y; // screen direction of the facing
+            float px = x + s*0.5f, py = y + s*0.5f, ts = s*0.09f;
+            vec perp(-td.y, td.x, 0);
+            float tipx = px + td.x*ts, tipy = py + td.y*ts;
+            float bxc = px - td.x*ts*0.6f, byc = py - td.y*ts*0.6f;
+            float lx = bxc + perp.x*ts*0.55f, ly = byc + perp.y*ts*0.55f;
+            float rx = bxc - perp.x*ts*0.55f, ry = byc - perp.y*ts*0.55f;
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/arrow_player.png")->id);
+            glColor4f(0.25f, 0.95f, 1.0f, 1.0f);
+            glBegin(GL_TRIANGLES);
+            glTexCoord2f(0.5f, 0.02f); glVertex2f(tipx, tipy);
+            glTexCoord2f(0.02f, 0.98f); glVertex2f(lx, ly);
+            glTexCoord2f(0.98f, 0.98f); glVertex2f(rx, ry);
+            glEnd();
+            glColor4f(1, 1, 1, 1.0f);
+        }
     }
 
 
