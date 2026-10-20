@@ -431,7 +431,11 @@ VARFP(texcompress, 0, 1<<10, 1<<12, initwarning("texture quality", INIT_LOAD));
 VARFP(texcompressquality, -1, -1, 1, setuptexcompress());
 VARFP(trilinear, 0, 1, 1, initwarning("texture filtering", INIT_LOAD));
 VARFP(bilinear, 0, 1, 1, initwarning("texture filtering", INIT_LOAD));
-VARFP(aniso, 0, 0, 16, initwarning("texture filtering", INIT_LOAD));
+// Playtest fix (Oct 20, Fix 7): anisotropic filtering default 8. The engine
+// shipped with aniso off (0), leaving trilinear-only mip selection; at the
+// follow cam's grazing angle, ground detail smeared and crawled ("fuzziness")
+// while walking. 8x is negligible on any discrete GPU or recent iGPU.
+VARFP(aniso, 0, 8, 16, initwarning("texture filtering", INIT_LOAD));
 
 extern int usetexcompress;
 
