@@ -2875,7 +2875,7 @@ namespace server
         if(!rpg::connected() || !cq) return;
         int q = rpg::chainpos(cq->name); // 1..3, or QUEST_DONE
         int st = -1, kills = 0, need = 0;
-        if(q >= rpg::QUEST_CULL && q <= rpg::QUEST_CHAMPION)
+        if(rpg::validquest(q))
         {
             st = rpg::queststate(cq->name, q);
             kills = rpg::questkills(cq->name, q);
@@ -3247,7 +3247,12 @@ namespace server
     static void rpg_questoffer(clientinfo *cq, int q)
     {
         // flavor per quest; the accept hint is a plain UI line, not dialogue
-        if(q == rpg::QUEST_CULL)
+        if(q == rpg::QUEST_ERRAND)
+        {
+            rpg_qmsg(cq, "Elder Maren: A small favor before anything grander, traveler.");
+            rpg_qmsg(cq, "Elder Maren: Take this tonic to Tomas — he's just nearby. He'll have something for you.");
+        }
+        else if(q == rpg::QUEST_CULL)
         {
             rpg_qmsg(cq, "Elder Maren: You're the sword-arm we've been praying for, traveler.");
             rpg_qmsg(cq, "Elder Maren: Imps plague the fields beyond the village. Cull them — 5 of the wretched things.");
@@ -3567,6 +3572,53 @@ namespace server
         }
     }
 
+    // CLEANUP item 6: Tomas - the errand's delivery target. All validation is
+    // server-side like Maren's chain: the tonic is counted and removed here,
+    // XP and the reward are granted here, and completion persists through
+    // questsetcomplete like any other quest.
+    static void rpg_talk_tomas(clientinfo *cq)
+    {
+        const char *name = cq->name;
+        int q = rpg::chainpos(name);
+        if(q == rpg::QUEST_ERRAND && rpg::queststate(name, q) == rpg::QSTATE_ACTIVE)
+        {
+            if(rpg::itemcount(name, "health_potion") >= 1)
+            {
+                rpg::removeitem(name, "health_potion", 1);
+                rpg::questsetcomplete(name, q);
+                const rpg::questdef &qd = rpg::quest(q);
+                bool leveled = false;
+                int newlevel = rpg::awardxp(name, qd.xpreward, &leveled);
+                rpg_qmsg(cq, "Tomas: The tonic! Maren worries too much, but thank her for me.");
+                defformatstring(done)("Quest complete: %s (+%d XP)", qd.name, qd.xpreward);
+                rpg_qmsg(cq, done);
+                if(leveled && newlevel > 0) // same level-up handling as Maren's turn-in
+                {
+                    sendservmsgf("\f2%s \f7reached RPG level \f2%d!", name, newlevel);
+                    if(rpg::mapactive(smapname))
+                    {
+                        int maxhp = rpg::stat_maxhp(newlevel);
+                        if(cq->state.health > maxhp) cq->state.health = maxhp;
+                        cq->state.maxhealth = maxhp;
+                        sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
+                    }
+                }
+                if(qd.itemreward && qd.itemreward[0] && rpg::additem(name, qd.itemreward, 1))
+                {
+                    defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem(qd.itemreward)));
+                    rpg_qmsg(cq, it);
+                }
+                rpg_qmsg(cq, "Tomas: Take the tunic — you'll want it out there. Maren has real work for you now.");
+                rpg_syncinv(cq);
+            }
+            else rpg_qmsg(cq, "Tomas: Maren said you'd bring a health potion. If you've none, ask her for another.");
+        }
+        else if(q == rpg::QUEST_ERRAND)
+            rpg_qmsg(cq, "Tomas: If you're looking for work, Elder Maren has a favor to ask.");
+        else
+            rpg_qmsg(cq, "Tomas: The village looks to you now. Good luck out there.");
+    }
+
     void rpg_talk(clientinfo *cq, int npcidx)
     {
         if(!rpg::connected() || !cq) return;
@@ -3596,6 +3648,12 @@ namespace server
             return;
         }
         const char *name = cq->name;
+        if(npcidx == 1) // Tomas: his own branch (item 6); tracker sync matches Maren's path
+        {
+            rpg_talk_tomas(cq);
+            rpg_syncquest(cq);
+            return;
+        }
         int q = rpg::chainpos(name);
         if(q == rpg::QUEST_DONE)
         {
@@ -3618,10 +3676,32 @@ namespace server
             defformatstring(acc)("Quest accepted: %s — %s.", qd.name, qd.objective);
             rpg_qmsg(cq, acc);
             if(q == rpg::QUEST_CHAMPION) rpg_spawnchampion(cq);
+            if(q == rpg::QUEST_ERRAND)
+            {
+                // hand over the tonic to carry (server-side grant, item 6)
+                if(rpg::additem(name, "health_potion", 1))
+                {
+                    defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem("health_potion")));
+                    rpg_qmsg(cq, it);
+                }
+                rpg_syncinv(cq);
+            }
         }
         else if(st == rpg::QSTATE_ACTIVE)
         {
-            if(kills >= qd.need) // turn in: objective re-validated server-side
+            if(q == rpg::QUEST_ERRAND)
+            {
+                // delivery, not kills: completion happens at Tomas. Here we
+                // only remind - or replace a lost tonic (item 6).
+                if(rpg::itemcount(name, "health_potion") < 1)
+                {
+                    if(rpg::additem(name, "health_potion", 1))
+                        rpg_qmsg(cq, "Elder Maren: Lost the tonic? Here's another. Tomas is just nearby.");
+                    rpg_syncinv(cq);
+                }
+                else rpg_qmsg(cq, "Elder Maren: Tomas is just nearby — take the tonic to him.");
+            }
+            else if(kills >= qd.need) // turn in: objective re-validated server-side
             {
                 rpg::questsetcomplete(name, q);
                 bool leveled = false;
@@ -3646,7 +3726,7 @@ namespace server
                 }
                 rpg_syncinv(cq); // refresh xp/inventory/level on the client sheet
                 int nq = rpg::chainpos(name);
-                if(nq >= rpg::QUEST_CULL && nq <= rpg::QUEST_CHAMPION)
+                if(rpg::validquest(nq))
                 {
                     rpg::questsetoffered(name, nq);
                     rpg_questoffer(cq, nq);

@@ -2364,7 +2364,11 @@ namespace game
         float ty = rs + rs/10 + 36.0f;
         float nmw = float(strlen(qd.name))*0.5f*30.0f;
         rpg_chattext(qd.name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
-        defformatstring(prog)("%d/%d", kills, need);
+        // CLEANUP item 6: a quest with need 0 (the delivery errand) shows its
+        // objective text instead of a meaningless "0/0".
+        static string progbuf;
+        const char *prog = qd.objective;
+        if(need > 0) { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
         float pgw = float(strlen(prog))*0.5f*26.0f;
         rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
     }

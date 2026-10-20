@@ -897,6 +897,9 @@ namespace rpg
     static const npcdef NPCS[] =
     {
         { "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f },
+        // CLEANUP item 6: Tomas, the errand's delivery target - a villager a
+        // short walk northeast of Maren on the same village plateau (z 2116).
+        { "Tomas", "playermodels/peasant_male", 2246.0f, 1994.0f, 2116.0f, 225.0f },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
 
@@ -942,9 +945,18 @@ namespace rpg
         { "The Imps Keep Coming", "Slay 8 imps", "imp", 8, 150, NULL },
         { "The Rotting Champion", "Slay the Rotting Champion", "Rotting Champion", 1, 300, "imp_mace" },
     };
+    bool validquest(int qid)
+    {
+        return (qid >= QUEST_CULL && qid <= QUEST_CHAMPION) || qid == QUEST_ERRAND;
+    }
+
     const questdef &quest(int qid)
     {
         static const questdef empty = { "", "", "", 0, 0, NULL };
+        // CLEANUP item 6: the starter errand lives outside the QUESTS table
+        // (its id, 5, sits past QUEST_DONE by design so ids 1..3 never move).
+        static const questdef errand = { "A Neighborly Errand", "Take a health potion to Tomas", "", 0, 25, "ranger_tunic" };
+        if(qid == QUEST_ERRAND) return errand;
         if(qid < QUEST_CULL || qid > QUEST_CHAMPION) return empty;
         return QUESTS[qid];
     }
@@ -965,7 +977,7 @@ namespace rpg
             {
                 int q = sqlite3_column_int(st, 0);
                 qrow r; r.state = sqlite3_column_int(st, 1); r.kills = sqlite3_column_int(st, 2);
-                if(q >= QUEST_CULL && q <= QUEST_CHAMPION) questcache[std::string(name)][q] = r;
+                if(validquest(q)) questcache[std::string(name)][q] = r;
             }
             sqlite3_finalize(st);
         }
@@ -989,12 +1001,16 @@ namespace rpg
         }
     }
 
+    // Chain order: the starter errand first (item 6), then the cull chain.
+    static const int CHAIN_ORDER[] = { QUEST_ERRAND, QUEST_CULL, QUEST_WAVES, QUEST_CHAMPION };
+
     int chainpos(const char *name)
     {
         if(!name || !name[0]) return QUEST_DONE;
         std::map<int, qrow> &m = questcache[std::string(name)];
-        for(int q = QUEST_CULL; q <= QUEST_CHAMPION; q++)
+        loopi(int(sizeof(CHAIN_ORDER)/sizeof(CHAIN_ORDER[0])))
         {
+            int q = CHAIN_ORDER[i];
             std::map<int, qrow>::iterator it = m.find(q);
             if(it == m.end() || it->second.state != QSTATE_COMPLETE) return q;
         }
@@ -1003,7 +1019,7 @@ namespace rpg
 
     int queststate(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return -1;
+        if(!name || !name[0] || !validquest(qid)) return -1;
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
         return it == m.end() ? -1 : it->second.state;
@@ -1011,7 +1027,7 @@ namespace rpg
 
     int questkills(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return 0;
+        if(!name || !name[0] || !validquest(qid)) return 0;
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
         return it == m.end() ? 0 : it->second.kills;
@@ -1019,7 +1035,7 @@ namespace rpg
 
     void questsetoffered(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        if(!name || !name[0] || !validquest(qid)) return;
         qrow r; r.state = QSTATE_OFFERED; r.kills = 0;
         questcache[std::string(name)][qid] = r;
         questsave(name, qid);
@@ -1027,7 +1043,7 @@ namespace rpg
 
     void questsetactive(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        if(!name || !name[0] || !validquest(qid)) return;
         qrow r; r.state = QSTATE_ACTIVE; r.kills = 0;
         questcache[std::string(name)][qid] = r;
         questsave(name, qid);
@@ -1035,7 +1051,7 @@ namespace rpg
 
     void questaddkill(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        if(!name || !name[0] || !validquest(qid)) return;
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
         if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // only while active
@@ -1045,7 +1061,7 @@ namespace rpg
 
     void questsetcomplete(const char *name, int qid)
     {
-        if(!name || !name[0] || qid < QUEST_CULL || qid > QUEST_CHAMPION) return;
+        if(!name || !name[0] || !validquest(qid)) return;
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
         if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // no double turn-in
@@ -1065,7 +1081,8 @@ namespace rpg
     {
         if(!name || !name[0] || !ismonster) return 0;
         int q = chainpos(name);
-        if(q < QUEST_CULL || q > QUEST_CHAMPION) return 0;
+        if(!validquest(q)) return 0;
+        if(q == QUEST_ERRAND) return 0; // delivery quest: kills never count
         if(queststate(name, q) != QSTATE_ACTIVE) return 0;
         if(q == QUEST_CHAMPION && targetclientnum != champion_clientnum) return 0;
         questaddkill(name, q);
