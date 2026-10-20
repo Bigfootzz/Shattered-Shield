@@ -45,6 +45,7 @@ namespace rpg
         int mana;
         int lastcast[ABILITY_COUNT]; // millis of last successful cast per ability
         int lastregen;               // millis of last regen tick (<0 = not started)
+        int lastcombatms = -1;       // server millis of last damage dealt/taken (<0 = never)
         std::map<int, int> inv;      // item index -> count (session view of rpg_inventory)
         int equipped[SLOT_COUNT];    // item index per slot, -1 = empty (session view of rpg_equipment)
     };
@@ -72,6 +73,7 @@ namespace rpg
         cc.mana = maxmana(level);
         loopi(ABILITY_COUNT) cc.lastcast[i] = -1000000000; // every ability ready on connect
         cc.lastregen = now;
+        cc.lastcombatms = -1; // never fought: out of combat (mana/HP start full anyway)
     }
 
     static void loadinv(const char *name); // defined below onconnect
@@ -387,6 +389,18 @@ namespace rpg
         return true;
     }
 
+    void notecombat(const char *name, int now)
+    {
+        cachedchar *cc = findcached(name);
+        if(cc) cc->lastcombatms = now;
+    }
+
+    int lastcombat(const char *name)
+    {
+        cachedchar *cc = findcached(name);
+        return cc ? cc->lastcombatms : -1;
+    }
+
     void regen(int now)
     {
         if(!db) return;
@@ -399,6 +413,15 @@ namespace rpg
             {
                 int cap = maxmana(cc.level);
                 cc.mana = min(cap, cc.mana + dt*stat_manaregen(cc.level)/1000);
+                // Oct 20 regen rule: out of combat (no damage dealt or taken
+                // for REGEN_DELAY_MS), mana also climbs at the slow regen
+                // rate until full. This stacks on the Wisdom regen above,
+                // which keeps running in combat exactly as before.
+                if(cc.lastcombatms < 0 || now - cc.lastcombatms >= REGEN_DELAY_MS)
+                {
+                    int rate = max(REGEN_RATE_MIN, cap*REGEN_RATE_PCT/100);
+                    cc.mana = min(cap, cc.mana + dt*rate/1000);
+                }
                 cc.lastregen = now;
             }
         }

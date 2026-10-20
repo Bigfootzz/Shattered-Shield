@@ -1,5 +1,6 @@
 // monster.h: implements AI for single player monsters, currently client only
 #include "game.h"
+#include "rpg/rpg.h" // Shattered Shield: RPG map gate + mob-behaviour constants
 
 extern int physsteps;
 
@@ -96,6 +97,19 @@ namespace monster
     bool isValidMonsterType(int id)
     {
         return id >= 0 && id < NUMMONSTERTYPES;
+    }
+
+    // Shattered Shield RPG levels, parallel to monstertypes[] above. The
+    // ladder follows max HP: rat 1, zombies 2, imp 4, puglin 6, juggernaut
+    // 10. Every current world type is <= 10, so all ambient mobs (and the
+    // Rotting Champion, a zombie variant) are passive until engaged under
+    // the Oct 20 mob-behaviour rules. Data-only: stock modes never read it.
+    static const int monsterlevels[] = { 2, 2, 2, 2, 2, 2, 2, 1, 10, 4, 6 };
+
+    int getMonsterLevel(int id)
+    {
+        if(id < 0 || id >= NUMMONSTERTYPES) return 1;
+        return monsterlevels[id];
     }
 
     int getRandomType()
@@ -259,10 +273,178 @@ namespace ai
             }
         }
 
+        // --- RPG: Shattered Shield world-mob behaviour (Oct 20 rules) ---
+        // game::damaged records the human attacker here; think() picks it
+        // up as the mob's retaliation target. This is the ONLY way a world
+        // mob acquires a target on RPG maps (no aggro on sight).
+        void notedamage(fpsent *d, fpsent *actor)
+        {
+            if(!d || !actor || d == actor) return;
+            if(d->ai.type != AI_TYPE_MONSTER || !d->ai.local || !d->ai.data) return;
+            if(actor->isInfected()) return; // monster-on-monster damage is dropped server-side on RPG maps anyway
+            MonsterAiInfo *ai = (MonsterAiInfo *)d->ai.data;
+            ai->rpgfoe = actor;
+        }
+
+        // Replaces stock think() for level <= 10 monsters on RPG maps only.
+        // Design: mobs are PASSIVE (never aggro on sight), ANCHORED to
+        // their spawn point (idle roam radius rpg::MOB_ROAM_RADIUS),
+        // RETALIATE only against the player who damaged them, and LEASH at
+        // rpg::MOB_LEASH_RANGE from home: mob or foe past the line breaks
+        // the fight, the mob walks home, and the server resets the fight
+        // (full health, threat wiped) once it is back. Movement and the
+        // bite flow deliberately mirror the stock M_HOME / M_AIMING path
+        // so attacks land through the exact same shoot() plumbing. No
+        // waypoint routing here: the world fields are open ground, and
+        // the blocked-hop below covers lips and steps.
+        void MonsterAi::rpgthink(fpsent *d, MonsterAiInfo *ai, const ::monster::MonsterType &monsterType)
+        {
+            // Leash / roam distances are horizontal: the anchor z is a feet
+            // level while d->o rides at eye height, so a 3D distance would
+            // carry a constant eye-height bias.
+            #define RPGDH(v) (vec((v).x - ai->rpghome.x, (v).y - ai->rpghome.y, 0).magnitude())
+            // (Re)spawn or server reset: a new lifesequence means a fresh
+            // life, anchored wherever the server placed the mob.
+            if(ai->rpglifeseq != d->lifesequence)
+            {
+                ai->rpglifeseq = d->lifesequence;
+                if(!ai->rpghomeknown) ai->rpghome = d->o;
+                else if(RPGDH(d->o) > rpg::MOB_ROAM_RADIUS)
+                {
+                    // The spawnstate pipeline parks remote ents at a player
+                    // spawn; the server anchor (N_RPG_MOBHOME) is the truth.
+                    // As the movement authority for this mob, place it home.
+                    // The anchor z is a feet level; the origin rides at eye
+                    // height. Placing at the raw anchor would embed the mob
+                    // in the terrain and it would fall through the world.
+                    d->o = vec(ai->rpghome.x, ai->rpghome.y, ai->rpghome.z + d->eyeheight + 2.0f);
+                    d->resetinterp(); // moveplayer(local) snaps o to newpos: keep them in sync
+                    d->vel = vec(0, 0, 0);
+                    d->falling = vec(0, 0, 0);
+                }
+                ai->rpgfoe = NULL;
+                ai->enemy = NULL;
+                ai->anger = 0;
+                ai->wproute.setsize(0);
+                ai->transition(d, M_SLEEP, 0, 100, 100);
+            }
+
+            // Retaliation: consume the recorded attacker as the target.
+            if(!ai->enemy && ai->rpgfoe)
+            {
+                if(ai->rpgfoe->state == CS_ALIVE)
+                {
+                    ai->enemy = ai->rpgfoe;
+                    ai->transition(d, M_HOME, 1, 100, 100);
+                    conoutf("rpgbehav: '%s' engages '%s' (damaged)", d->name, ai->enemy->name);
+                }
+                ai->rpgfoe = NULL;
+            }
+            if(ai->enemy && ai->enemy->state != CS_ALIVE) { ai->enemy = NULL; ai->transition(d, M_SLEEP, 0, 100, 100); }
+
+            // Leash: either side past the line from home breaks the fight.
+            if(ai->enemy && (RPGDH(d->o) > rpg::MOB_LEASH_RANGE || RPGDH(ai->enemy->o) > rpg::MOB_LEASH_RANGE))
+            {
+                conoutf("rpgbehav: '%s' leashes (mob %.0f / foe %.0f from home, limit %.0f)", d->name, RPGDH(d->o), RPGDH(ai->enemy->o), rpg::MOB_LEASH_RANGE);
+                ai->enemy = NULL;
+                ai->rpgfoe = NULL;
+                ai->transition(d, M_SEARCH, 1, 100, 100); // M_SEARCH here = returning home
+            }
+
+            // Steering: face the foe, or face home when returning.
+            vec dest;
+            bool havedest = false;
+            if(ai->enemy) { dest = ai->enemy->o; havedest = true; }
+            else if(RPGDH(d->o) > rpg::MOB_ROAM_RADIUS) { dest = ai->rpghome; havedest = true; }
+            if(havedest)
+            {
+                ai->targetyaw = -atan2(dest.x - d->o.x, dest.y - d->o.y)/RAD;
+                normalizeYaw(d->yaw, ai->targetyaw);
+                if(ai->targetyaw > d->yaw) { d->yaw += curtime*0.5f; if(ai->targetyaw < d->yaw) d->yaw = ai->targetyaw; }
+                else { d->yaw -= curtime*0.5f; if(ai->targetyaw > d->yaw) d->yaw = ai->targetyaw; }
+                float dd = d->o.dist(dest);
+                if(dd > 0.01f) d->pitch = asin(clamp((dest.z - d->o.z)/dd, -1.0f, 1.0f))/RAD;
+            }
+
+            if(d->blocked) // ran into scenery: hop it (returning or chasing)
+            {
+                d->blocked = false;
+                if(!rnd(20000/max(monsterType.classInfo.maxspeed/4, 1))) d->jumping = true;
+                else if(!ai->enemy && !rnd(3)) d->jumping = true;
+            }
+
+            float dist = ai->enemy ? ai->enemy->o.dist(d->o) : 0;
+            switch(ai->monsterstate)
+            {
+                case M_AIMING: // delay between wanting to bite and biting (stock flow)
+                    if(ai->enemy && ai->trigger < lastmillis && lastmillis-d->lastaction >= d->gunwait)
+                    {
+                        d->attacking = true;
+                        shoot(d, ai->attacktarget);
+                        ai->transition(d, M_ATTACKING, 0, 600, 0);
+                        ai->lastshot = lastmillis;
+                    }
+                    else if(!ai->enemy) ai->transition(d, M_SLEEP, 0, 100, 100);
+                    break;
+                case M_ATTACKING:
+                case M_PAIN:
+                    if(ai->trigger < lastmillis) ai->transition(d, ai->enemy ? M_HOME : M_SLEEP, ai->enemy ? 1 : 0, 100, 100);
+                    break;
+                case M_HOME: // chasing the foe
+                    if(!ai->enemy) { ai->transition(d, M_SLEEP, 0, 100, 100); break; }
+                    d->move = dist > 20 ? 1 : 0;
+                    if(ai->trigger < lastmillis)
+                    {
+                        vec target;
+                        if(raycubelos(d->o, ai->enemy->o, target))
+                        {
+                            if(dist < 20 && ai->enemy->state == CS_ALIVE) // bite trigger, same gate as stock
+                            {
+                                ai->attacktarget = rnd(100) < 20*aiSkillToLevel(d->ai.skill) ? ai->enemy->headpos() : target;
+                                ai->transition(d, M_AIMING, 0, monsterType.lag, 10);
+                            }
+                            else ai->transition(d, M_HOME, 1, monsterType.rate, 0);
+                        }
+                        else ai->transition(d, M_HOME, 1, 800, 500); // no line of sight: keep homing (open fields)
+                    }
+                    break;
+                case M_SEARCH: // returning home after a leash break
+                    if(ai->enemy) { ai->transition(d, M_HOME, 1, 100, 100); break; }
+                    if(RPGDH(d->o) <= rpg::MOB_ROAM_RADIUS) { d->move = 0; ai->transition(d, M_SLEEP, 0, 100, 100); }
+                    else d->move = 1;
+                    break;
+                case M_SLEEP:
+                default: // idle at home: stand within the roam radius
+                    d->move = 0;
+                    if(ai->enemy) ai->transition(d, M_HOME, 1, 100, 100);
+                    else if(RPGDH(d->o) > rpg::MOB_ROAM_RADIUS) ai->transition(d, M_SEARCH, 1, 100, 100);
+                    break;
+            }
+
+            // movement tail, same as stock think()
+            if(d->move || d->maymove() || (ai->stacked && (ai->stacked->state!=CS_ALIVE || ai->stackpos != ai->stacked->o)))
+            {
+                if(physsteps > 0) ai->stacked = NULL;
+                moveplayer(d, 1, true);
+                entities::checkitems(d);
+                if(cmode) cmode->checkitems(d);
+            }
+        }
+
         void MonsterAi::think(fpsent *d, bool run)
         {
             MonsterAiInfo *ai = getMonsterState(d);
             const ::monster::MonsterType &monsterType = ::monster::getMonsterType(d->getMonsterType());
+
+            // --- RPG: Shattered Shield world-mob behaviour (Oct 20 rules) ---
+            // On RPG maps, level <= 10 monsters run the anchored/passive/
+            // leashed behaviour instead of the stock hunt. Everywhere else
+            // (and for any future higher-level type) stock think() is untouched.
+            if(d->state==CS_ALIVE && rpg::mapactive(getclientmap()) && ::monster::getMonsterLevel(d->getMonsterType()) <= 10)
+            {
+                rpgthink(d, ai, monsterType);
+                return;
+            }
 
             if(d->state==CS_ALIVE)
             {

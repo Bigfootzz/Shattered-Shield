@@ -140,6 +140,10 @@ namespace monster
 
     extern const MonsterType &getMonsterType(int);
     extern bool isValidMonsterType(int);
+    // Shattered Shield: RPG level per monster type (design ladder for the
+    // Oct 20 mob-behaviour rules: level <= 10 world mobs are passive until
+    // engaged). Data-only; stock modes never read it.
+    extern int getMonsterLevel(int);
     extern void preloadMonsters();
 
     extern int getRandomTypeWithTrait(int);
@@ -695,6 +699,8 @@ enum
     // Shattered Shield clan system v1 (additive, Oct 19)
     N_RPG_CLANCHAT, // s->c: clan chat line (sender cn, tag, text)
     N_RPG_CLAN,     // s->c: clan membership sync (clan id, rank, name, tag; id 0 = none)
+    N_RPG_HP,       // s->c: RPG current-HP sync (health) - out-of-combat regen push
+    N_RPG_MOBHOME,  // s->c: RPG ambient mob anchor (cn, x, y, z) - spawn-point placement for the owning client
     NUMSV
 };
 
@@ -730,7 +736,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
     N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
-    N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0,
+    N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     -1
 };
 

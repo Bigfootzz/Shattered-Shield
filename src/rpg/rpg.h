@@ -53,6 +53,28 @@ namespace rpg
     bool spendmana(const char *name, int cost);  // false when mana < cost
     void regen(int now);                         // mana regen tick for all cached chars
 
+    // --- mob behaviour + player regen (Oct 20 design rules, additive) ---
+    // World mobs on RPG maps are anchored to their spawn point: they stay
+    // within MOB_ROAM_RADIUS of home while idle, engage only when damaged
+    // (level <= 10 types), and break off + reset once a fight carries them
+    // or their foe past MOB_LEASH_RANGE from home. AGGRO is the design unit
+    // the leash derives from (leash = 2 x aggro, measured from the spawn
+    // point, per the user's rule). Shared by the client AI (movement) and
+    // the server (authoritative reset/regen), hence constants live here.
+    const float MOB_AGGRO_RANGE = 30.0f;  // combat-zone unit around a mob's home
+    const float MOB_LEASH_RANGE = 60.0f;  // 2 x aggro from the spawn point: break off + reset
+    const float MOB_ROAM_RADIUS = 12.0f;  // anchored home roam radius while idle
+    // Out-of-combat regen: no damage dealt or taken for REGEN_DELAY_MS, then
+    // health and mana climb at REGEN_RATE_PCT of max per second (min
+    // REGEN_RATE_MIN points/s) back to full. Wisdom's in-combat mana regen
+    // is separate and unchanged.
+    const int REGEN_DELAY_MS = 10000;
+    const int REGEN_RATE_PCT = 2;
+    const int REGEN_RATE_MIN = 2;
+    // Combat bookkeeping for the regen rule (session-only, like mana).
+    void notecombat(const char *name, int now); // stamp last damage dealt/taken
+    int lastcombat(const char *name);           // millis of last combat, -1 when unknown
+
     // --- test-only monster pinning (milestone step 3) ---
     // Lets the scripted harness park a monster at the caster server-side.
     // The owning client still simulates/renders it at its own spawn point,

@@ -924,6 +924,14 @@ namespace game
     {
         if(d->state!=CS_ALIVE || intermission) return;
 
+        // --- RPG: Shattered Shield mob behaviour (additive, Oct 20 rules) ---
+        // Record the human attacker on a world mob so it retaliates against
+        // that player (its only way to acquire a target). Done before the
+        // actor==player1 presentation early-out below, because in local play
+        // the attacker IS player1 on the client that owns the mob's AI.
+        if(damage > 0 && d->ai.type == ai::AI_TYPE_MONSTER && d->ai.local && actor && actor != d && !actor->isInfected() && rpg::mapactive(getclientmap()))
+            ai::monster::notedamage(d, actor);
+
         if(local) damage = d->dodamage(damage);
         else if(actor==player1)
         {

@@ -19,9 +19,19 @@ namespace ai
             vec stackpos;
             bool counts;                        // does count for guts
             int lastshot;
+            // --- RPG: Shattered Shield world-mob behaviour (Oct 20 rules) ---
+            // Used only on RPG maps for level <= 10 types; stock modes never
+            // read these. rpghome is the anchored spawn point, captured on
+            // the first think of each life (lifesequence change = (re)spawn
+            // or a server reset, both of which mean "fresh fight").
+            vec rpghome;                        // anchored spawn point
+            bool rpghomeknown = false;          // server assigned the anchor (N_RPG_MOBHOME)
+            int rpglifeseq;                     // lifesequence rpghome belongs to (-1 = none)
+            fpsent *rpgfoe;                     // player who last damaged this mob (retaliation)
 
             MonsterAiInfo() :   monsterstate(M_SEARCH), tag(-1), enemy(NULL), targetyaw(0), trigger(0), attacktarget(0, 0, 0),
-                                anger(0), lastrouteplan(0), stacked(NULL), stackpos(0, 0, 0), counts(true), lastshot(0)
+                                anger(0), lastrouteplan(0), stacked(NULL), stackpos(0, 0, 0), counts(true), lastshot(0),
+                                rpghome(0, 0, 0), rpglifeseq(-1), rpgfoe(NULL)
             {}
 
             // monster AI is sequenced using transitions: they are in a particular state where
@@ -56,6 +66,9 @@ namespace ai
             void collide(fpsent *d, physent *o, const vec &dir);
 
             void hit(fpsent *d, fpsent *actor, int damage, const vec &vel, int gun);
+            // RPG: think() replacement for world mobs on RPG maps (passive,
+            // anchored, leashed). Only called when the map gate passes.
+            void rpgthink(fpsent *d, MonsterAiInfo *ai, const ::monster::MonsterType &monsterType);
             void spawned(fpsent *d);
             void killed(fpsent *d, fpsent *e);
 
@@ -66,5 +79,10 @@ namespace ai
             void clear();
             void render(fpsent *d, float i);
         };
+
+        // RPG: records that a human player damaged monster d, so the mob
+        // retaliates against that player (and only that player). Called from
+        // game::damaged on the client that owns the monster's AI.
+        void notedamage(fpsent *d, fpsent *actor);
     }
 }

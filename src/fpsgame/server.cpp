@@ -2584,6 +2584,7 @@ namespace server
 
     void startintermission() { gamelimit = min(gamelimit, gamemillis); checkintermission(); }
 
+    static void rpg_behaviordamage(clientinfo *monster, clientinfo *player); // RPG mob behaviour (Oct 20), defined with the ambient spawner below
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
         // --- RPG: Shattered Shield ambient spawns (additive) ---
@@ -2617,6 +2618,23 @@ namespace server
            actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER)
         {
             damage = 0; // test godmode: monsters cannot hurt players
+        }
+        // --- RPG: Shattered Shield mob behaviour + regen bookkeeping (Oct 20) ---
+        // Any real damage between a player and a monster stamps the
+        // player's combat clock (drives out-of-combat regen) and the
+        // monster's engagement record (drives the leash reset).
+        if(damage > 0 && target && actor && target != actor && rpg::connected() && rpg::mapactive(smapname))
+        {
+            if(actor->state.ai.type == ai::AI_TYPE_NONE && target->state.ai.type == ai::AI_TYPE_MONSTER)
+            {
+                rpg::notecombat(actor->name, totalmillis);
+                rpg_behaviordamage(target, actor);
+            }
+            else if(actor->state.ai.type == ai::AI_TYPE_MONSTER && target->state.ai.type == ai::AI_TYPE_NONE)
+            {
+                rpg::notecombat(target->name, totalmillis);
+                rpg_behaviordamage(actor, target);
+            }
         }
         gamestate &ts = target->state;
         ts.dodamage(damage);
@@ -3247,6 +3265,27 @@ namespace server
         rpg_qmsg(cq, "Press F again to take up the quest.");
     }
 
+    // --- RPG: mob behaviour tracking for the quest champion (Oct 20) ---
+    // The champion is not an ambient-table mob, so its home/full-HP and
+    // engagement live here; rpg_behaviortick() applies the same leash +
+    // reset rules to it as to the ambient spawns.
+    static void rpg_sendmobhome(clientinfo *mi, const vec &home)
+    {
+        // N_SPAWNSTATE carries no position: clients park remote ents at
+        // a player spawn, and the OWNING client then simulates the mob
+        // from there (the spawn-convergence bug, Oct 20). Broadcast the
+        // anchor so every client - above all the owner - places and
+        // holds the mob at its spawn point. Additive; stock modes never
+        // send this.
+        sendf(-1, 1, "ri5", N_RPG_MOBHOME, mi->clientnum, (int)home.x, (int)home.y, (int)home.z);
+    }
+
+    static vec rpg_champhome(0, 0, 0);
+    static int rpg_champfullhp = 0;
+    static int rpg_champfoe = -1;
+    static int rpg_champlfight = 0;
+    static bool rpg_champengaged = false;
+
     static void rpg_spawnchampion(clientinfo *cq)
     {
         // reuse the live champion if there is one (e.g. player relogged mid-quest)
@@ -3273,6 +3312,12 @@ namespace server
         extern void sendspawn(clientinfo *ci);
         sendspawn(mi);
         rpg::setchampioncn(mi->clientnum);
+        // mob behaviour (Oct 20): anchor the champion where it rose and
+        // remember its real full HP from the settled spawn pipeline.
+        rpg_sendmobhome(mi, mi->state.o);
+        rpg_champhome = mi->state.o;
+        rpg_champfullhp = mi->state.maxhealth;
+        rpg_champengaged = false; rpg_champfoe = -1; rpg_champlfight = 0;
         rpg_qmsg(cq, "The Rotting Champion has risen near the village!");
         conoutf("rpg: quest champion spawned for '%s' (hp 400)", cq->name);
     }
@@ -3283,7 +3328,7 @@ namespace server
     // (same AI slot) so bot slots never leak (MAXBOTS = 32); if a slot was
     // reaped (owner left, map changed) the spawner falls back to a fresh one.
     #define RPG_AMBIENT_RESPAWN_MS 60000
-    struct rpg_ambientrec { int clientnum; int nextrespawn; };
+    struct rpg_ambientrec { int clientnum; int nextrespawn; int lastfight; int foecn; int fullhp; bool engaged; };
     static vector<rpg_ambientrec> rpg_ambients;
     static string rpg_ambientmap;
 
@@ -3331,6 +3376,9 @@ namespace server
         sendspawn(mi); // spawnstate resets HP to the type default (180 for zombies)
         rpg_ambients[idx].clientnum = mi->clientnum;
         rpg_ambients[idx].nextrespawn = 0;
+        rpg_sendmobhome(mi, vec(sp->x, sp->y, sp->z));
+        rpg_ambients[idx].fullhp = mi->state.maxhealth; // settled by sendspawn (type HP)
+        rpg_ambients[idx].engaged = false; rpg_ambients[idx].foecn = -1;
         conoutf("rpg: ambient spawn %d (%s): '%s' at (%.0f, %.0f, %.0f)", idx, sp->area, mi->name, sp->x, sp->y, sp->z);
     }
 
@@ -3352,6 +3400,9 @@ namespace server
         extern void sendspawn(clientinfo *ci);
         sendspawn(mi);
         rpg_ambients[idx].nextrespawn = 0;
+        rpg_sendmobhome(mi, vec(sp->x, sp->y, sp->z));
+        rpg_ambients[idx].fullhp = mi->state.maxhealth;
+        rpg_ambients[idx].engaged = false; rpg_ambients[idx].foecn = -1;
         conoutf("rpg: ambient spawn %d (%s): respawned '%s'", idx, sp->area, mi->name);
     }
 
@@ -3369,7 +3420,7 @@ namespace server
             copystring(rpg_ambientmap, smapname);
             rpg_ambients.shrink(0);
             int n = rpg::spawnpointcount();
-            loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = 1; }
+            loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = 1; r.lastfight = 0; r.foecn = -1; r.fullhp = 0; r.engaged = false; }
             conoutf("rpg: ambient spawns armed for rpg_01 (%d points)", n);
         }
         // AI slots need an owner: only spawn while a live player is connected
@@ -3394,6 +3445,127 @@ namespace server
         }
     }
 
+
+    // --- RPG: Shattered Shield mob behaviour (Oct 20 design rules) ---
+    // Server side of the behaviour rules. The client AI owns movement
+    // (passive / retaliate / leash walk-home, in MonsterAi::rpgthink);
+    // the server owns the RESET: once an engaged mob is back inside its
+    // roam radius with the fight over — or hopelessly dragged out — the
+    // fight is wiped: full health restored through the same reinit +
+    // sendspawn pipeline as a respawn, so the owning client restarts
+    // the mob fresh at its anchor with threat wiped. Engagement itself
+    // is stamped by dodamage (rpg_behaviordamage below).
+    static void rpg_behavreset(clientinfo *mi, const vec &home)
+    {
+        // Mirror of rpg_respawnsingleambient's revive, minus the death:
+        // reinit (N_INITAI) + reposition + sendspawn (full type HP, new
+        // lifesequence — the owning client reads that as a fresh life).
+        mi->state.state = CS_ALIVE;
+        mi->aireinit = 2;
+        aiman::reinitai(mi);
+        mi->state.o = vec(home.x, home.y, home.z + 2.0f);
+        extern void sendspawn(clientinfo *ci);
+        sendspawn(mi);
+        rpg_sendmobhome(mi, home);
+    }
+
+    static void rpg_behavfixhp(clientinfo *mi, int fullhp)
+    {
+        // sendspawn's spawnstate settles health at the TYPE default; a mob
+        // whose full HP is per-instance (the 400 HP champion) needs it put
+        // back, and every client told. A negative-damage N_DAMAGE is the
+        // engine's heal sync: clients set the ent's health from the packet.
+        if(fullhp <= 0 || mi->state.health == fullhp) return;
+        int heal = fullhp - mi->state.health;
+        mi->state.health = mi->state.maxhealth = fullhp;
+        sendf(-1, 1, "ri7", N_DAMAGE, mi->clientnum, mi->clientnum, -heal, mi->state.armour, mi->state.health, WEAP_FIST);
+    }
+
+    static void rpg_behaviordamage(clientinfo *monster, clientinfo *player)
+    {
+        if(!monster || !player) return;
+        loopv(rpg_ambients) if(rpg_ambients[i].clientnum == monster->clientnum)
+        {
+            rpg_ambientrec &rec = rpg_ambients[i];
+            rec.engaged = true;
+            rec.lastfight = totalmillis;
+            rec.foecn = player->clientnum;
+            return;
+        }
+        if(monster->clientnum == rpg::championcn())
+        {
+            rpg_champengaged = true;
+            rpg_champlfight = totalmillis;
+            rpg_champfoe = player->clientnum;
+        }
+    }
+
+    // One tracked mob's leash/reset evaluation; clears *engaged on a reset.
+    static void rpg_behaveval(clientinfo *mi, const vec &home, int fullhp, int foecn, int lastfight, bool &engaged, const char *label)
+    {
+        if(!mi || mi->state.ai.type != ai::AI_TYPE_MONSTER || mi->state.state != CS_ALIVE || mi->ownernum < 0) { engaged = false; return; }
+        clientinfo *foe = rpg_findambientcn(foecn);
+        bool foegone = !foe || foe->state.ai.type != ai::AI_TYPE_NONE || foe->state.state != CS_ALIVE;
+        // Horizontal distances only: home z is a feet level, state.o an
+        // eye-height origin - a 3D distance would carry a constant bias.
+        float dhome = vec(mi->state.o.x - home.x, mi->state.o.y - home.y, 0).magnitude();
+        float foedist = foegone ? 1e9f : vec(foe->state.o.x - home.x, foe->state.o.y - home.y, 0).magnitude();
+        const float backstop = rpg::MOB_LEASH_RANGE + 15.0f; // the client leash (60) acts first; this is the authority net
+        if(!foegone && (dhome > backstop || foedist > backstop))
+        {
+            rpg_behavreset(mi, home);
+            rpg_behavfixhp(mi, fullhp);
+            engaged = false;
+            conoutf("rpgbehav: %s '%s' leash reset (backstop): mob %.0f / foe %.0f from home", label, mi->name, dhome, foedist);
+        }
+        else if(dhome <= rpg::MOB_ROAM_RADIUS && (foegone || (vec(foe->state.o.x - mi->state.o.x, foe->state.o.y - mi->state.o.y, 0).magnitude() > rpg::MOB_AGGRO_RANGE && totalmillis - lastfight > 5000)))
+        {
+            // The mob broke off and walked home, its foe is gone, or the
+            // foe has genuinely disengaged (out of aggro range of the mob
+            // and no combat for 5s): the fight is over — wipe it back to
+            // a fresh, full-health mob. A foe still standing in range
+            // keeps the fight (and the mob's damage) alive no matter how
+            // long the bite cadence gaps.
+            rpg_behavreset(mi, home);
+            rpg_behavfixhp(mi, fullhp);
+            engaged = false;
+            conoutf("rpgbehav: %s '%s' reset at home: full hp %d, threat wiped", label, mi->name, fullhp);
+        }
+        else if(foegone && dhome > rpg::MOB_ROAM_RADIUS && totalmillis - lastfight > 5000)
+        {
+            // Stranded mid-field with nobody to fight (foe disconnected
+            // mid-kite): send it home rather than leaving it drifted.
+            rpg_behavreset(mi, home);
+            rpg_behavfixhp(mi, fullhp);
+            engaged = false;
+            conoutf("rpgbehav: %s '%s' reset (stranded, foe gone)", label, mi->name);
+        }
+    }
+
+    void rpg_behaviortick()
+    {
+        if(strcmp(smapname, "rpg_01")) return;
+        loopv(rpg_ambients)
+        {
+            rpg_ambientrec &rec = rpg_ambients[i];
+            if(!rec.engaged) continue;
+            const rpg::spawndef *sp = rpg::spawnpoint(i);
+            if(!sp) { rec.engaged = false; continue; }
+            rpg_behaveval(rpg_findambientcn(rec.clientnum), vec(sp->x, sp->y, sp->z), rec.fullhp, rec.foecn, rec.lastfight, rec.engaged, sp->area);
+            if(!rec.engaged) rec.foecn = -1;
+        }
+        if(rpg_champengaged)
+        {
+            int ccn = rpg::championcn();
+            clientinfo *mi = ccn >= 0 ? rpg_findambientcn(ccn) : NULL;
+            if(!mi) rpg_champengaged = false;
+            else
+            {
+                rpg_behaveval(mi, rpg_champhome, rpg_champfullhp, rpg_champfoe, rpg_champlfight, rpg_champengaged, "champion");
+                if(!rpg_champengaged) rpg_champfoe = -1;
+            }
+        }
+    }
 
     void rpg_talk(clientinfo *cq, int npcidx)
     {
@@ -3915,11 +4087,27 @@ namespace server
                     int mana = 0, maxmana = 0;
                     if(rpg::getmana(cq->name, mana, maxmana))
                         sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
+                    // --- RPG: out-of-combat health regen (Oct 20 rule) ---
+                    // After REGEN_DELAY_MS with no damage dealt or taken,
+                    // health climbs at the slow regen rate back to full.
+                    // Pushed per second (same cadence as mana) via N_RPG_HP,
+                    // so the HUD orb tracks the server-authoritative value.
+                    if(rpg::mapactive(smapname) && cq->state.state == CS_ALIVE && cq->state.health > 0 && cq->state.health < cq->state.maxhealth)
+                    {
+                        int lc = rpg::lastcombat(cq->name);
+                        if(lc < 0 || totalmillis - lc >= rpg::REGEN_DELAY_MS)
+                        {
+                            int heal = max(rpg::REGEN_RATE_MIN, cq->state.maxhealth*rpg::REGEN_RATE_PCT/100);
+                            cq->state.health = min(cq->state.maxhealth, cq->state.health + heal);
+                            sendf(cq->clientnum, 1, "ri2", N_RPG_HP, cq->state.health);
+                        }
+                    }
                 }
             }
         }
         // --- RPG: Shattered Shield ambient monster spawns (world map) ---
         rpg_ambienttick();
+        rpg_behaviortick(); // RPG mob behaviour: leash/reset evaluation (Oct 20)
         static int rpg_lastautosave = 0;
         if(totalmillis - rpg_lastautosave >= 60000)
         {

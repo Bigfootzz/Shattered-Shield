@@ -327,7 +327,36 @@ namespace game
     // the RPG maps won't load in the harness environment.
     ICOMMAND(rpgteststrafe, "i", (int *v), { if(player1) player1->strafe = *v; });
     // TEST-ONLY (harness): place the player at an exact position (radar proofs).
-    ICOMMAND(rpgtestteleport, "fff", (float *x, float *y, float *z), { if(player1) { player1->o = vec(*x, *y, *z); player1->vel = vec(0, 0, 0); } });
+    ICOMMAND(rpgtestteleport, "fff", (float *x, float *y, float *z), { if(player1) { player1->o = vec(*x, *y, *z); player1->resetinterp(); player1->vel = vec(0, 0, 0); } });
+    // TEST-ONLY (harness): dump every live monster's position plus its
+    // distance to the nearest RPG spawn point (mob-behaviour proofs:
+    // anchoring, leash return, fresh-load village safety).
+    ICOMMAND(rpgtestmobdump, "s", (char *f),
+    {
+        if(!f || !f[0]) return;
+        FILE *fp = fopen(f, "w");
+        if(!fp) return;
+        int pmana = -1; int pmaxmana = -1;
+        if(player1) rpg::getmana(player1->name, pmana, pmaxmana);
+        fprintf(fp, "player o=%.0f,%.0f,%.0f health=%d maxhealth=%d mana=%d maxmana=%d state=%d yaw=%.1f\n",
+            player1 ? player1->o.x : -1, player1 ? player1->o.y : -1, player1 ? player1->o.z : -1,
+            player1 ? player1->health : -1, player1 ? player1->maxhealth : -1, pmana, pmaxmana, player1 ? (int)player1->state : -1, player1 ? player1->yaw : -999);
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(!d || d == player1 || d->ai.type != ai::AI_TYPE_MONSTER) continue;
+            int best = -1; float bestd = 1e18f;
+            loopj(rpg::spawnpointcount())
+            {
+                const rpg::spawndef *sp = rpg::spawnpoint(j);
+                float dd = d->o.squaredist(vec(sp->x, sp->y, sp->z));
+                if(dd < bestd) { bestd = dd; best = j; }
+            }
+            fprintf(fp, "mon cn=%d name=%s hp=%d/%d state=%d o=%.0f,%.0f,%.0f nearestspawn=%d dist=%.1f\n",
+                d->clientnum, d->name, d->health, d->maxhealth, (int)d->state, d->o.x, d->o.y, d->o.z, best, best >= 0 ? sqrtf(bestd) : -1.0f);
+        }
+        fclose(fp);
+    });
     ICOMMAND(rpgtestwritestate, "s", (char *f),
     {
         if(!f || !f[0]) return;
@@ -2552,6 +2581,41 @@ namespace game
                     if(player1->health >= player1->maxhealth) player1->health = maxhp;
                     else if(player1->health > maxhp) player1->health = maxhp;
                     player1->maxhealth = maxhp;
+                }
+                break;
+            }
+            case N_RPG_HP:
+            {
+                // RPG: server-authoritative current-HP sync (out-of-combat
+                // regen push, Oct 20). Same trust model as N_RPG_HPMAX:
+                // the server owns player health; the HUD reads player1.
+                int hp = getint(p);
+                if(player1 && hp > 0) player1->health = min(hp, player1->maxhealth);
+                break;
+            }
+            case N_RPG_MOBHOME:
+            {
+                // RPG: ambient mob anchor (Oct 20). The spawnstate pipeline
+                // parks remote ents at a player spawn; the server anchor is
+                // the truth. Record it on the mob's AI state; the owning
+                // client's behaviour think places and holds the mob there.
+                int mcn = getint(p);
+                int hx = getint(p);
+                int hy = getint(p);
+                int hz = getint(p);
+                fpsent *d = getclient(mcn);
+                if(d && d->ai.type == ai::AI_TYPE_MONSTER && d->ai.data)
+                {
+                    ai::monster::MonsterAiInfo *mai = (ai::monster::MonsterAiInfo *)d->ai.data;
+                    mai->rpghome = vec((float)hx, (float)hy, (float)hz);
+                    mai->rpghomeknown = true;
+                    if(d->ai.local && d->state == CS_ALIVE)
+                    {
+                        d->o = vec((float)hx, (float)hy, (float)hz + d->eyeheight + 2.0f); // anchor z is feet level; origin rides at eye height
+                        d->resetinterp(); // moveplayer(local) snaps o to newpos: keep them in sync
+                        d->vel = vec(0, 0, 0);
+                        d->falling = vec(0, 0, 0);
+                    }
                 }
                 break;
             }
