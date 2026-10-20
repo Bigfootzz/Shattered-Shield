@@ -2507,11 +2507,43 @@ namespace game
         return clamp(max(minimapradius.x, minimapradius.y)/3, float(minradarscale), float(maxradarscale));
     }
 
+    // RPG (world/PvE) radar scale: the whole map fits inside the stone ring
+    // (user, Oct 19: the zoomed-in view showed only a neighborhood). The
+    // ring's interior opening is 0.83 of the rect half-width, so dividing the
+    // map half-extent by 0.80 seats the full map inside the opening with a
+    // small margin. Markers (rpg_drawmarker) use this same scale so they
+    // plot in the same coordinate space as the terrain - truthful positions.
+    // Battleground/stock radar path (drawblip/drawradarfull) untouched.
+    float rpg_radarscale()
+    {
+        // Guard against a zero radius (minimap not generated yet): markers
+        // divide by this scale, so it must never be 0.
+        return max(max(minimapradius.x, minimapradius.y), 1.0f)/0.80f;
+    }
+
     void drawminimap(fpsent *d, float x, float y, float s)
     {
         vec pos = vec(d->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir;
         vecfromyawpitch(camera1->yaw, 0, 1, 0, dir);
         float scale = calcradarscale();
+        glBegin(GL_TRIANGLE_FAN);
+        loopi(16)
+        {
+            vec tc = vec(dir).rotate_around_z(i/16.0f*2*M_PI);
+            glTexCoord2f(pos.x + tc.x*scale*minimapscale.x, pos.y + tc.y*scale*minimapscale.y);
+            vec v = vec(0, -1, 0).rotate_around_z(i/16.0f*2*M_PI);
+            glVertex2f(x + 0.5f*s*(1.0f + v.x), y + 0.5f*s*(1.0f + v.y));
+        }
+        glEnd();
+    }
+
+    // RPG radar minimap: same 16-point fan as drawminimap, but at the
+    // full-map rpg_radarscale() so the whole map fits the ring.
+    void rpg_drawminimap(fpsent *d, float x, float y, float s)
+    {
+        vec pos = vec(d->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir;
+        vecfromyawpitch(camera1->yaw, 0, 1, 0, dir);
+        float scale = rpg_radarscale();
         glBegin(GL_TRIANGLE_FAN);
         loopi(16)
         {
@@ -2813,7 +2845,9 @@ namespace game
     {
         // Stock blip pattern: textured quad tinted per category. (The neutral
         // grey blip tints cleanly; this matches the engine's HUD blip rendering.)
-        float scale = calcradarscale();
+        // Full-map space (Oct 19): markers share rpg_radarscale() with the
+        // terrain fan, so blips plot truthfully over the whole-map minimap.
+        float scale = rpg_radarscale();
         vec dir = d->o;
         dir.sub(pos).div(scale);
         // Marker clamp for the frame art (Oct 19): the stone ring's interior
@@ -2837,7 +2871,7 @@ namespace game
         glColor4f(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
-        drawminimap(d, x, y, s);
+        rpg_drawminimap(d, x, y, s); // full-map scale (Oct 19): whole map inside the ring
         if(minimapalpha >= 1) glEnable(GL_BLEND);
         // RPG frame art (Oct 19): dark stone ring, rope border, silver studs,
         // brass inner rim (packages/ui/rpg/hud/radar_frame.png) — the user's
