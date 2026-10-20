@@ -2586,6 +2586,18 @@ namespace server
 
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
+        // --- RPG: Shattered Shield ambient spawns (additive) ---
+        // No friendly fire between monsters on RPG maps. Ambient zombies crowd
+        // the player and their bites land on each other; the stock "infight if
+        // very angry" retaliation (zombie loyalty 1 = two friendly bites) then
+        // turns the crowd into duels to the death and the respawn timer just
+        // feeds the grinder. Dropping the hit entirely (no N_DAMAGE, so no
+        // pain/anger reaction) keeps monsters focused on players. Player and
+        // champion damage is unaffected; FPS/survival modes are untouched.
+        if(damage > 0 && rpg::connected() && target && actor && target != actor &&
+           target->state.ai.type == ai::AI_TYPE_MONSTER && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
+           rpg::mapactive(smapname))
+            return;
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // DDO-style PERCENTAGE mitigation: taken = raw*100/(100 + armor*10).
         // Same gating as before (monster attacker + RPG map only): PvP damage,
@@ -3265,6 +3277,118 @@ namespace server
         conoutf("rpg: quest champion spawned for '%s' (hp 400)", cq->name);
     }
 
+    // --- RPG: Shattered Shield ambient monster spawns (world map rpg_01) ---
+    // Server-authoritative: the server owns one AI monster per spawn point and
+    // respawns it on a timer after death. Dead monsters are respawned IN PLACE
+    // (same AI slot) so bot slots never leak (MAXBOTS = 32); if a slot was
+    // reaped (owner left, map changed) the spawner falls back to a fresh one.
+    #define RPG_AMBIENT_RESPAWN_MS 60000
+    struct rpg_ambientrec { int clientnum; int nextrespawn; };
+    static vector<rpg_ambientrec> rpg_ambients;
+    static string rpg_ambientmap;
+
+    static int rpg_resolvespawntype(const char *type)
+    {
+        // "zombie" (or empty) = random zombie type. When bestiary types land
+        // in monster.cpp, their keys resolve here — a data change, not a
+        // rewrite (the spawn table in src/rpg/rpg.cpp just names them).
+        if(!type || !strcmp(type, "zombie")) return monster::getRandomType();
+        return monster::getRandomType();
+    }
+
+    static clientinfo *rpg_findambientcn(int cn)
+    {
+        loopv(clients) if(clients[i]->clientnum == cn) return clients[i];
+        return NULL;
+    }
+
+    static bool rpg_ambientalive(rpg_ambientrec &rec)
+    {
+        if(rec.clientnum < 0) return false;
+        clientinfo *mi = rpg_findambientcn(rec.clientnum);
+        return mi && mi->state.ai.type == ai::AI_TYPE_MONSTER && mi->state.state == CS_ALIVE;
+    }
+
+    static void rpg_spawnsingleambient(int idx)
+    {
+        const rpg::spawndef *sp = rpg::spawnpoint(idx);
+        if(!sp) return;
+        clientinfo *mi = aiman::addai(50, -1, ai::AI_TYPE_MONSTER);
+        if(!mi) { conoutf("rpg: ambient spawn %d (%s): no free AI slot", idx, sp->area); return; }
+        int mtype = rpg_resolvespawntype(sp->type);
+        makeInfected(mi, mtype, false);
+        copystring(mi->name, monster::getMonsterType(mtype).classInfo.name, MAXNAMELEN+1);
+        mi->state.state = CS_ALIVE;
+        aiman::reinitai(mi); // N_INITAI broadcast (reassign wipes position to sentinel)
+        mi->state.o = vec(sp->x, sp->y, sp->z + 2.0f);
+        extern void sendspawn(clientinfo *ci);
+        sendspawn(mi); // spawnstate resets HP to the type default (180 for zombies)
+        rpg_ambients[idx].clientnum = mi->clientnum;
+        rpg_ambients[idx].nextrespawn = 0;
+        conoutf("rpg: ambient spawn %d (%s): '%s' at (%.0f, %.0f, %.0f)", idx, sp->area, mi->name, sp->x, sp->y, sp->z);
+    }
+
+    static void rpg_respawnsingleambient(int idx)
+    {
+        const rpg::spawndef *sp = rpg::spawnpoint(idx);
+        clientinfo *mi = rpg_findambientcn(rpg_ambients[idx].clientnum);
+        if(!mi || mi->state.ai.type != ai::AI_TYPE_MONSTER || mi->ownernum < 0)
+        {
+            // slot was reaped (owner left, map changed): fresh spawn instead
+            rpg_ambients[idx].clientnum = -1;
+            rpg_spawnsingleambient(idx);
+            return;
+        }
+        mi->state.state = CS_ALIVE;
+        mi->aireinit = 2;
+        aiman::reinitai(mi); // N_INITAI broadcast (reassign wipes position to sentinel)
+        mi->state.o = vec(sp->x, sp->y, sp->z + 2.0f);
+        extern void sendspawn(clientinfo *ci);
+        sendspawn(mi);
+        rpg_ambients[idx].nextrespawn = 0;
+        conoutf("rpg: ambient spawn %d (%s): respawned '%s'", idx, sp->area, mi->name);
+    }
+
+    void rpg_ambienttick()
+    {
+        // Only the world map gets ambient spawns (krpg is the PvP battleground).
+        if(strcmp(smapname, "rpg_01"))
+        {
+            if(rpg_ambientmap[0]) { rpg_ambientmap[0] = '\0'; rpg_ambients.shrink(0); }
+            return;
+        }
+        if(strcmp(rpg_ambientmap, smapname))
+        {
+            // (re)entered the world map: fresh tracking (changemap wiped all AI).
+            copystring(rpg_ambientmap, smapname);
+            rpg_ambients.shrink(0);
+            int n = rpg::spawnpointcount();
+            loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = 1; }
+            conoutf("rpg: ambient spawns armed for rpg_01 (%d points)", n);
+        }
+        // AI slots need an owner: only spawn while a live player is connected
+        // (ownerless AI is immediately deleted by reinitai).
+        bool haveplayer = false;
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { haveplayer = true; break; }
+        }
+        if(!haveplayer) return;
+        loopv(rpg_ambients)
+        {
+            if(rpg_ambientalive(rpg_ambients[i])) continue;
+            if(rpg_ambients[i].nextrespawn == 0)
+                rpg_ambients[i].nextrespawn = totalmillis + RPG_AMBIENT_RESPAWN_MS;
+            if(totalmillis >= rpg_ambients[i].nextrespawn)
+            {
+                if(rpg_ambients[i].clientnum < 0) rpg_spawnsingleambient(i);
+                else rpg_respawnsingleambient(i);
+            }
+        }
+    }
+
+
     void rpg_talk(clientinfo *cq, int npcidx)
     {
         if(!rpg::connected() || !cq) return;
@@ -3788,6 +3912,8 @@ namespace server
                 }
             }
         }
+        // --- RPG: Shattered Shield ambient monster spawns (world map) ---
+        rpg_ambienttick();
         static int rpg_lastautosave = 0;
         if(totalmillis - rpg_lastautosave >= 60000)
         {

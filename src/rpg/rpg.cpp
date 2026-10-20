@@ -880,6 +880,32 @@ namespace rpg
     int npccount() { return NPC_COUNT; }
     const npcdef *npcat(int i) { return (i >= 0 && i < NPC_COUNT) ? &NPCS[i] : NULL; }
 
+    // --- ambient monster spawns: static table for rpg_01 ---
+    // 12 points around the village outskirts — never on the player spawn at
+    // (2220,1972) or on Maren at (2228,1980); a new player meets the first
+    // zombies a short walk out. z is the measured ground height at (x,y).
+    // Density: 12 live zombies with a 60s respawn comfortably feeds q1
+    // (5 kills) and q2 (8 kills) for 2-10 players sharing the world.
+    static const spawndef SPAWNS[] =
+    {
+        { "zombie", 2150.0f, 1450.0f, 2344.0f, "south fields" },
+        { "zombie", 2380.0f, 1600.0f, 2277.0f, "south fields east" },
+        { "zombie", 1980.0f, 1280.0f, 2373.0f, "south fields west" },
+        { "zombie", 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
+        { "zombie", 1120.0f, 2420.0f, 2181.0f, "west forest" },
+        { "zombie", 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
+        { "zombie", 3080.0f, 2280.0f, 2188.0f, "east clearing" },
+        { "zombie", 3050.0f, 2600.0f, 2116.0f, "east homesteads" },
+        { "zombie", 2200.0f, 3350.0f, 2116.0f, "north road" },
+        { "zombie", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
+        { "zombie", 2600.0f, 1300.0f, 2383.0f, "southeast field" },
+        { "zombie", 1500.0f, 1500.0f, 2381.0f, "southwest field" },
+    };
+    static const int SPAWN_COUNT = sizeof(SPAWNS)/sizeof(SPAWNS[0]);
+
+    int spawnpointcount() { return SPAWN_COUNT; }
+    const spawndef *spawnpoint(int i) { return (i >= 0 && i < SPAWN_COUNT) ? &SPAWNS[i] : NULL; }
+
     static const questdef QUESTS[QUEST_DONE] =
     {
         { "", "", "", 0, 0, NULL }, // QUEST_NONE placeholder (index 0)

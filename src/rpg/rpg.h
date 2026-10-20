@@ -140,6 +140,20 @@ namespace rpg
     int npccount();
     const npcdef *npcat(int i); // NULL when out of range
 
+    // --- ambient monster spawns (world map): static spawn-point table ---
+    // Each row is one spawn point. Adding monster types later is a DATA
+    // change: put the type key in `type`; the server resolves it to a
+    // monster type id ("zombie" = random zombie today; bestiary keys will
+    // resolve in the same place when those types land in monster.cpp).
+    struct spawndef
+    {
+        const char *type;   // monster set key, e.g. "zombie"
+        float x, y, z;      // feet position on the map (spawner nudges +2)
+        const char *area;   // human label for logs/docs, e.g. "south fields"
+    };
+    int spawnpointcount();
+    const spawndef *spawnpoint(int i); // NULL when out of range
+
     // --- quest chain v1: quest definitions (static, shared) ---
     enum { QUEST_NONE = 0, QUEST_CULL = 1, QUEST_WAVES = 2, QUEST_CHAMPION = 3, QUEST_DONE = 4 };
     enum { QSTATE_OFFERED = 0, QSTATE_ACTIVE = 1, QSTATE_COMPLETE = 2 };
