@@ -315,7 +315,13 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     #endif
 
     extern int sdl_backingstore_bug;
-    if(background || sdl_backingstore_bug > 0) restorebackground();
+    // CLEANUP item 1: while still loading (no world frame rendered yet),
+    // always restore the full background before drawing the bar. Callers
+    // passing background=false used to draw successive progress strings
+    // over a stale back buffer, so the boot splash appeared to garble and
+    // restart partway through loading. restorebackground() no-ops once a
+    // real frame exists, so in-game progress calls are unaffected.
+    if(background || sdl_backingstore_bug > 0 || !renderedframe) restorebackground();
 
     int w = scr_w, h = scr_h;
     if(forceaspect) w = int(ceil(h*forceaspect));
