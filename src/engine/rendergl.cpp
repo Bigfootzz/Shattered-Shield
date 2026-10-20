@@ -2689,6 +2689,7 @@ void drawcrosshair(int w, int h)
     float r = 1, g = 1, b = 1, f = 1, cx = 0.5f, cy = 0.5f, chsize;
     int index = game::selectcrosshair(r, g, b, f);
     Texture *crosshair;
+    bool rpgmenucursor = false; // RPG cursor art carries its tip at the cell center (see hotspot note below)
     if(windowhit)
     {
         static Texture *cursor = NULL, *rpgcursor = NULL;
@@ -2696,6 +2697,7 @@ void drawcrosshair(int w, int h)
         // --- RPG: Shattered Shield inventory (milestone step 4): the kit pointer cursor over GUI windows, RPG maps only ---
         if(!rpgcursor) rpgcursor = textureload("packages/ui/rpg/cursors/cursor_default.png", 3, true);
         crosshair = rpg::mapactive(game::getclientmap()) ? rpgcursor : cursor;
+        rpgmenucursor = (crosshair == rpgcursor);
         chsize = cursorsize*w/900.0f;
         g3d_cursorpos(cx, cy);
     }
@@ -2720,8 +2722,15 @@ void drawcrosshair(int w, int h)
     if(crosshair->type&Texture::ALPHA) glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     else glBlendFunc(GL_ONE, GL_ONE);
     glColor3f(r, g, b);
-    float x = cx*w - (windowhit ? 0 : chsize/2.0f);
-    float y = cy*h - (windowhit ? 0 : chsize/2.0f);
+    // Cursor hotspot: the stock cursor art carries its tip at the top-left corner, so it is
+    // drawn top-left at the click point; the RPG cursor art carries its tip at the cell
+    // CENTER (32,32 of 64px, measured on default/attack/glove), so it is centered on the
+    // click point. The old code drew the RPG cursor top-left like the stock one, putting
+    // the visible tip ~half a cursor size away from the real click point - small buttons
+    // like the inventory/character window X could never be hit by aiming at them.
+    float hoff = (windowhit && !rpgmenucursor) ? 0.0f : chsize/2.0f;
+    float x = cx*w - hoff;
+    float y = cy*h - hoff;
     glBindTexture(GL_TEXTURE_2D, crosshair->id);
     glBegin(GL_TRIANGLE_STRIP);
     glTexCoord2f(0, 0); glVertex2f(x,          y);

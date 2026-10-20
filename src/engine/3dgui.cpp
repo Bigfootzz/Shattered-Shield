@@ -1469,3 +1469,22 @@ void consolebox(int x1, int y1, int x2, int y2)
     glPopMatrix();
 }
 
+
+// TEST-ONLY (harness): drive the engine's real mouse path headlessly.
+// rpgtestguimove calls the same g3d_movecursor() the SDL event loop calls
+// when a 2D menu is open; rpgtestclick calls the same keypress() entry the
+// SDL handler uses for mouse button events (code -1 = left button), so a
+// scripted click takes the identical menukey -> g3d_windowhit -> GUI hit
+// test route as a physical click.
+ICOMMAND(rpgtestguimove, "ii", (int *dx, int *dy), { g3d_movecursor(*dx, *dy); });
+ICOMMAND(rpgtestclick, "i", (int *down), { keypress(-1, *down != 0, 0); });
+ICOMMAND(rpgtestguistate, "s", (char *f),
+{
+    FILE *fp = fopen(f, "w");
+    if(!fp) return;
+    const char *ro = getalias("guirollovername");
+    fprintf(fp, "guiopen=%d cursor=%.3f,%.3f windowhit=%d rollover=%s\n",
+        g3d_gui2dopen() ? 1 : 0, cursorx, cursory, windowhit ? 1 : 0, ro ? ro : "(null)");
+    fprintf(fp, "actionon=%d mousebuttons=%d layoutpass=%d guis2d=%d\n", actionon ? 1 : 0, mousebuttons, layoutpass ? 1 : 0, guis2d.length());
+    fclose(fp);
+});
