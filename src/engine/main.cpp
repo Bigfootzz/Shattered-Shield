@@ -261,12 +261,13 @@ void renderbackground(const char *caption, Texture *mapshot, Texture *bgshot, co
             glTexCoord2f(side,   1); glVertex2f(hx-hsz, hy+hsz);
         }
         glEnd();
-        float lh = 0.5f*min(w, h), lw = lh*2,
-              lx = 0.5f*(w - lw), ly = 0.5f*(h*0.5f - lh);
-        // Shattered Shield (ITEM 5): the Revelade logo overlay is skipped -
-        // our full-bleed backdrop/loadscreen art already carries the branding
+        // Shattered Shield: the Revelade logo overlay is skipped - our
+        // full-bleed backdrop/loadscreen art already carries the branding
         // (the menu GUI draws the logo as its title treatment).
-        // (The lx/ly/lw/lh rect is kept: the mapshot block below reuses ly+lh.)
+        // CLEANUP item 3: the stock mapshot preview box that used to be drawn
+        // below (framed box + "?" placeholder + map name/info when no mapshot
+        // texture exists) is removed entirely - the load screen is the art,
+        // the caption, and the progress bar, nothing else.
 
         if(caption)
         {
@@ -278,73 +279,6 @@ void renderbackground(const char *caption, Texture *mapshot, Texture *bgshot, co
             glScalef(tsz, tsz, 1);
             draw_text(caption, 0, 0);
             glPopMatrix();
-        }
-        if(mapshot || mapname)
-        {
-            int infowidth = 21*FONTH;
-            //float sz = 0.35f*min(w, h), msz = (0.78f*min(w, h) - sz)/(infowidth + FONTH), x = 0.5f*(w-sz), y = ly+lh - sz/15;
-            float sz = 0.35f*min(w, h), msz = (1.0f*min(w, h) - sz)/(infowidth + FONTH), x = 0.5f*(w-sz), y = ly+lh - sz/15;
-            if(mapinfo)
-            {
-                settextscale(0.9f);
-                int mw, mh;
-                text_bounds(mapinfo, mw, mh, infowidth);
-                x -= 0.5f*(mw*msz + FONTH*msz);
-                settextscale(1.0f);
-            }
-            if(mapshot && mapshot!=notexture)
-            {
-                //x = w*0.5 - (sz*0.5);
-                //y = h*0.5 - (sz*0.5);
-                glBindTexture(GL_TEXTURE_2D, mapshot->id);
-                glBegin(GL_TRIANGLE_STRIP);
-                glTexCoord2f(0, 0); glVertex2f(x,    y);
-                glTexCoord2f(1, 0); glVertex2f(x+sz, y);
-                glTexCoord2f(0, 1); glVertex2f(x,    y+sz);
-                glTexCoord2f(1, 1); glVertex2f(x+sz, y+sz);
-                glEnd();
-            }
-            else
-            {
-                int qw, qh;
-                text_bounds("?", qw, qh);
-                float qsz = sz*0.5f/max(qw, qh);
-                glPushMatrix();
-                glTranslatef(x + 0.5f*(sz - qw*qsz), y + 0.5f*(sz - qh*qsz), 0);
-                glScalef(qsz, qsz, 1);
-                draw_text("?", 0, 0);
-                glPopMatrix();
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            }
-            settexture("data/gui/mapshot_frame.png", 3);
-            glBegin(GL_TRIANGLE_STRIP);
-            glTexCoord2f(0, 0); glVertex2f(x,    y);
-            glTexCoord2f(1, 0); glVertex2f(x+sz, y);
-            glTexCoord2f(0, 1); glVertex2f(x,    y+sz);
-            glTexCoord2f(1, 1); glVertex2f(x+sz, y+sz);
-            glEnd();
-            if(mapname)
-            {
-                int tw = text_width(mapname);
-                float tsz = sz/(8*FONTH),
-                      tx = 0.9f*sz - tw*tsz, ty = 0.9f*sz - FONTH*tsz;
-                if(tx < 0.1f*sz) { tsz = 0.1f*sz/tw; tx = 0.1f; }
-                glPushMatrix();
-                glTranslatef(x+tx, y+ty, 0);
-                glScalef(tsz, tsz, 1);
-                draw_text(mapname, 0, 0);
-                glPopMatrix();
-            }
-            if(mapinfo)
-            {
-                settextscale(0.9f);
-                glPushMatrix();
-                glTranslatef(x+sz+FONTH*msz, y, 0);
-                glScalef(msz, msz, 1);
-                draw_text(mapinfo, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, -1, infowidth);
-                glPopMatrix();
-                settextscale(1.0f);
-            }
         }
         glDisable(GL_BLEND);
         if(!restore) swapbuffers(false);
@@ -430,7 +364,8 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     // gold fill (ember-gold), inset within the track
     float bh = fh - 8, by = fy + 4;
     float bx = fx + 4, bw = fw - 8;
-    float mw = bw, sw = 0.0f;
+    // CLEANUP item 3: the per-file loading text is no longer drawn in the
+    // bar (callers still pass it; it is simply not rendered).
     if(bar > 0)
     {
         float fillw = bw * (bar > 1 ? 1 : bar);
@@ -446,43 +381,10 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
         glEnd();
     }
 
-    if(text)
-    {
-        int tw = text_width(text);
-        float tsz = bh*0.8f/FONTH;
-        if(tw*tsz > mw) tsz = mw/tw;
-        glPushMatrix();
-        glTranslatef(bx+sw, by + (bh - FONTH*tsz)/2, 0);
-        glScalef(tsz, tsz, 1);
-        draw_text(text, 0, 0);
-        glPopMatrix();
-    }
 
     glDisable(GL_BLEND);
     glEnable(GL_TEXTURE_2D);
 
-    if(tex)
-    {
-        glBindTexture(GL_TEXTURE_2D, tex);
-        float sz = 0.35f*min(w, h), x = 0.5f*(w-sz), y = 0.5f*min(w, h) - sz/15;
-        glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0, 0); glVertex2f(x,    y);
-        glTexCoord2f(1, 0); glVertex2f(x+sz, y);
-        glTexCoord2f(0, 1); glVertex2f(x,    y+sz);
-        glTexCoord2f(1, 1); glVertex2f(x+sz, y+sz);
-        glEnd();
-
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        settexture("data/gui/mapshot_frame.png", 3);
-        glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0, 0); glVertex2f(x,    y);
-        glTexCoord2f(1, 0); glVertex2f(x+sz, y);
-        glTexCoord2f(0, 1); glVertex2f(x,    y+sz);
-        glTexCoord2f(1, 1); glVertex2f(x+sz, y+sz);
-        glEnd();
-        glDisable(GL_BLEND);
-    }
 
     glDisable(GL_TEXTURE_2D);
 
