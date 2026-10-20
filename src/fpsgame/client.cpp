@@ -281,6 +281,16 @@ namespace game
     static float rpg_rmblx = 0, rpg_rmbly = 0; // last steered sample, screen px
     #define RPG_RMB_DRAGPX 12.0f
     #define RPG_RMB_STEERSENS 0.15f // deg per px of drag, near stock mouse feel
+    // Mouse-look pitch (user request, Oct 20): the same right-drag also tilts
+    // the follow camera up/down. The pitch lives in this static, NOT in the
+    // camera entity, and is re-applied to camera1 every frame in
+    // updatetargeting() - so transient camera copies (map loads, edit-mode
+    // trips) can never leak a tilt into play, and the character itself never
+    // pitches (view only). Clamps keep the camera off the floor when looking
+    // up and short of fully overhead when looking down.
+    static float rpg_campitch = 0.0f; // deg, 0 = level follow view
+    #define RPG_CAM_PITCH_MIN -60.0f // looking down: camera high above, not top-down
+    #define RPG_CAM_PITCH_MAX 35.0f  // looking up: camera low, not under the floor
     bool rpg_rmbsteering() { return rpg_rmbdrag; } // fps.cpp hides the cursor while steering
     static void rpg_rmbpress()
     {
@@ -326,6 +336,9 @@ namespace game
         fprintf(fp, "player_yaw=%.1f camera_yaw=%.1f strafe=%d rmbheld=%d rmbdrag=%d\n",
             player1 ? player1->yaw : -999, camera1 ? camera1->yaw : -999,
             player1 ? player1->strafe : -99, rpg_rmbheld ? 1 : 0, rpg_rmbdrag ? 1 : 0);
+        fprintf(fp, "camera_pitch=%.1f campitch=%.1f player_pitch=%.1f editmode=%d player_state=%d detached=%d\n",
+            camera1 ? camera1->pitch : -999, rpg_campitch, player1 ? player1->pitch : -999,
+            editmode ? 1 : 0, player1 ? (int)player1->state : -1, (camera1 && player1 && camera1 != player1) ? 1 : 0);
         fprintf(fp, "health=%d state=%d deaths=%d\n",
             player1 ? player1->health : -1, player1 ? (int)player1->state : -1, player1 ? player1->deaths : -1);
         fclose(fp);
@@ -348,6 +361,12 @@ namespace game
     // rpgclick runs the genuine raycast pick, and rpgtestmouselook exposes the
     // mouse-look gate for both map kinds.
     ICOMMAND(rpgtestdelta, "ii", (int *dx, int *dy), cursormove(*dx, *dy));
+    // TEST-ONLY (harness): drive engine mousemove() - the exact function the
+    // SDL event loop calls for pointer motion - because XTEST pointer warps
+    // never reach SDL relative mode under Xvfb (measured: cursor frozen).
+    // Exercises the real allowmouselook() gate: no-op in RPG play mode, live
+    // in edit mode (the Oct 20 edit-camera proof).
+    ICOMMAND(rpgtestlook, "ii", (int *dx, int *dy), mousemove(*dx, *dy));
     ICOMMAND(rpgcursorpos, "", (),
     {
         float cx = 0; float cy = 0; rpg::cursorget(cx, cy);
@@ -517,13 +536,18 @@ namespace game
             else
             {
                 float dx = cx - rpg_rmblx;
+                float dy = cy - rpg_rmbly;
                 camera1->yaw += dx * RPG_RMB_STEERSENS;
                 while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
                 while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+                // Vertical drag pitches the view, stock mouse feel: drag up
+                // (dy < 0) looks up, exactly like the stock mousemove path.
+                rpg_campitch = clamp(rpg_campitch - dy * RPG_RMB_STEERSENS, RPG_CAM_PITCH_MIN, RPG_CAM_PITCH_MAX);
                 rpg::cursorset(rpg_rmbpx, rpg_rmbpy);
                 rpg_rmblx = rpg_rmbpx; rpg_rmbly = rpg_rmbpy;
             }
         }
+        camera1->pitch = rpg_campitch; // follow-cam elevation, applied every frame (see rpg_campitch note)
 
         // Follow-camera facing (user design, Oct 19): the character faces the
         // camera's forward direction; while fighting a selected target (auto-
@@ -1347,7 +1371,10 @@ namespace game
     {
         // RPG: on RPG maps the mouse is a free cursor, not a camera control.
         // FPS/battleground maps are untouched.
-        return (!gamepaused || !remote || m_edit) && !rpg::mapactive(getclientmap());
+        // Edit-mode carve-out (user request, Oct 20): while editing, mouse
+        // look drives the stock editor camera even on RPG maps (paired with
+        // the detachcamera() carve-out in fps.cpp); play mode is unaffected.
+        return (!gamepaused || !remote || m_edit) && (!rpg::mapactive(getclientmap()) || editmode);
     }
 
     // RPG: raw mouse deltas for the free cursor. The engine calls this even

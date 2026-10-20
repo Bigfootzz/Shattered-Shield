@@ -662,7 +662,13 @@ namespace game
         fpsent *d = hudplayer();
         // RPG: third person is the enforced default view on RPG maps.
         // The thirdperson var itself is never modified; FPS maps are untouched.
-        return d->state==CS_DEAD || rpg::mapactive(getclientmap());
+        // Edit-mode carve-out (user request, Oct 20): while editing, the stock
+        // editor camera rules - attached to the editor player, free-fly -
+        // even on RPG maps, so map building and quest/NPC placement use the
+        // original fixed edit view. The follow cam is for play only; leaving
+        // edit mode restores it. (allowmouselook() in client.cpp has the
+        // matching carve-out so the mouse steers the editor view.)
+        return d->state==CS_DEAD || (rpg::mapactive(getclientmap()) && d->state!=CS_EDITING && !editmode);
     }
 
     // Follow-cam wheel zoom (user design, Oct 19): in third person the wheel
@@ -2259,6 +2265,7 @@ namespace game
     void drawrpgcursor(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
+        if(editmode) return; // stock editor owns the pointer while editing (Oct 20 camera carve-out)
         if(g3d_gui2dopen()) return;
         extern bool rpg_rmbsteering(); // client.cpp: hide the cursor while right-drag steering
         if(rpg_rmbsteering()) return;
