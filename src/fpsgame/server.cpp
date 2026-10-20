@@ -2588,7 +2588,7 @@ namespace server
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
         // --- RPG: Shattered Shield ambient spawns (additive) ---
-        // No friendly fire between monsters on RPG maps. Ambient zombies crowd
+        // No friendly fire between monsters on RPG maps. Ambient monsters crowd
         // the player and their bites land on each other; the stock "infight if
         // very angry" retaliation (zombie loyalty 1 = two friendly bites) then
         // turns the crowd into duels to the death and the respawn timer just
@@ -3250,7 +3250,7 @@ namespace server
         if(q == rpg::QUEST_CULL)
         {
             rpg_qmsg(cq, "Elder Maren: You're the sword-arm we've been praying for, traveler.");
-            rpg_qmsg(cq, "Elder Maren: The dead walk the fields beyond the village. Cull them — 5 of the rotted things.");
+            rpg_qmsg(cq, "Elder Maren: Imps plague the fields beyond the village. Cull them — 5 of the wretched things.");
         }
         else if(q == rpg::QUEST_WAVES)
         {
@@ -3659,7 +3659,7 @@ namespace server
             }
             else // progress reminder
             {
-                const char *mobword = (q == rpg::QUEST_CHAMPION) ? "champion" : "zombies";
+                const char *mobword = (q == rpg::QUEST_CHAMPION) ? "champion" : "imps";
                 defformatstring(prog)("Elder Maren: %d of %d %s slain.", kills, qd.need, mobword);
                 rpg_qmsg(cq, prog);
             }

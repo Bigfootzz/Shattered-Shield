@@ -906,27 +906,29 @@ namespace rpg
     // --- ambient monster spawns: static table for rpg_01 ---
     // 12 points around the village outskirts — never on the player spawn at
     // (2220,1972) or on Maren at (2228,1980); a new player meets the first
-    // zombies a short walk out. z is the measured ground height at (x,y).
+    // imps a short walk out. z is the measured ground height at (x,y).
     // Density: 12 live monsters with a 60s respawn comfortably feeds q1
     // (5 kills) and q2 (8 kills) for 2-10 players sharing the world.
-    // Mix: 8 zombie rows near the village (q1/q2 fodder — questonkill counts
-    // any monster kill, but the chain reads as a zombie cull, so the rows
-    // nearest the village stay zombie), 2 imp rows east, 2 puglin rows at
-    // the far west/northwest. Types resolve by name in rpg_resolvespawntype.
+    // Mix: 10 imp rows (the ambient zombie rows became imps on the user's
+    // call, Oct 20 - the bestiary imp is the mob new players actually face;
+    // questonkill counts any monster kill, so q1/q2 credit is unchanged)
+    // and 2 puglin rows at the far west/northwest. The Rotting Champion
+    // (quest 3) is NOT in this table and stays a zombie. Types resolve by
+    // name in rpg_resolvespawntype.
     static const spawndef SPAWNS[] =
     {
-        { "zombie", 2150.0f, 1450.0f, 2344.0f, "south fields" },
-        { "zombie", 2380.0f, 1600.0f, 2277.0f, "south fields east" },
-        { "zombie", 1980.0f, 1280.0f, 2373.0f, "south fields west" },
-        { "zombie", 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
+        { "imp"   , 2150.0f, 1450.0f, 2344.0f, "south fields" },
+        { "imp"   , 2380.0f, 1600.0f, 2277.0f, "south fields east" },
+        { "imp"   , 1980.0f, 1280.0f, 2373.0f, "south fields west" },
+        { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
         { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
-        { "zombie", 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
+        { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
         { "imp",    3080.0f, 2280.0f, 2188.0f, "east clearing" },
         { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
-        { "zombie", 2200.0f, 3350.0f, 2116.0f, "north road" },
+        { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
         { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
-        { "zombie", 2600.0f, 1300.0f, 2383.0f, "southeast field" },
-        { "zombie", 1500.0f, 1500.0f, 2381.0f, "southwest field" },
+        { "imp"   , 2600.0f, 1300.0f, 2383.0f, "southeast field" },
+        { "imp"   , 1500.0f, 1500.0f, 2381.0f, "southwest field" },
     };
     static const int SPAWN_COUNT = sizeof(SPAWNS)/sizeof(SPAWNS[0]);
 
@@ -936,8 +938,8 @@ namespace rpg
     static const questdef QUESTS[QUEST_DONE] =
     {
         { "", "", "", 0, 0, NULL }, // QUEST_NONE placeholder (index 0)
-        { "Cull the Undead", "Slay 5 zombies", "zombie", 5, 100, NULL },
-        { "The Dead Keep Coming", "Slay 8 zombies", "zombie", 8, 150, NULL },
+        { "Cull the Imps", "Slay 5 imps", "imp", 5, 100, NULL },
+        { "The Imps Keep Coming", "Slay 8 imps", "imp", 8, 150, NULL },
         { "The Rotting Champion", "Slay the Rotting Champion", "Rotting Champion", 1, 300, "imp_mace" },
     };
     const questdef &quest(int qid)
@@ -1378,7 +1380,7 @@ namespace rpg
     {
         if(clquest_state != QSTATE_ACTIVE || !monname || !monname[0]) return false;
         if(clquest_id == QUEST_CHAMPION) return !strcmp(monname, CHAMPION_NAME);
-        if(clquest_id == QUEST_CULL || clquest_id == QUEST_WAVES) return true; // any zombie counts
+        if(clquest_id == QUEST_CULL || clquest_id == QUEST_WAVES) return true; // any monster counts
         return false;
     }
 }
