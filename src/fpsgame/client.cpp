@@ -567,7 +567,7 @@ namespace game
                 {
                     rpg_rmbdrag = true;
                     rpg_rmblx = cx; rpg_rmbly = cy;
-                    conoutf("rpg: steering camera (right-drag)");
+                    conoutf("rpg: pitching camera (right-drag)");
                 }
             }
             else
