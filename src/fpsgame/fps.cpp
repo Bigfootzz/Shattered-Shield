@@ -3183,6 +3183,21 @@ namespace game
 
     void loadconfigs()
     {
+        // CLEANUP item 2: preload the player models here, during startup,
+        // behind the boot splash. They used to load lazily inside the first
+        // character-select preview draw (guiplayerpreview -> renderplayer),
+        // which froze that screen for ~10 seconds on first open (measured:
+        // ~11s with three characters of three different models, ~2s with an
+        // empty roster - the cost scales with the distinct preview models).
+        // The character-create previews and Maren's NPC model use the same
+        // four models, so they are warm too. flushpreloadedmodels() drives
+        // the normal load-progress rendering while it works.
+        loopi(NUMPLAYERMODELS)
+        {
+            const playermodelinfo *mdl = getplayermodelinfo(i);
+            if(mdl && mdl->ffa) preloadmodel(mdl->ffa);
+        }
+        flushpreloadedmodels(false);
     }
 
     const char *getentname(dynent *d) // debugging helper function
