@@ -1,3 +1,0 @@
-/usr/bin/cmake -E rm -f CMakeFiles/client_win64_x64.dir/objects.a
-/usr/bin/x86_64-w64-mingw32-ar qc CMakeFiles/client_win64_x64.dir/objects.a @CMakeFiles/client_win64_x64.dir/objects1.rsp
-/usr/bin/x86_64-w64-mingw32-g++ -O3 -DNDEBUG -fno-exceptions -fno-rtti  -DWIN32 -DWINDOWS -DWIN64 -O3 -DNDEBUG -DBUILD_NO_DEBUG -Wl,--whole-archive CMakeFiles/client_win64_x64.dir/objects.a -Wl,--no-whole-archive -o client_win64_x64.exe -Wl,--out-implib,libclient_win64_x64.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles/client_win64_x64.dir/linkLibs.rsp
