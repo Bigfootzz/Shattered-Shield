@@ -898,8 +898,10 @@ namespace rpg
     {
         { "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f },
         // CLEANUP item 6: Tomas, the errand's delivery target - a villager a
-        // short walk northeast of Maren on the same village plateau (z 2116).
-        { "Tomas", "playermodels/peasant_male", 2246.0f, 1994.0f, 2116.0f, 225.0f },
+        // short walk northeast of Maren. Placed on verified open ground:
+        // (2246,1994) is inside a building wall; (2244,1992,2110) was probed
+        // walkable in the real client.
+        { "Tomas", "playermodels/peasant_male", 2244.0f, 1992.0f, 2110.0f, 225.0f },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
 
