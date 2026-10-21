@@ -1,5 +1,6 @@
 #include "game.h"
 #include "engine.h"
+#include <vector>
 #include "rpg/rpg.h"
 #include "rpg/abilities.h"
 #include "rpg/stats.h"
@@ -402,6 +403,64 @@ namespace game
     }
     ICOMMAND(rpgtalk, "", (), rpg_dtalk());
     ICOMMAND(rpgcleartarget, "", (), rpg::cleartargeting());
+    // --- quest engine v2: dialogue panel state (display only; the server owns the flow) ---
+    // The server sends node text + up to 4 response buttons (N_RPG_DIALOG);
+    // the panel (data/menus/rpg.cfg) renders them; rpgrespond sends back the
+    // button index (N_RPG_RESPOND). Nodeid -1 from the server closes the panel.
+    static string rpg_dlg_npc;
+    static std::vector<std::string> rpg_dlg_lines;
+    static string rpg_dlg_resps[4];
+    static int rpg_dlg_nresp = 0;
+    static bool rpg_dlg_open = false;
+    static void rpg_dlg_wrap(const char *text)
+    {
+        rpg_dlg_lines.clear();
+        if(!text) return;
+        const char *p = text;
+        char para[512];
+        while(*p)
+        {
+            // split paragraphs on \n first
+            const char *nl = strchr(p, '\n');
+            size_t plen = nl ? (size_t)(nl - p) : strlen(p);
+            if(plen >= sizeof(para)) plen = sizeof(para) - 1;
+            memcpy(para, p, plen); para[plen] = '\0';
+            // then wrap the paragraph at ~64 chars on word boundaries
+            const char *w = para;
+            while(*w)
+            {
+                size_t len = strlen(w);
+                if(len > 64)
+                {
+                    len = 64;
+                    while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
+                    if(len == 0) len = 64;
+                }
+                char line[72];
+                memcpy(line, w, len); line[len] = '\0';
+                rpg_dlg_lines.push_back(std::string(line));
+                w += len;
+                while(*w == ' ') w++;
+            }
+            if(!nl) break;
+            p = nl + 1;
+        }
+    }
+    ICOMMAND(rpg_dlg_npc, "", (), result(rpg_dlg_npc));
+    ICOMMAND(rpg_dlg_lines, "", (), intret((int)rpg_dlg_lines.size()));
+    ICOMMAND(rpg_dlg_line, "i", (int *i),
+        result(*i >= 0 && *i < (int)rpg_dlg_lines.size() ? rpg_dlg_lines[*i].c_str() : ""));
+    ICOMMAND(rpg_dlg_n, "", (), intret(rpg_dlg_nresp));
+    ICOMMAND(rpg_dlg_resp, "i", (int *i),
+        result(*i >= 0 && *i < rpg_dlg_nresp ? rpg_dlg_resps[*i] : ""));
+    ICOMMAND(rpgdlgo, "", (), intret(rpg_dlg_open ? 1 : 0)); // 1 while the dialogue panel is open
+    ICOMMAND(rpgrespond, "i", (int *i), if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i));
+    // J-key quest log: a derived view (no new table). rpgjournal rebuilds the
+    // lines from the client quest caches and opens the panel.
+    ICOMMAND(rpgjournal, "", (), { rpg::rpg_buildjournal(); showgui("rpgjournal"); });
+    ICOMMAND(rpg_journal_lines, "", (), intret(rpg::rpg_journal_lines()));
+    ICOMMAND(rpg_journal_line, "i", (int *i),
+        { char b[256]; rpg::rpg_journal_line(*i, b, sizeof(b)); result(b); });
     // --- TEST-ONLY scaffolding (mouse & targeting v1 harness) ---
     // The headless harness cannot move the OS pointer, so these drive the same
     // code paths the real input takes: rpgtestdelta exercises game::cursormove
@@ -515,21 +574,37 @@ namespace game
 
     static int rpg_npchover(int npci)
     {
-        int qid = 0, st = -1, kills = 0, need = 0;
-        bool active = rpg::getclientquest(qid, st, kills, need); // true only when ACTIVE
+        // quest engine v2 hover states (display only)
         if(npci == 0) // Elder Maren
         {
-            if(qid == rpg::QUEST_DONE) return rpg::RPG_HOVER_DEFAULT;
+            int qid = 0, st = -1, kills = 0, need = 0;
+            bool active = rpg::getclientquest(qid, st, kills, need);
             if(active)
             {
-                if(qid == rpg::QUEST_ERRAND) return rpg_potioncount() == 0 ? rpg::RPG_HOVER_QUEST : rpg::RPG_HOVER_DEFAULT; // a replacement tonic waits
-                return kills >= need ? rpg::RPG_HOVER_TURNIN : rpg::RPG_HOVER_DEFAULT;
+                const rpg::questdef *qd = rpg::questdefbyid(qid);
+                if(qd && qd->giver == 0)
+                {
+                    if(qid == 5) return rpg_potioncount() == 0 ? rpg::RPG_HOVER_QUEST : rpg::RPG_HOVER_DEFAULT; // a replacement tonic waits
+                    return (need > 0 && kills >= need) ? rpg::RPG_HOVER_TURNIN : rpg::RPG_HOVER_DEFAULT;
+                }
             }
-            return rpg::RPG_HOVER_QUEST; // offered or not yet offered: she has work for you
+            // she has work when any of her quests is unstarted
+            int nq = rpg::questdefcount();
+            loopi(nq)
+            {
+                const rpg::questdef *qd = rpg::questdefbyindex(i);
+                if(qd && qd->giver == 0 && rpg::clientqueststate(qd->qid) <= 0) return rpg::RPG_HOVER_QUEST;
+            }
+            return rpg::RPG_HOVER_DEFAULT;
         }
         if(npci == 1) // Tomas
         {
-            if(active && qid == rpg::QUEST_ERRAND && rpg_potioncount() > 0) return rpg::RPG_HOVER_TURNIN;
+            if(rpg::clientqueststate(5) == 1 && rpg_potioncount() > 0) return rpg::RPG_HOVER_TURNIN;
+            return rpg::RPG_HOVER_DEFAULT;
+        }
+        if(npci == 2) // Corvin
+        {
+            if(rpg::clientqueststate(4) == 1) return rpg::RPG_HOVER_QUEST; // waiting for the letter
             return rpg::RPG_HOVER_DEFAULT;
         }
         return rpg::RPG_HOVER_DEFAULT;
@@ -1579,6 +1654,10 @@ namespace game
         remote = _remote;
         if(editmode) toggleedit();
         auth::init();
+        // RPG: content data layer (crafting build step 0) - the client loads
+        // the same data/rpg defs for display; the server's copy rules.
+        rpg::loadcontent();
+        rpg::loadquests(); // quest engine v2: quest + dialogue defs
     }
 
     void gamedisconnect(bool cleanup)
@@ -2693,6 +2772,39 @@ namespace game
             {
                 int qid = getint(p), st = getint(p), kills = getint(p), need = getint(p);
                 rpg::setclientquest(qid, st, kills, need);
+                break;
+            }
+            case N_RPG_QTEXT: // quest engine v2: objective display text
+            {
+                int qid = getint(p);
+                string text; getstring(text, p);
+                rpg::setclientquesttext(qid, text);
+                break;
+            }
+            case N_RPG_DIALOG: // quest engine v2: dialogue node (display only)
+            {
+                int nodeid = getint(p);
+                string npcname, text;
+                getstring(npcname, p);
+                getstring(text, p);
+                int nresp = getint(p);
+                string rs[4];
+                loopi(4) getstring(rs[i], p);
+                if(nodeid < 0)
+                {
+                    // server closed the dialogue
+                    if(rpg_dlg_open) cleargui(1);
+                    rpg_dlg_open = false;
+                }
+                else
+                {
+                    copystring(rpg_dlg_npc, npcname);
+                    rpg_dlg_wrap(text);
+                    rpg_dlg_nresp = min(nresp, 4);
+                    loopi(rpg_dlg_nresp) copystring(rpg_dlg_resps[i], rs[i]);
+                    rpg_dlg_open = true;
+                    showgui("rpgdialog");
+                }
                 break;
             }
             case N_RPG_CLANCHAT:

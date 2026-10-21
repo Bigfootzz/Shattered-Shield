@@ -7,6 +7,7 @@ add_library(rpg STATIC
     abilities.cpp
     stats.cpp
     items.cpp
+    quests.cpp
     sqlite3.c)
 
 target_include_directories(rpg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

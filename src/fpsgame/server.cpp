@@ -829,7 +829,7 @@ namespace server
     COMMANDN(rpgstats, rpgstats_cmd, "sV");
 
     static void rpg_syncinv(clientinfo *cq); // defined with the inventory ops below
-    static void rpg_qmsg(clientinfo *cq, const char *line); // quest chain v1, defined below
+    static void rpg_qmsg(clientinfo *cq, const char *line); // quest engine v2, defined below
     struct rpg_party;
     static rpg_party *rpg_findparty(const char *name);
     static clientinfo *rpg_findclient(const char *name);
@@ -908,8 +908,10 @@ namespace server
         }
     }
 
-    static void rpg_syncquest(clientinfo *cq); // quest chain v1, defined below
-    void rpg_talk(clientinfo *cq, int npcidx); // quest chain v1, defined below
+    static void rpg_syncquest(clientinfo *cq); // quest engine v2, defined below
+    static void rpg_spawnchampion(clientinfo *cq); // defined with the mob spawns below
+    void rpg_respond(clientinfo *cq, int idx); // quest engine v2, defined below
+    void rpg_talk(clientinfo *cq, int npcidx); // quest engine v2, defined below
     void rpggrantxp_cmd(tagval *args, int numargs)
     {
         if(numargs < 2) { conoutf("usage: rpggrantxp <name> <amount>"); return; }
@@ -1072,10 +1074,14 @@ namespace server
         }
         if(!victim) { conoutf("rpgmonsterdmg: no live player '%s'", name); return; }
         if(!monster) { conoutf("rpgmonsterdmg: no live monster (spawn one with rpgspawnmonster first)"); return; }
-        int hpbefore = victim->state.health;
-        vec push(0, 0, 0);
-        bool savegod = rpg_testgod; rpg_testgod = false; // explicit test damage bypasses god mode
-        dodamage(victim, monster, amount, WEAP_FIST, push, false);
+        int hpbefore = victim->state.health;
+
+        vec push(0, 0, 0);
+
+        bool savegod = rpg_testgod; rpg_testgod = false; // explicit test damage bypasses god mode
+
+        dodamage(victim, monster, amount, WEAP_FIST, push, false);
+
         rpg_testgod = savegod;
         conoutf("rpgmonsterdmg: '%s' %d -> %d hp (raw %d)", name, hpbefore, victim->state.health, amount);
     }
@@ -1125,6 +1131,9 @@ namespace server
         auth::init();
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         rpg::init();
+        // --- RPG: content data layer (crafting build step 0): items + loot from data/rpg ---
+        rpg::loadcontent();
+        rpg::loadquests(); // quest engine v2: quest + dialogue defs
     }
 
     int numclients(int exclude = -1, bool nospec = true, bool noai = true, bool priv = false)
@@ -2696,46 +2705,55 @@ namespace server
                     }
                     rpg_syncinv(actor); // refresh level/xp on the client sheet
                 }
-                // --- RPG: Shattered Shield quest chain v1 (additive; see src/rpg) ---
-                // Server-validated kill counting: only counts while the matching
-                // quest is ACTIVE; the champion only counts as the tracked one.
-                if(rpg::mapactive(smapname))
+                // --- RPG: quest engine v2 kill counting (additive; see src/rpg) ---
+                // Generalized: a kill counts toward EVERY active quest with a
+                // matching kill objective. Party shared credit preserved: the
+                // killer's party members get the same counting. XP stays with
+                // the killer; turn-in stays individual.
+                if(rpg::mapactive(smapname) && target)
                 {
-                    int qcounted = rpg::questonkill(actor->name, target->clientnum, true);
-                    if(qcounted > 0)
+                    int counted[8];
+                    int ncounted = rpg::questonkill(actor->name, target->name, target->clientnum, true, counted, 8);
+                    if(ncounted > 0)
                     {
-                        const rpg::questdef &qqd = rpg::quest(qcounted);
-                        int qk = rpg::questkills(actor->name, qcounted);
-                        if(qk >= qqd.need) rpg_qmsg(actor, "Objective complete — return to Elder Maren.");
-                        else
+                        loopi(ncounted)
                         {
-                            defformatstring(qprog)("%s: %d/%d slain.", qqd.name, qk, qqd.need);
-                            rpg_qmsg(actor, qprog);
+                            const rpg::questdef *qqd = rpg::questdefbyid(counted[i]);
+                            if(!qqd) continue;
+                            int have = 0, need = 0;
+                            rpg::questprogress(actor->name, counted[i], have, need);
+                            if(have >= need && need > 0) rpg_qmsg(actor, "Objective complete - return to the quest giver.");
+                            else
+                            {
+                                defformatstring(qprog)("%s: %d/%d slain.", qqd->name, have, need);
+                                rpg_qmsg(actor, qprog);
+                            }
                         }
                         rpg_syncquest(actor);
                     }
-                    // RPG: party shared quest credit (v1). A kill by any member
-                    // counts toward the same active quest objective of every OTHER
-                    // member who has that quest active. Same map is implicit (one
-                    // map per server); no distance check in v1. XP stays with the
-                    // killer (existing per-kill behavior). Turn-in stays individual.
                     rpg_party *pp = rpg_findparty(actor->name);
                     if(pp) loopi(pp->nmembers)
                     {
                         if(!strcmp(pp->members[i], actor->name)) continue;
                         clientinfo *m = rpg_findclient(pp->members[i]);
                         if(!m) continue; // offline: no live tracker to update
-                        int mq = rpg::questonkill(m->name, target->clientnum, true);
-                        if(mq > 0)
+                        int mcounted[8];
+                        int nmcounted = rpg::questonkill(m->name, target->name, target->clientnum, true, mcounted, 8);
+                        if(nmcounted > 0)
                         {
-                            conoutf("rpg: party credit: %s quest %d (killer %s)", m->name, mq, actor->name);
-                            const rpg::questdef &mqqd = rpg::quest(mq);
-                            int mqk = rpg::questkills(m->name, mq);
-                            if(mqk >= mqqd.need) rpg_qmsg(m, "Objective complete — return to Elder Maren.");
-                            else
+                            conoutf("rpg: party credit: %s %d quest(s) (killer %s)", m->name, nmcounted, actor->name);
+                            loopj(nmcounted)
                             {
-                                defformatstring(mqprog)("%s: %d/%d slain. (party credit from %s)", mqqd.name, mqk, mqqd.need, actor->name);
-                                rpg_qmsg(m, mqprog);
+                                const rpg::questdef *mqqd = rpg::questdefbyid(mcounted[j]);
+                                if(!mqqd) continue;
+                                int have = 0, need = 0;
+                                rpg::questprogress(m->name, mcounted[j], have, need);
+                                if(have >= need && need > 0) rpg_qmsg(m, "Objective complete - return to the quest giver.");
+                                else
+                                {
+                                    defformatstring(mqprog)("%s: %d/%d slain. (party credit from %s)", mqqd->name, have, need, actor->name);
+                                    rpg_qmsg(m, mqprog);
+                                }
                             }
                             rpg_syncquest(m);
                         }
@@ -2745,7 +2763,16 @@ namespace server
                 // Loot drops roll on RPG maps only, so FPS modes never see item drops.
                 if(rpg::mapactive(smapname))
                 {
-                    int loot = rpg::rollloot();
+                    // Content layer (step 0): per-type loot tables, keyed by
+                    // the victim's monster class. Ambient mobs carry their
+                    // class name ("zombie 3", "imp", "puglin"); the champion
+                    // is a zombie variant. Anything else rolls the global
+                    // fallback table, exactly as before this change.
+                    const char *lootkey = NULL;
+                    if(!strcmp(target->name, "imp")) lootkey = "imp";
+                    else if(!strcmp(target->name, "puglin")) lootkey = "puglin";
+                    else if(!strncmp(target->name, "zombie", 6) || !strcmp(target->name, "Rotting Champion")) lootkey = "zombie";
+                    int loot = rpg::rollloot(lootkey);
                     if(loot >= 0)
                     {
                         int idx = rpg::spoilloot(loot, target->state.o.x, target->state.o.y, target->state.o.z);
@@ -2878,28 +2905,340 @@ namespace server
 
     // --- RPG: Shattered Shield quest chain v1 (additive; see src/rpg) ---
     // Quest dialogue + state machine, server-authoritative. Dialogue lines go
-    // to the talking client as N_RPG_QMSG; the client prints them as "rpg: "
-    // lines so they land in the chat box System tab. Quest state persists in
-    // rpg.db (write-through); kills only count while the quest is ACTIVE and
-    // turn-in re-validates the objective server-side (no double turn-in).
+    // --- RPG: quest engine v2 + dialogue (server-authoritative) ---
+    // Dialogue runs as server session-state: the server picks the node from
+    // the npc's graph, sends node text + response buttons (N_RPG_DIALOG);
+    // the client sends back only a button index (N_RPG_RESPOND). Conditions
+    // and actions are the CLOSED vocabularies from the quest data - dialogue
+    // data can never execute arbitrary script. Sessions close on walk-away
+    // (range re-checked on respond), death/disconnect, or explicit close.
+    // Quest state persists in rpg.db (write-through); turn-in re-validates
+    // the objective server-side (no double turn-in).
     static void rpg_qmsg(clientinfo *cq, const char *line)
     {
         if(!cq || !line || !line[0]) return;
         sendf(cq->clientnum, 1, "ris", N_RPG_QMSG, line);
     }
 
+    // Shared level-up handling (broadcast + hpmax sync on RPG maps).
+    static void rpg_levelupfx(clientinfo *cq, int newlevel)
+    {
+        if(!cq || newlevel <= 0) return;
+        sendservmsgf("\f2%s \f7reached RPG level \f2%d!", cq->name, newlevel);
+        if(rpg::mapactive(smapname))
+        {
+            int maxhp = rpg::stat_maxhp(newlevel);
+            if(cq->state.health > maxhp) cq->state.health = maxhp;
+            cq->state.maxhealth = maxhp;
+            sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
+        }
+    }
+
+    // Objective display text for one quest (tracker + journal).
+    static void rpg_questobjtext(const char *name, int qid, char *out, int outlen)
+    {
+        if(out && outlen > 0) out[0] = '\0';
+        const rpg::questdef *qd = rpg::questdefbyid(qid);
+        if(!qd) return;
+        int st = rpg::queststate(name, qid);
+        const rpg::queststage *qs = rpg::queststageof(qd, st);
+        if(!qs) return;
+        if(qs->objtype == rpg::QOBJ_KILL)
+        {
+            int have = 0, need = 0;
+            rpg::questprogress(name, qid, have, need);
+            formatstring(out)("%d/%d slain", have, need);
+        }
+        else if(qs->objtype == rpg::QOBJ_FETCH)
+        {
+            char item[64]; int amount = 0;
+            if(rpg::repeatableget(name, qid, item, sizeof(item), &amount))
+            {
+                int iid = rpg::finditem(item);
+                int have = rpg::itemcount(name, item);
+                if(have > amount) have = amount;
+                formatstring(out)("%dx %s (%d/%d)", amount, rpg::itemname(iid), have, amount);
+            }
+        }
+        else if(qs->objtype == rpg::QOBJ_TALK)
+        {
+            int ni = rpg::npcindexbyid(qs->objarg);
+            const rpg::npcdef *nd = ni >= 0 ? rpg::npcat(ni) : NULL;
+            formatstring(out)("Talk to %s", nd ? nd->name : qs->objarg);
+        }
+    }
+
     static void rpg_syncquest(clientinfo *cq) // push quest state to one client
     {
         if(!rpg::connected() || !cq) return;
-        int q = rpg::chainpos(cq->name); // 1..3, or QUEST_DONE
-        int st = -1, kills = 0, need = 0;
-        if(rpg::validquest(q))
+        int nq = rpg::questdefcount();
+        loopi(nq)
         {
-            st = rpg::queststate(cq->name, q);
-            kills = rpg::questkills(cq->name, q);
-            need = rpg::quest(q).need;
+            const rpg::questdef *qd = rpg::questdefbyindex(i);
+            int st = rpg::queststate(cq->name, qd->qid);
+            int have = 0, need = 0;
+            rpg::questprogress(cq->name, qd->qid, have, need);
+            sendf(cq->clientnum, 1, "ri5", N_RPG_QUEST, qd->qid, st, have, need);
+            char objtext[160];
+            rpg_questobjtext(cq->name, qd->qid, objtext, sizeof(objtext));
+            sendf(cq->clientnum, 1, "riis", N_RPG_QTEXT, qd->qid, objtext);
         }
-        sendf(cq->clientnum, 1, "ri5", N_RPG_QUEST, q, st, kills, need);
+    }
+
+    // --- dialogue sessions ---
+    struct rpg_talksession
+    {
+        int clientnum;      // -1 = free slot
+        int npcid;
+        int nodeidx;        // node index in the npc's graph
+        int sentresp[4];    // resp indices (into the node) shown as buttons
+        int nsentresp;
+    };
+    static const int MAXTALKSESSIONS = 32;
+    static rpg_talksession rpg_talks[MAXTALKSESSIONS];
+    static bool rpg_talksinit_done = false;
+    static void rpg_talksinit()
+    {
+        if(rpg_talksinit_done) return;
+        rpg_talksinit_done = true;
+        loopi(MAXTALKSESSIONS) rpg_talks[i].clientnum = -1;
+    }
+    static rpg_talksession *rpg_findtalk(int clientnum)
+    {
+        rpg_talksinit();
+        loopi(MAXTALKSESSIONS) if(rpg_talks[i].clientnum == clientnum) return &rpg_talks[i];
+        return NULL;
+    }
+    static void rpg_closetalk(clientinfo *cq)
+    {
+        if(!cq) return;
+        rpg_talksession *t = rpg_findtalk(cq->clientnum);
+        if(t) t->clientnum = -1;
+        // nodeid -1 = close the panel
+        sendf(cq->clientnum, 1, "riississss", N_RPG_DIALOG, -1, "", "", 0, "", "", "", "");
+    }
+
+    // Send one dialogue node to the client (filters responses by condition).
+    static void rpg_senddialog(clientinfo *cq, const rpg::dlggraph *g, int nodeidx, int npcid)
+    {
+        if(!cq || !g || nodeidx < 0 || nodeidx >= g->nnodes) return;
+        rpg_talksinit();
+        rpg_talksession *t = rpg_findtalk(cq->clientnum);
+        if(!t)
+        {
+            loopi(MAXTALKSESSIONS) if(rpg_talks[i].clientnum < 0) { t = &rpg_talks[i]; break; }
+            if(!t) return; // no session slot
+            t->clientnum = cq->clientnum;
+        }
+        const rpg::dlgnode &nd = g->nodes[nodeidx];
+        t->npcid = npcid;
+        t->nodeidx = nodeidx;
+        t->nsentresp = 0;
+        // join say lines with $var substitution
+        char text[1024]; text[0] = '\0';
+        loopi(nd.nsay)
+        {
+            char sub[512];
+            rpg::questtextsubst(cq->name, nd.quest, nd.say[i], sub, sizeof(sub));
+            if(i > 0) concatstring(text, "\n");
+            concatstring(text, sub);
+        }
+        // response buttons: only those whose conditions all hold
+        char r0[160] = "", r1[160] = "", r2[160] = "", r3[160] = "";
+        char *rs[4] = { r0, r1, r2, r3 };
+        loopi(nd.nresp)
+        {
+            const rpg::dlgresponse &r = nd.resp[i];
+            bool ok = true;
+            loopj(r.ncond) if(!rpg::dlgcondmet(cq->name, r.cond[j])) { ok = false; break; }
+            if(!ok) continue;
+            if(t->nsentresp >= 4) break;
+            t->sentresp[t->nsentresp] = i;
+            copystring(rs[t->nsentresp], r.text, 160);
+            t->nsentresp++;
+        }
+        const rpg::npcdef *npc = rpg::npcat(npcid);
+        sendf(cq->clientnum, 1, "riississss", N_RPG_DIALOG, nodeidx,
+              npc ? npc->name : "", text, t->nsentresp, r0, r1, r2, r3);
+    }
+
+    // Execute one dialogue action server-side. xp_granted accumulates givexp
+    // for the turn-in summary. Returns false when validation fails (the
+    // response is aborted and the session closed).
+    static bool rpg_doaction(clientinfo *cq, const rpg::dlgaction &a, int &xp_granted)
+    {
+        const char *name = cq->name;
+        switch(a.verb)
+        {
+            case rpg::ACT_SETSTAGE:
+                rpg::questsetstage(name, a.qid, a.n);
+                return true;
+            case rpg::ACT_COMPLETEQUEST:
+            {
+                const rpg::questdef *qd = rpg::questdefbyid(a.qid);
+                if(!qd) return false;
+                int st = rpg::queststate(name, a.qid);
+                if(st <= 0 || st == qd->finalstage) return false; // no double turn-in
+                // Re-validate the objective server-side (belt and suspenders:
+                // the turn-in node's when-clauses already required objready).
+                rpg::dlgcond orc;
+                memset(&orc, 0, sizeof(orc));
+                orc.verb = rpg::CND_OBJREADY; orc.qid = a.qid;
+                if(!rpg::dlgcondmet(name, orc)) return false;
+                rpg::questsetstage(name, a.qid, qd->finalstage);
+                defformatstring(done)("Quest complete: %s (+%d XP)", qd->name, xp_granted);
+                rpg_qmsg(cq, done);
+                return true;
+            }
+            case rpg::ACT_GIVEITEM:
+            {
+                if(!rpg::additem(name, a.item, a.count)) return false;
+                int iid = rpg::finditem(a.item);
+                defformatstring(it)("%s", "");
+                if(a.count > 1) formatstring(it)("Received: %dx %s", a.count, rpg::itemname(iid));
+                else formatstring(it)("Received: %s", rpg::itemname(iid));
+                rpg_qmsg(cq, it);
+                return true;
+            }
+            case rpg::ACT_TAKEITEM:
+            {
+                char item[64];
+                copystring(item, a.item, sizeof(item));
+                if(!strcmp(item, "rolled"))
+                {
+                    int amount = 0;
+                    if(!rpg::repeatableget(name, a.qid, item, sizeof(item), &amount)) return false;
+                }
+                if(rpg::itemcount(name, item) < a.count) return false;
+                rpg::removeitem(name, item, a.count);
+                return true;
+            }
+            case rpg::ACT_GIVEXP:
+            {
+                bool leveled = false;
+                int newlevel = rpg::awardxp(name, a.n, &leveled);
+                if(newlevel < 0) return false;
+                xp_granted += a.n;
+                if(leveled) rpg_levelupfx(cq, newlevel);
+                return true;
+            }
+            case rpg::ACT_GIVEFETCHXP:
+            {
+                const rpg::questdef *qd = rpg::questdefbyid(a.qid);
+                if(!qd) return false;
+                char item[64]; int amount = 0;
+                if(!rpg::repeatableget(name, a.qid, item, sizeof(item), &amount)) return false;
+                int iid = rpg::finditem(item);
+                int reward = amount * (iid >= 0 ? rpg::item(iid).value : 0);
+                if(reward < 1) return false;
+                bool leveled = false;
+                int newlevel = rpg::awardxp(name, reward, &leveled);
+                if(newlevel < 0) return false;
+                xp_granted += reward;
+                if(leveled) rpg_levelupfx(cq, newlevel);
+                return true;
+            }
+            case rpg::ACT_SPAWNCHAMPION:
+                rpg_spawnchampion(cq);
+                return true;
+            case rpg::ACT_ROLLFETCH:
+                return rpg::repeatableroll(name, a.qid);
+        }
+        return false;
+    }
+
+    // The client clicked a response button. Server-validated: session must
+    // exist, the button index must be one we sent, the player must still be
+    // alive and in range, and response conditions are re-checked.
+    void rpg_respond(clientinfo *cq, int idx)
+    {
+        if(!rpg::connected() || !cq) return;
+        if(cq->state.ai.type != ai::AI_TYPE_NONE) return;
+        if(!rpg::mapactive(smapname)) return;
+        rpg_talksession *t = rpg_findtalk(cq->clientnum);
+        if(!t) return;
+        if(cq->state.state != CS_ALIVE) { rpg_closetalk(cq); return; }
+        const rpg::npcdef *nd = rpg::npcat(t->npcid);
+        if(!nd || cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 14.0f)
+        {
+            rpg_qmsg(cq, "Too far away to talk.");
+            rpg_closetalk(cq);
+            return;
+        }
+        const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
+        if(!g || t->nodeidx < 0 || t->nodeidx >= g->nnodes) { rpg_closetalk(cq); return; }
+        if(idx < 0 || idx >= t->nsentresp) return; // forged index
+        const rpg::dlgnode &node = g->nodes[t->nodeidx];
+        int respidx = t->sentresp[idx];
+        if(respidx < 0 || respidx >= node.nresp) return;
+        const rpg::dlgresponse &r = node.resp[respidx];
+        // re-check response conditions (they could have changed)
+        loopi(r.ncond) if(!rpg::dlgcondmet(cq->name, r.cond[i])) { rpg_closetalk(cq); return; }
+        int xp_granted = 0;
+        loopi(r.nact) if(!rpg_doaction(cq, r.act[i], xp_granted)) { rpg_closetalk(cq); return; }
+        rpg_syncinv(cq); // refresh xp/inventory/level + quest tracker
+        if(r.close) { rpg_closetalk(cq); return; }
+        if(r.gotonode[0])
+        {
+            int target = -1;
+            loopi(g->nnodes) if(!strcmp(g->nodes[i].id, r.gotonode)) { target = i; break; }
+            if(target >= 0)
+            {
+                // goto lands only when the target's when-clauses hold;
+                // otherwise fall back to entry selection.
+                bool ok = g->nodes[target].nwhen > 0;
+                if(ok) loopi(g->nodes[target].nwhen)
+                    if(!rpg::dlgcondmet(cq->name, g->nodes[target].when[i])) { ok = false; break; }
+                if(ok) { rpg_senddialog(cq, g, target, t->npcid); return; }
+            }
+            int entry = rpg::dlgnode_selectentry(g, cq->name);
+            if(entry >= 0) rpg_senddialog(cq, g, entry, t->npcid);
+            else rpg_closetalk(cq);
+        }
+        else rpg_closetalk(cq); // no flow (shouldn't happen; data requires one)
+    }
+
+    void rpg_talk(clientinfo *cq, int npcidx)
+    {
+        if(!rpg::connected() || !cq) return;
+        if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players talk
+        if(!rpg::mapactive(smapname)) return;
+        if(cq->state.state != CS_ALIVE) { rpg_qmsg(cq, "You must be alive to talk."); return; }
+        if(npcidx < 0)
+        {
+            // The client sent no specific NPC (F pressed with nobody selected
+            // or in sights) - resolve the nearest NPC inside talk range here;
+            // the distance check below re-validates it.
+            float best = 12.0f;
+            loopi(rpg::npccount())
+            {
+                const rpg::npcdef *cand = rpg::npcat(i);
+                if(!cand) continue;
+                float d = cq->state.o.dist(vec(cand->x, cand->y, cand->z));
+                if(d <= best) { best = d; npcidx = i; }
+            }
+            if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
+        }
+        const rpg::npcdef *nd = rpg::npcat(npcidx);
+        if(!nd || !nd->dialogue || !nd->dialogue[0]) return;
+        if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
+        {
+            rpg_qmsg(cq, "Too far away to talk.");
+            return;
+        }
+        const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
+        if(!g)
+        {
+            rpg_qmsg(cq, "They have nothing to say.");
+            return;
+        }
+        int entry = rpg::dlgnode_selectentry(g, cq->name);
+        if(entry < 0)
+        {
+            rpg_qmsg(cq, "They have nothing to say.");
+            return;
+        }
+        rpg_senddialog(cq, g, entry, npcidx);
     }
 
     // --- RPG: Party + safety v1 (Oct 19, additive) ---
@@ -3262,31 +3601,6 @@ namespace server
         return true;
     }
 
-    static void rpg_questoffer(clientinfo *cq, int q)
-    {
-        // flavor per quest; the accept hint is a plain UI line, not dialogue
-        if(q == rpg::QUEST_ERRAND)
-        {
-            rpg_qmsg(cq, "Elder Maren: A small favor before anything grander, traveler.");
-            rpg_qmsg(cq, "Elder Maren: Take this tonic to Tomas — he's just nearby. He'll have something for you.");
-        }
-        else if(q == rpg::QUEST_CULL)
-        {
-            rpg_qmsg(cq, "Elder Maren: You're the sword-arm we've been praying for, traveler.");
-            rpg_qmsg(cq, "Elder Maren: Imps plague the fields beyond the village. Cull them — 5 of the wretched things.");
-        }
-        else if(q == rpg::QUEST_WAVES)
-        {
-            rpg_qmsg(cq, "Elder Maren: You fight well. But they keep coming.");
-            rpg_qmsg(cq, "Elder Maren: Eight more press in from the treeline. Drive them back.");
-        }
-        else if(q == rpg::QUEST_CHAMPION)
-        {
-            rpg_qmsg(cq, "Elder Maren: Their champion has risen — a great rotted brute.");
-            rpg_qmsg(cq, "Elder Maren: End it, and we may finally sleep again.");
-        }
-        rpg_qmsg(cq, "Press F again to take up the quest.");
-    }
 
     // --- RPG: mob behaviour tracking for the quest champion (Oct 20) ---
     // The champion is not an ambient-table mob, so its home/full-HP and
@@ -3594,184 +3908,6 @@ namespace server
     // server-side like Maren's chain: the tonic is counted and removed here,
     // XP and the reward are granted here, and completion persists through
     // questsetcomplete like any other quest.
-    static void rpg_talk_tomas(clientinfo *cq)
-    {
-        const char *name = cq->name;
-        int q = rpg::chainpos(name);
-        if(q == rpg::QUEST_ERRAND && rpg::queststate(name, q) == rpg::QSTATE_ACTIVE)
-        {
-            if(rpg::itemcount(name, "health_potion") >= 1)
-            {
-                rpg::removeitem(name, "health_potion", 1);
-                rpg::questsetcomplete(name, q);
-                const rpg::questdef &qd = rpg::quest(q);
-                bool leveled = false;
-                int newlevel = rpg::awardxp(name, qd.xpreward, &leveled);
-                rpg_qmsg(cq, "Tomas: The tonic! Maren worries too much, but thank her for me.");
-                defformatstring(done)("Quest complete: %s (+%d XP)", qd.name, qd.xpreward);
-                rpg_qmsg(cq, done);
-                if(leveled && newlevel > 0) // same level-up handling as Maren's turn-in
-                {
-                    sendservmsgf("\f2%s \f7reached RPG level \f2%d!", name, newlevel);
-                    if(rpg::mapactive(smapname))
-                    {
-                        int maxhp = rpg::stat_maxhp(newlevel);
-                        if(cq->state.health > maxhp) cq->state.health = maxhp;
-                        cq->state.maxhealth = maxhp;
-                        sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
-                    }
-                }
-                if(qd.itemreward && qd.itemreward[0] && rpg::additem(name, qd.itemreward, 1))
-                {
-                    defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem(qd.itemreward)));
-                    rpg_qmsg(cq, it);
-                }
-                // TUNING Oct 21 (user-approved): the errand also arms the
-                // new character - a puglin stick from Tomas, so starter
-                // hunts are winnable with the new Basic Attack base damage.
-                if(rpg::additem(name, "puglin_stick", 1))
-                {
-                    defformatstring(it2)("Received: %s", rpg::itemname(rpg::finditem("puglin_stick")));
-                    rpg_qmsg(cq, it2);
-                }
-                rpg_qmsg(cq, "Tomas: Take the tunic and this stick — you'll want them out there. Maren has real work for you now.");
-                rpg_syncinv(cq);
-            }
-            else rpg_qmsg(cq, "Tomas: Maren said you'd bring a health potion. If you've none, ask her for another.");
-        }
-        else if(q == rpg::QUEST_ERRAND)
-            rpg_qmsg(cq, "Tomas: If you're looking for work, Elder Maren has a favor to ask.");
-        else
-            rpg_qmsg(cq, "Tomas: The village looks to you now. Good luck out there.");
-    }
-
-    void rpg_talk(clientinfo *cq, int npcidx)
-    {
-        if(!rpg::connected() || !cq) return;
-        if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players talk
-        if(!rpg::mapactive(smapname)) return;
-        if(cq->state.state != CS_ALIVE) { rpg_qmsg(cq, "You must be alive to talk."); return; }
-        if(npcidx < 0)
-        {
-            // CLEANUP item 4: the client sent no specific NPC (F pressed with
-            // nobody selected or in sights) - resolve the nearest NPC inside
-            // talk range here; the distance check below re-validates it.
-            float best = 12.0f;
-            loopi(rpg::npccount())
-            {
-                const rpg::npcdef *cand = rpg::npcat(i);
-                if(!cand) continue;
-                float d = cq->state.o.dist(vec(cand->x, cand->y, cand->z));
-                if(d <= best) { best = d; npcidx = i; }
-            }
-            if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
-        }
-        const rpg::npcdef *nd = rpg::npcat(npcidx);
-        if(!nd) return;
-        if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
-        {
-            rpg_qmsg(cq, "Too far away to talk.");
-            return;
-        }
-        const char *name = cq->name;
-        if(npcidx == 1) // Tomas: his own branch (item 6); tracker sync matches Maren's path
-        {
-            rpg_talk_tomas(cq);
-            rpg_syncquest(cq);
-            return;
-        }
-        int q = rpg::chainpos(name);
-        if(q == rpg::QUEST_DONE)
-        {
-            rpg_qmsg(cq, "Elder Maren: The village breathes again, thanks to you.");
-            rpg_qmsg(cq, "Elder Maren: We have nothing more to ask — only our thanks.");
-            rpg_syncquest(cq);
-            return;
-        }
-        const rpg::questdef &qd = rpg::quest(q);
-        int st = rpg::queststate(name, q);
-        int kills = rpg::questkills(name, q);
-        if(st < 0) // never offered: show the offer
-        {
-            rpg::questsetoffered(name, q);
-            rpg_questoffer(cq, q);
-        }
-        else if(st == rpg::QSTATE_OFFERED) // accept
-        {
-            rpg::questsetactive(name, q);
-            defformatstring(acc)("Quest accepted: %s — %s.", qd.name, qd.objective);
-            rpg_qmsg(cq, acc);
-            if(q == rpg::QUEST_CHAMPION) rpg_spawnchampion(cq);
-            if(q == rpg::QUEST_ERRAND)
-            {
-                // hand over the tonic to carry (server-side grant, item 6)
-                if(rpg::additem(name, "health_potion", 1))
-                {
-                    defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem("health_potion")));
-                    rpg_qmsg(cq, it);
-                }
-                rpg_syncinv(cq);
-            }
-        }
-        else if(st == rpg::QSTATE_ACTIVE)
-        {
-            if(q == rpg::QUEST_ERRAND)
-            {
-                // delivery, not kills: completion happens at Tomas. Here we
-                // only remind - or replace a lost tonic (item 6).
-                if(rpg::itemcount(name, "health_potion") < 1)
-                {
-                    if(rpg::additem(name, "health_potion", 1))
-                        rpg_qmsg(cq, "Elder Maren: Lost the tonic? Here's another. Tomas is just nearby.");
-                    rpg_syncinv(cq);
-                }
-                else rpg_qmsg(cq, "Elder Maren: Tomas is just nearby — take the tonic to him.");
-            }
-            else if(kills >= qd.need) // turn in: objective re-validated server-side
-            {
-                rpg::questsetcomplete(name, q);
-                bool leveled = false;
-                int newlevel = rpg::awardxp(name, qd.xpreward, &leveled);
-                defformatstring(done)("Quest complete: %s (+%d XP)", qd.name, qd.xpreward);
-                rpg_qmsg(cq, done);
-                if(leveled && newlevel > 0) // same level-up handling as the kill path
-                {
-                    sendservmsgf("\f2%s \f7reached RPG level \f2%d!", name, newlevel);
-                    if(rpg::mapactive(smapname))
-                    {
-                        int maxhp = rpg::stat_maxhp(newlevel);
-                        if(cq->state.health > maxhp) cq->state.health = maxhp;
-                        cq->state.maxhealth = maxhp;
-                        sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
-                    }
-                }
-                if(qd.itemreward && qd.itemreward[0] && rpg::additem(name, qd.itemreward, 1))
-                {
-                    defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem(qd.itemreward)));
-                    rpg_qmsg(cq, it);
-                }
-                rpg_syncinv(cq); // refresh xp/inventory/level on the client sheet
-                int nq = rpg::chainpos(name);
-                if(rpg::validquest(nq))
-                {
-                    rpg::questsetoffered(name, nq);
-                    rpg_questoffer(cq, nq);
-                }
-                else
-                {
-                    rpg_qmsg(cq, "Elder Maren: The village breathes again, thanks to you.");
-                    rpg_qmsg(cq, "Elder Maren: We have nothing more to ask — only our thanks.");
-                }
-            }
-            else // progress reminder
-            {
-                const char *mobword = (q == rpg::QUEST_CHAMPION) ? "champion" : "imps";
-                defformatstring(prog)("Elder Maren: %d of %d %s slain.", kills, qd.need, mobword);
-                rpg_qmsg(cq, prog);
-            }
-        }
-        rpg_syncquest(cq); // keep the client tracker in sync after every talk
-    }
 
     void rpg_cast(clientinfo *cq, int ability, int yaw, int advisory)
     {
@@ -4517,6 +4653,10 @@ namespace server
             ci->state.timeplayed += lastmillis - ci->state.lasttimeplayed;
             // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
             rpg::ondisconnect(ci->name, smapname, ci->state.o.x, ci->state.o.y, ci->state.o.z, 0.0f /* yaw: not on gamestate; reserved for later */);
+            { // quest engine v2: drop any open dialogue session (talk state is never persisted)
+                rpg_talksinit();
+                loopi(MAXTALKSESSIONS) if(rpg_talks[i].clientnum == n) rpg_talks[i].clientnum = -1;
+            }
             savescore(ci);
             sendf(-1, 1, "ri2", N_CDIS, n);
             clients.removeobj(ci);
@@ -5200,6 +5340,12 @@ namespace server
             {
                 int npcidx = getint(p);
                 if(cq) rpg_talk(cq, npcidx);
+                break;
+            }
+            case N_RPG_RESPOND: // quest engine v2: dialogue response button
+            {
+                int idx = getint(p);
+                if(cq) rpg_respond(cq, idx);
                 break;
             }
             // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---

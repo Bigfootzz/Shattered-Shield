@@ -60,6 +60,10 @@ namespace rpg
     struct qrow { int state; int kills; };
     static std::map<std::string, std::map<int, qrow> > questcache;
     static void questcacheload(const char *name);
+    static void rpcacheload(const char *name);
+    // quest engine v2: repeatable fetch state, session view of rpg_repeatables
+    struct rprow { char item[64]; int amount; int readyat; };
+    static std::map<std::string, std::map<int, rprow> > rpcache;
 
     static cachedchar *findcached(const char *name)
     {
@@ -148,6 +152,14 @@ namespace rpg
                 "state INTEGER NOT NULL DEFAULT 0,"
                 "kills INTEGER NOT NULL DEFAULT 0,"
                 "PRIMARY KEY(name, quest))");
+        // --- quest engine v2: repeatables (fetch template), additive ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_repeatables("
+                "name TEXT NOT NULL,"
+                "quest INTEGER NOT NULL,"
+                "item TEXT NOT NULL DEFAULT '',"
+                "amount INTEGER NOT NULL DEFAULT 0,"
+                "readyat INTEGER NOT NULL DEFAULT 0,"
+                "PRIMARY KEY(name, quest))");
         // --- party + safety v1 (Oct 19): mute/block lists, additive ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_mutes("
                 "owner TEXT NOT NULL,"
@@ -230,8 +242,9 @@ namespace rpg
         cache[std::string(name)] = cc;
         // --- inventory & equipment v1 (milestone step 4) ---
         loadinv(name); // rows into the session cache (no-op when none)
-        // --- quest chain v1: quest rows into the session cache (no-op when none) ---
+        // --- quest engine v2: quest rows + repeatable rows into the session caches ---
         questcacheload(name);
+        rpcacheload(name);
         if(!existed)
         {
             // starter kit: a stick in hand and two potions in the pack
@@ -309,8 +322,9 @@ namespace rpg
         if(!db || !name || !name[0]) return;
         savepos(name, map, x, y, z, yaw);
         saveinv(name); // milestone step 4: inventory + equipment persist with the character
-        // quest chain v1: quest rows are already write-through; drop the session view
+        // quest engine v2: quest + repeatable rows are already write-through; drop the session views
         questcache.erase(std::string(name));
+        rpcache.erase(std::string(name));
         cache.erase(std::string(name));
         conoutf("rpg: saved character '%s'", name);
     }
@@ -629,7 +643,7 @@ namespace rpg
 
     int spoilloot(int itemid, float x, float y, float z)
     {
-        if(itemid < 0 || itemid >= ITEM_COUNT) return -1;
+        if(itemid < 0 || itemid >= itemcount()) return -1;
         lootdrop d;
         d.idx = nextlootidx++;
         d.item = itemid;
@@ -896,13 +910,24 @@ namespace rpg
     // table is the single place a second quest giver slots in later.
     static const npcdef NPCS[] =
     {
-        { "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f },
+        { "maren", "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main" },
         // CLEANUP item 6: Tomas, the errand's delivery target. Stands beside
         // Maren in the spawn clearing - the errand is a conversation, not a
         // trek; the player talks to him from the same spot as Maren.
-        { "Tomas", "playermodels/peasant_male", 2226.0f, 1978.0f, 2116.0f, 225.0f },
+        { "tomas", "Tomas", "playermodels/peasant_male", 2226.0f, 1978.0f, 2116.0f, 225.0f, "tomas_main" },
+        // QUEST BUILD (Oct 21): Corvin, the relay quest's recipient. The
+        // design's "Tomas Reed" collided with the existing Tomas, so the
+        // relay recipient is a distinct NPC: a hunter camped by the east
+        // homesteads. peasant_male per the approved recommendation.
+        { "corvin", "Corvin", "playermodels/peasant_male", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main" },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
+    int npcindexbyid(const char *id)
+    {
+        if(!id || !id[0]) return -1;
+        loopi(NPC_COUNT) if(!strcmp(NPCS[i].id, id)) return i;
+        return -1;
+    }
 
     int npccount() { return NPC_COUNT; }
     const npcdef *npcat(int i) { return (i >= 0 && i < NPC_COUNT) ? &NPCS[i] : NULL; }
@@ -939,33 +964,22 @@ namespace rpg
     int spawnpointcount() { return SPAWN_COUNT; }
     const spawndef *spawnpoint(int i) { return (i >= 0 && i < SPAWN_COUNT) ? &SPAWNS[i] : NULL; }
 
-    static const questdef QUESTS[QUEST_DONE] =
-    {
-        { "", "", "", 0, 0, NULL }, // QUEST_NONE placeholder (index 0)
-        { "Cull the Imps", "Slay 5 imps", "imp", 5, 100, NULL },
-        { "The Imps Keep Coming", "Slay 8 imps", "imp", 8, 150, NULL },
-        { "The Rotting Champion", "Slay the Rotting Champion", "Rotting Champion", 1, 300, "imp_mace" },
-    };
+    // Quest engine v2: quest definitions are content now (data/rpg/quests.cfg,
+    // parsed by loadquests() in quests.cpp). validquest() is the single range
+    // test every quest guard uses: true exactly when a quest def exists.
     bool validquest(int qid)
     {
-        return (qid >= QUEST_CULL && qid <= QUEST_CHAMPION) || qid == QUEST_ERRAND;
-    }
-
-    const questdef &quest(int qid)
-    {
-        static const questdef empty = { "", "", "", 0, 0, NULL };
-        // CLEANUP item 6: the starter errand lives outside the QUESTS table
-        // (its id, 5, sits past QUEST_DONE by design so ids 1..3 never move).
-        static const questdef errand = { "A Neighborly Errand", "Take a health potion to Tomas", "", 0, 25, "ranger_tunic" };
-        if(qid == QUEST_ERRAND) return errand;
-        if(qid < QUEST_CULL || qid > QUEST_CHAMPION) return empty;
-        return QUESTS[qid];
+        return questdefbyid(qid) != NULL;
     }
 
     // Champion display name (also the radar/client match string).
     static const char *CHAMPION_NAME = "Rotting Champion";
 
-    // --- quest persistence: rpg_quests(name, quest, state, kills) ---
+    // --- quest engine v2: persistence rpg_quests(name, quest, state, kills) ---
+    // `state` is now a stage integer: 0 = never started, 1..N in progress,
+    // finalstage = done. (The column keeps its v1 name; no migration needed.)
+    void repeatablesetcooldown(const char *name, int qid); // fwd (defined below)
+    bool repeatableget(const char *name, int qid, char *item, int itemlen, int *amount); // fwd
     static void questcacheload(const char *name)
     {
         questcache[std::string(name)].clear();
@@ -1002,28 +1016,12 @@ namespace rpg
         }
     }
 
-    // Chain order: the starter errand first (item 6), then the cull chain.
-    static const int CHAIN_ORDER[] = { QUEST_ERRAND, QUEST_CULL, QUEST_WAVES, QUEST_CHAMPION };
-
-    int chainpos(const char *name)
-    {
-        if(!name || !name[0]) return QUEST_DONE;
-        std::map<int, qrow> &m = questcache[std::string(name)];
-        loopi(int(sizeof(CHAIN_ORDER)/sizeof(CHAIN_ORDER[0])))
-        {
-            int q = CHAIN_ORDER[i];
-            std::map<int, qrow>::iterator it = m.find(q);
-            if(it == m.end() || it->second.state != QSTATE_COMPLETE) return q;
-        }
-        return QUEST_DONE;
-    }
-
     int queststate(const char *name, int qid)
     {
-        if(!name || !name[0] || !validquest(qid)) return -1;
+        if(!name || !name[0] || !validquest(qid)) return 0;
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
-        return it == m.end() ? -1 : it->second.state;
+        return it == m.end() ? 0 : it->second.state; // no row = never started = stage 0
     }
 
     int questkills(const char *name, int qid)
@@ -1034,40 +1032,56 @@ namespace rpg
         return it == m.end() ? 0 : it->second.kills;
     }
 
-    void questsetoffered(const char *name, int qid)
+    void questsetstage(const char *name, int qid, int stage)
     {
         if(!name || !name[0] || !validquest(qid)) return;
-        qrow r; r.state = QSTATE_OFFERED; r.kills = 0;
+        const questdef *qd = questdefbyid(qid);
+        if(!qd || stage < 0 || stage > qd->finalstage) return;
+        qrow r; r.state = stage; r.kills = 0;
         questcache[std::string(name)][qid] = r;
         questsave(name, qid);
+        // Repeatable turn-in: setting the stage back to 0 stamps the cooldown.
+        if(stage == 0 && qd->repeatsec > 0) repeatablesetcooldown(name, qid);
     }
 
-    void questsetactive(const char *name, int qid)
+    void questaddprogress(const char *name, int qid, int n)
     {
-        if(!name || !name[0] || !validquest(qid)) return;
-        qrow r; r.state = QSTATE_ACTIVE; r.kills = 0;
-        questcache[std::string(name)][qid] = r;
-        questsave(name, qid);
-    }
-
-    void questaddkill(const char *name, int qid)
-    {
-        if(!name || !name[0] || !validquest(qid)) return;
+        if(!name || !name[0] || !validquest(qid) || n <= 0) return;
+        const questdef *qd = questdefbyid(qid);
         std::map<int, qrow> &m = questcache[std::string(name)];
         std::map<int, qrow>::iterator it = m.find(qid);
-        if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // only while active
-        it->second.kills++;
+        if(it == m.end()) return;
+        const queststage *qs = queststageof(qd, it->second.state);
+        if(!qs || qs->objtype != QOBJ_KILL) return; // kill stages only
+        it->second.kills += n;
         questsave(name, qid);
     }
 
-    void questsetcomplete(const char *name, int qid)
+    bool questiscomplete(const char *name, int qid)
     {
-        if(!name || !name[0] || !validquest(qid)) return;
-        std::map<int, qrow> &m = questcache[std::string(name)];
-        std::map<int, qrow>::iterator it = m.find(qid);
-        if(it == m.end() || it->second.state != QSTATE_ACTIVE) return; // no double turn-in
-        it->second.state = QSTATE_COMPLETE;
-        questsave(name, qid);
+        const questdef *qd = questdefbyid(qid);
+        if(!qd) return false;
+        return queststate(name, qid) == qd->finalstage;
+    }
+
+    void questprogress(const char *name, int qid, int &have, int &need)
+    {
+        have = 0; need = 0;
+        const questdef *qd = questdefbyid(qid);
+        if(!qd) return;
+        const queststage *qs = queststageof(qd, queststate(name, qid));
+        if(!qs) return;
+        if(qs->objtype == QOBJ_KILL) { have = questkills(name, qid); need = qs->objcount; }
+        else if(qs->objtype == QOBJ_FETCH)
+        {
+            char item[64]; int amount = 0;
+            if(repeatableget(name, qid, item, sizeof(item), &amount))
+            {
+                have = itemcount(name, item);
+                if(have > amount) have = amount;
+                need = amount;
+            }
+        }
     }
 
     // Champion tracking (server session state).
@@ -1076,20 +1090,123 @@ namespace rpg
     int championcn() { return champion_clientnum; }
     void clearchampioncn() { champion_clientnum = -1; }
 
-    // Server kill-path hook. Counts only while the matching quest is ACTIVE;
-    // quest 3 counts only the tracked champion. Returns the quest id counted, else 0.
-    int questonkill(const char *name, int targetclientnum, bool ismonster)
+    // --- repeatables: rpg_repeatables(name, quest, item, amount, readyat) ---
+    // One row per (character, quest): the rolled fetch item/amount and the
+    // earliest re-accept time (unix). Additive table; server-side only.
+    // (rprow + rpcache are declared at the top of the namespace.)
+    static void rpcacheload(const char *name)
     {
-        if(!name || !name[0] || !ismonster) return 0;
-        int q = chainpos(name);
-        if(!validquest(q)) return 0;
-        if(q == QUEST_ERRAND) return 0; // delivery quest: kills never count
-        if(queststate(name, q) != QSTATE_ACTIVE) return 0;
-        if(q == QUEST_CHAMPION && targetclientnum != champion_clientnum) return 0;
-        questaddkill(name, q);
-        if(q == QUEST_CHAMPION) clearchampioncn(); // the champion is dead; stop tracking
-        return q;
+        rpcache[std::string(name)].clear();
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT quest, item, amount, readyat FROM rpg_repeatables WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            while(sqlite3_step(st) == SQLITE_ROW)
+            {
+                int q = sqlite3_column_int(st, 0);
+                if(!validquest(q)) continue;
+                rprow r;
+                copystring(r.item, (const char *)sqlite3_column_text(st, 1), sizeof(r.item));
+                r.amount = sqlite3_column_int(st, 2);
+                r.readyat = sqlite3_column_int(st, 3);
+                rpcache[std::string(name)][q] = r;
+            }
+            sqlite3_finalize(st);
+        }
     }
+    static void rpsave(const char *name, int qid)
+    {
+        if(!db || !name || !name[0]) return;
+        std::map<int, rprow> &m = rpcache[std::string(name)];
+        std::map<int, rprow>::iterator it = m.find(qid);
+        if(it == m.end()) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO rpg_repeatables(name, quest, item, amount, readyat) VALUES(?1, ?2, ?3, ?4, ?5)", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(st, 2, qid);
+            sqlite3_bind_text(st, 3, it->second.item, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(st, 4, it->second.amount);
+            sqlite3_bind_int(st, 5, it->second.readyat);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+
+    bool repeatableready(const char *name, int qid)
+    {
+        const questdef *qd = questdefbyid(qid);
+        if(!qd || qd->repeatsec <= 0) return false;
+        std::map<int, rprow> &m = rpcache[std::string(name)];
+        std::map<int, rprow>::iterator it = m.find(qid);
+        if(it == m.end()) return true; // never rolled: ready
+        return (int)time(NULL) >= it->second.readyat;
+    }
+
+    bool repeatableroll(const char *name, int qid)
+    {
+        const questdef *qd = questdefbyid(qid);
+        if(!qd || qd->npool <= 0 || qd->poolmax < qd->poolmin) return false;
+        rprow r;
+        copystring(r.item, qd->pool[rnd(qd->npool)], sizeof(r.item));
+        r.amount = qd->poolmin + rnd(qd->poolmax - qd->poolmin + 1);
+        r.readyat = 0;
+        rpcache[std::string(name)][qid] = r;
+        rpsave(name, qid);
+        return true;
+    }
+
+    bool repeatableget(const char *name, int qid, char *item, int itemlen, int *amount)
+    {
+        std::map<int, rprow> &m = rpcache[std::string(name)];
+        std::map<int, rprow>::iterator it = m.find(qid);
+        if(it == m.end()) return false;
+        copystring(item, it->second.item, itemlen);
+        if(amount) *amount = it->second.amount;
+        return true;
+    }
+
+    void repeatablesetcooldown(const char *name, int qid)
+    {
+        const questdef *qd = questdefbyid(qid);
+        if(!qd || qd->repeatsec <= 0) return;
+        rprow &r = rpcache[std::string(name)][qid];
+        r.readyat = (int)time(NULL) + qd->repeatsec;
+        rpsave(name, qid);
+    }
+
+    // Server kill-path hook (generalized v2). Counts a kill toward EVERY
+    // active quest whose current stage has a matching kill objective:
+    // "any" matches any monster, "champion" matches only the tracked
+    // champion clientnum, otherwise the victim's class name must start with
+    // the objective class. Appends counted qids (up to maxcounted) and
+    // returns how many quests counted it.
+    int questonkill(const char *name, const char *victimclass, int targetclientnum,
+                    bool ismonster, int *counted, int maxcounted)
+    {
+        int n = 0;
+        if(!name || !name[0] || !ismonster || !counted || maxcounted <= 0) return 0;
+        int nq = questdefcount();
+        loopi(nq)
+        {
+            const questdef *qd = questdefbyindex(i);
+            const queststage *qs = queststageof(qd, queststate(name, qd->qid));
+            if(!qs || qs->objtype != QOBJ_KILL) continue;
+            bool match = false;
+            if(!strcmp(qs->objarg, "any")) match = true;
+            else if(!strcmp(qs->objarg, "champion")) match = (targetclientnum == championcn());
+            else if(victimclass && victimclass[0])
+                match = !strncmp(victimclass, qs->objarg, strlen(qs->objarg));
+            if(!match) continue;
+            questaddprogress(name, qd->qid, 1);
+            if(!strcmp(qs->objarg, "champion")) clearchampioncn(); // champion dead; stop tracking
+            if(n < maxcounted) counted[n] = qd->qid;
+            n++;
+        }
+        return n;
+    }
+
 
     // --- party + safety v1: mute/block lists (server-side) ---
     static bool hasrow(const char *table, const char *owner, const char *target)
@@ -1383,22 +1500,146 @@ namespace rpg
         return true;
     }
 
-    // --- quest chain v1: client presentation caches (never authoritative) ---
-    static int clquest_id = QUEST_NONE, clquest_state = -1, clquest_kills = 0, clquest_need = 0;
+    // --- quest engine v2: client presentation caches (never authoritative) ---
+    // One entry per quest the server has told us about. The tracker shows the
+    // lowest-id active quest; the journal (J key) lists all of them.
+    struct clquest { int state; int kills; int need; char objtext[160]; };
+    static std::map<int, clquest> clquests;
     void setclientquest(int qid, int state, int kills, int need)
     {
-        clquest_id = qid; clquest_state = state; clquest_kills = kills; clquest_need = need;
+        clquest &c = clquests[qid];
+        c.state = state; c.kills = kills; c.need = need;
+    }
+    void setclientquesttext(int qid, const char *text)
+    {
+        if(!text) return;
+        copystring(clquests[qid].objtext, text, sizeof(clquests[qid].objtext));
     }
     bool getclientquest(int &qid, int &state, int &kills, int &need)
     {
-        qid = clquest_id; state = clquest_state; kills = clquest_kills; need = clquest_need;
-        return clquest_state == QSTATE_ACTIVE;
+        // Tracked quest: the lowest-id quest with an in-progress (non-final) stage.
+        for(std::map<int, clquest>::iterator it = clquests.begin(); it != clquests.end(); ++it)
+        {
+            const questdef *qd = questdefbyid(it->first);
+            if(!qd) continue;
+            if(it->second.state > 0 && it->second.state != qd->finalstage)
+            {
+                qid = it->first; state = it->second.state;
+                kills = it->second.kills; need = it->second.need;
+                return true;
+            }
+        }
+        return false;
+    }
+    bool getclientquesttext(int qid, char *buf, int buflen)
+    {
+        std::map<int, clquest>::iterator it = clquests.find(qid);
+        if(it == clquests.end() || !it->second.objtext[0]) return false;
+        copystring(buf, it->second.objtext, buflen);
+        return true;
+    }
+    int clientqueststate(int qid)
+    {
+        std::map<int, clquest>::iterator it = clquests.find(qid);
+        return it == clquests.end() ? -1 : it->second.state;
     }
     bool isquestmobtarget(const char *monname)
     {
-        if(clquest_state != QSTATE_ACTIVE || !monname || !monname[0]) return false;
-        if(clquest_id == QUEST_CHAMPION) return !strcmp(monname, CHAMPION_NAME);
-        if(clquest_id == QUEST_CULL || clquest_id == QUEST_WAVES) return true; // any monster counts
+        if(!monname || !monname[0]) return false;
+        for(std::map<int, clquest>::iterator it = clquests.begin(); it != clquests.end(); ++it)
+        {
+            const questdef *qd = questdefbyid(it->first);
+            if(!qd) continue;
+            if(it->second.state <= 0 || it->second.state == qd->finalstage) continue;
+            const queststage *qs = queststageof(qd, it->second.state);
+            if(!qs || qs->objtype != QOBJ_KILL) continue;
+            if(!strcmp(qs->objarg, "any")) return true;
+            if(!strcmp(qs->objarg, "champion"))
+            {
+                if(!strcmp(monname, CHAMPION_NAME)) return true;
+                continue;
+            }
+            if(!strncmp(monname, qs->objarg, strlen(qs->objarg))) return true;
+        }
         return false;
+    }
+    // --- J-key quest log: derived view (no new table) ---
+    static std::vector<std::string> journalines;
+    static void journaladdwrapped(const char *prefix, const char *text)
+    {
+        // Wrap at ~58 chars on word boundaries; continuation lines indent.
+        char line[256];
+        const char *p = text;
+        bool first = true;
+        while(*p)
+        {
+            const char *pre = first ? prefix : "  ";
+            size_t prelen = strlen(pre);
+            size_t maxw = 58 > prelen ? 58 - prelen : 10;
+            size_t len = strlen(p);
+            if(len > maxw)
+            {
+                len = maxw;
+                while(len > 0 && p[len] != ' ' && p[len] != '\0') len--;
+                if(len == 0) len = maxw;
+            }
+            copystring(line, pre, sizeof(line));
+            strncat(line, p, min(len, sizeof(line) - strlen(line) - 1));
+            journalines.push_back(std::string(line));
+            p += len;
+            while(*p == ' ') p++;
+            first = false;
+        }
+        if(first) journalines.push_back(std::string(prefix)); // empty text
+    }
+    void rpg_buildjournal()
+    {
+        journalines.clear();
+        journalines.push_back("=== Active Quests ===");
+        bool anyactive = false, anydone = false;
+        int nq = questdefcount();
+        loopi(nq)
+        {
+            const questdef *qd = questdefbyindex(i);
+            std::map<int, clquest>::iterator it = clquests.find(qd->qid);
+            int st = (it == clquests.end()) ? -1 : it->second.state;
+            if(st > 0 && st != qd->finalstage)
+            {
+                anyactive = true;
+                journalines.push_back(std::string(qd->name));
+                const queststage *qs = queststageof(qd, st);
+                char obj[192] = "";
+                if(it->second.objtext[0]) copystring(obj, it->second.objtext, sizeof(obj));
+                else if(qs && qs->objtype == QOBJ_KILL)
+                    formatstring(obj)("%d/%d slain", it->second.kills, qs->objcount);
+                char desc[512];
+                formatstring(desc)("%s%s%s", qs ? qs->journal : "",
+                    obj[0] ? " [" : "", obj[0] ? obj : "");
+                if(obj[0]) strcat(desc, "]");
+                journaladdwrapped("  ", desc);
+            }
+        }
+        if(!anyactive) journalines.push_back("  (none)");
+        journalines.push_back("=== Completed ===");
+        loopi(nq)
+        {
+            const questdef *qd = questdefbyindex(i);
+            std::map<int, clquest>::iterator it = clquests.find(qd->qid);
+            int st = (it == clquests.end()) ? -1 : it->second.state;
+            if(st == qd->finalstage)
+            {
+                anydone = true;
+                char done[512];
+                formatstring(done)("* %s - %s", qd->name, qd->donetext);
+                journaladdwrapped("  ", done);
+            }
+        }
+        if(!anydone) journaladdwrapped("  ", "(none)");
+    }
+    int rpg_journal_lines() { return (int)journalines.size(); }
+    void rpg_journal_line(int i, char *buf, int buflen)
+    {
+        if(i < 0 || i >= (int)journalines.size() || !buf || buflen <= 0) { if(buf && buflen > 0) buf[0] = '\0'; return; }
+        copystring(buf, journalines[i].c_str(), buflen);
     }
 }

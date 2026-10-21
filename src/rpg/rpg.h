@@ -154,13 +154,16 @@ namespace rpg
     // server range-checks talk requests against the same coordinates.
     struct npcdef
     {
-        const char *name;   // display name ("Elder Maren")
-        const char *model;  // model path ("playermodels/peasant_female")
-        float x, y, z;      // feet position on the map
-        float yaw;          // facing (degrees, engine yaw convention)
+        const char *id;      // stable id ("maren") used by quest data
+        const char *name;    // display name ("Elder Maren")
+        const char *model;   // model path ("playermodels/peasant_female")
+        float x, y, z;       // feet position on the map
+        float yaw;           // facing (degrees, engine yaw convention)
+        const char *dialogue;// root dialogue graph name ("maren_main")
     };
     int npccount();
     const npcdef *npcat(int i); // NULL when out of range
+    int npcindexbyid(const char *id); // -1 when unknown
 
     // --- ambient monster spawns (world map): static spawn-point table ---
     // Each row is one spawn point. Adding monster types later is a DATA
@@ -176,40 +179,130 @@ namespace rpg
     int spawnpointcount();
     const spawndef *spawnpoint(int i); // NULL when out of range
 
-    // --- quest chain v1: quest definitions (static, shared) ---
-    enum { QUEST_NONE = 0, QUEST_CULL = 1, QUEST_WAVES = 2, QUEST_CHAMPION = 3, QUEST_DONE = 4, QUEST_ERRAND = 5 };
-    // CLEANUP item 6: QUEST_ERRAND is the starter delivery quest. It keeps id
-    // 5 (ids 1..3 and the QUEST_DONE sentinel are unchanged) but runs FIRST
-    // in the chain - see chainorder() in rpg.cpp. validquest() is the single
-    // range test every quest guard uses.
-    bool validquest(int qid);
-    enum { QSTATE_OFFERED = 0, QSTATE_ACTIVE = 1, QSTATE_COMPLETE = 2 };
+    // --- quest engine v2 (data-driven): quest + dialogue definitions ---
+    // Quests, their staged objectives, and NPC dialogue node graphs are
+    // CONTENT: data/rpg/quests.cfg, parsed once at init on both client and
+    // server (same ss_* setter syntax as the item content files). Stages are
+    // plain integers per quest; stage 0 = never started, `finalstage` is the
+    // terminal stage. Dialogue is server-authoritative: the server picks the
+    // node, sends node text + response buttons; the client sends back only a
+    // button index. Conditions/actions are the CLOSED vocabularies below -
+    // dialogue data can never execute arbitrary script.
+    enum { QOBJ_NONE = 0, QOBJ_KILL, QOBJ_FETCH, QOBJ_TALK };
+    struct queststage
+    {
+        int stage;            // stage number (>= 1)
+        int objtype;          // QOBJ_*
+        char objarg[64];      // kill: monster class ("any"/"champion"/"imp"...);
+                              // fetch: unused (roll from fetch pool); talk: npc id
+        int objcount;         // kill/fetch count
+        char journal[256];    // journal line for this stage
+    };
     struct questdef
     {
-        const char *name;        // "Cull the Undead"
-        const char *objective;   // "Slay 5 zombies"
-        const char *mobname;     // monster display name counted ("zombie"), or champion name
-        int need;                // kills required
-        int xpreward;            // XP on turn-in
-        const char *itemreward;  // item id granted on turn-in, or NULL
+        int qid;              // permanent append-only id (1..3 Maren, 4 relay, 5 errand, 6 fetch)
+        char key[64];         // "cull_the_imps"
+        char name[96];        // "Cull the Imps"
+        int giver;            // npc index (resolved from ss_quest_giver id)
+        int finalstage;       // terminal stage value
+        int repeatsec;        // >0: repeatable template (fetch), cooldown seconds after turn-in
+        char donetext[256];   // journal line on completion
+        int nstages;
+        queststage stages[8];
+        int npool;            // fetch pool item ids
+        char pool[8][64];
+        int poolmin, poolmax; // roll amount range
     };
-    const questdef &quest(int qid); // qid 1..3; QUEST_NONE/QUEST_DONE return an empty def
+    // Dialogue condition/action vocabularies (closed - add to the enum AND
+    // the server executor; never arbitrary script).
+    enum { CND_STAGE = 0, CND_HASITEM, CND_LEVEL, CND_QUESTDONE, CND_OBJREADY, CND_COOLDOWNREADY };
+    enum { CMP_EQ = 0, CMP_GE, CMP_LE, CMP_LT, CMP_GT };
+    struct dlgcond
+    {
+        int verb;             // CND_*
+        int qid;
+        int op;               // CMP_* (stage/hasitem/level)
+        int n;
+        char item[64];        // hasitem
+    };
+    enum { ACT_SETSTAGE = 0, ACT_COMPLETEQUEST, ACT_GIVEITEM, ACT_TAKEITEM,
+           ACT_GIVEXP, ACT_GIVEFETCHXP, ACT_SPAWNCHAMPION, ACT_ROLLFETCH };
+    struct dlgaction
+    {
+        int verb;             // ACT_*
+        int qid;
+        int n;                // setstage stage / givexp amount
+        char item[64];        // giveitem/takeitem ("rolled" = the fetch roll)
+        int count;
+    };
+    struct dlgresponse
+    {
+        char text[160];
+        int ncond; dlgcond cond[2];
+        int nact;  dlgaction act[6];
+        char gotonode[64];    // empty = none
+        bool close;
+    };
+    struct dlgnode
+    {
+        char id[64];
+        int quest;            // qid for $var substitution (0 = none)
+        int nwhen; dlgcond when[4];
+        int nsay;  char say[6][256];
+        int nresp; dlgresponse resp[4];
+    };
+    struct dlggraph
+    {
+        char name[64];
+        int nnodes; dlgnode nodes[48];
+    };
+    // Content API (both sides). loadquests() runs at init; defs are read-only
+    // afterwards. Returns false when data/rpg/quests.cfg failed validation
+    // (the server logs the reason and keeps running with no quest content).
+    bool loadquests();
+    int questdefcount();
+    const questdef *questdefbyid(int qid);      // NULL when unknown
+    const questdef *questdefbyindex(int i);     // 0..count-1
+    const dlggraph *questgraph(const char *name); // NULL when unknown
+    const queststage *queststageof(const questdef *qd, int stage); // NULL when no such stage
+    bool validquest(int qid); // true when a quest def exists for qid
+    // Entry node selection: first node (definition order) whose when-clauses
+    // all hold; no-when nodes only match at entry when they are the graph's
+    // last node (the fallback). Goto-only nodes never match at entry.
+    // Returns the node index, or -1 when the graph is empty (never when valid).
+    int dlgnode_selectentry(const dlggraph *g, const char *name);
+    // $var substitution for node text: $progress/$target (kill), $amount/$item
+    // (fetch), $name. Server-side (needs the character's repeatable row).
+    void questtextsubst(const char *name, int qid, const char *in, char *out, int outlen);
 
-    // --- quest chain v1: server-side per-character state (persisted in rpg.db) ---
-    // chainpos: next quest id to offer (1..3), or QUEST_DONE when the chain
-    // is fully turned in. queststate: QSTATE_* or -1 when never offered.
-    int chainpos(const char *name);
-    int queststate(const char *name, int qid);
-    int questkills(const char *name, int qid);
-    void questsetoffered(const char *name, int qid);
-    void questsetactive(const char *name, int qid);   // (re)starts: kills reset to 0
-    void questaddkill(const char *name, int qid);     // kills++, write-through
-    void questsetcomplete(const char *name, int qid);
+    // --- quest engine v2: server-side per-character state (persisted in rpg.db) ---
+    // Stages are integers: 0 = never started (no row yet), 1..N in progress,
+    // finalstage = done. questsetstage upserts and resets progress; write-through.
+    int queststate(const char *name, int qid);          // stage, 0 when never started
+    int questkills(const char *name, int qid);          // progress counter for kill stages
+    void questsetstage(const char *name, int qid, int stage);
+    void questaddprogress(const char *name, int qid, int n = 1); // kill stages only
+    bool questiscomplete(const char *name, int qid);    // stage == finalstage
+    // Objective bookkeeping for sync/display. have/need: kill -> kills/count;
+    // fetch -> min(have,amount)/amount; talk/none -> 0/0.
+    void questprogress(const char *name, int qid, int &have, int &need);
+    // Server-evaluated condition (needs character state). Client never evaluates.
+    bool dlgcondmet(const char *name, const dlgcond &c);
     // Called from the server kill path for every monster kill by a player.
-    // Returns the quest id when the kill counted toward an active quest, else 0.
-    // Server-validated: only counts while that quest is ACTIVE; champion kills
-    // only count when the victim is the tracked champion clientnum.
-    int questonkill(const char *name, int targetclientnum, bool ismonster);
+    // Counts the kill toward EVERY active quest whose current stage has a
+    // matching kill objective ("any" matches any monster; "champion" only the
+    // tracked champion clientnum; otherwise the victim's class name). Party
+    // credit is preserved: the caller loops party members. Appends counted
+    // qids to `counted` (up to maxcounted) and returns how many counted.
+    int questonkill(const char *name, const char *victimclass, int targetclientnum,
+                    bool ismonster, int *counted, int maxcounted);
+    // --- repeatables (fetch template): additive table rpg_repeatables ---
+    // One row per (character, quest): the rolled item/amount and the earliest
+    // re-accept time. Server-side only.
+    bool repeatableready(const char *name, int qid); // cooldown elapsed (or never rolled)
+    bool repeatableroll(const char *name, int qid);  // roll item+amount from the pool
+    bool repeatableget(const char *name, int qid, char *item, int itemlen, int *amount);
+    void repeatablesetcooldown(const char *name, int qid); // readyat = now + repeatsec
     // --- party + safety v1 (Oct 19): per-player mute/block lists, persisted ---
     // in rpg.db (additive tables rpg_mutes / rpg_blocks). Used server-side.
     bool ismuted(const char *owner, const char *target);
@@ -261,12 +354,18 @@ namespace rpg
     bool autoattacking(); void setautoattack(bool on);
     void cleartargeting();                          // deselect + stop auto-attack (map change, death)
 
-    // --- quest chain v1: client presentation caches (never authoritative) ---
-    // Active-quest sync from the server (N_RPG_QUEST). Drives the on-screen
-    // quest tracker and the radar's orange quest-mob split.
+    // --- quest engine v2: client presentation caches (never authoritative) ---
+    // Per-quest sync from the server (N_RPG_QUEST + N_RPG_QTEXT). Drives the
+    // on-screen quest tracker, the radar's quest-mob highlight, and the J-key
+    // quest log (a derived view - no new table).
     void setclientquest(int qid, int state, int kills, int need);
-    bool getclientquest(int &qid, int &state, int &kills, int &need);
+    void setclientquesttext(int qid, const char *text); // objective display text
+    bool getclientquest(int &qid, int &state, int &kills, int &need); // tracked quest
+    bool getclientquesttext(int qid, char *buf, int buflen);
+    int clientqueststate(int qid); // -1 when the client has no row for qid
     // True when a monster with this display name is a current quest target.
-    // Quest 1/2 count any zombie; quest 3 counts only the Rotting Champion.
     bool isquestmobtarget(const char *monname);
+    void rpg_buildjournal(); // rebuild the J-key log from the quest caches
+    int rpg_journal_lines();
+    void rpg_journal_line(int i, char *buf, int buflen);
 }

@@ -2357,18 +2357,20 @@ namespace game
         if(!rpg::mapactive(getclientmap())) return;
         int qid = 0, st = -1, kills = 0, need = 0;
         if(!rpg::getclientquest(qid, st, kills, need)) return;
-        const rpg::questdef &qd = rpg::quest(qid);
-        if(!qd.name || !qd.name[0]) return;
+        const rpg::questdef *qd = rpg::questdefbyid(qid);
+        if(!qd || !qd->name[0]) return;
         float X = w*1800.0f/h;
         int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
         float ty = rs + rs/10 + 36.0f;
-        float nmw = float(strlen(qd.name))*0.5f*30.0f;
-        rpg_chattext(qd.name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
-        // CLEANUP item 6: a quest with need 0 (the delivery errand) shows its
-        // objective text instead of a meaningless "0/0".
+        float nmw = float(strlen(qd->name))*0.5f*30.0f;
+        rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
+        // quest engine v2: the server sends the objective display text
+        // (N_RPG_QTEXT); kill quests fall back to kills/need.
         static string progbuf;
-        const char *prog = qd.objective;
-        if(need > 0) { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
+        char objtext[160];
+        const char *prog = NULL;
+        if(rpg::getclientquesttext(qid, objtext, sizeof(objtext))) prog = objtext;
+        else { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
         float pgw = float(strlen(prog))*0.5f*26.0f;
         rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
     }
