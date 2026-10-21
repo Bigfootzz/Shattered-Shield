@@ -276,6 +276,66 @@ namespace game
             }
         }
     }
+    // --- Tab cycling (Issue #11, Oct 21): RPG maps ONLY. Each Tab press
+    // selects the next nearest targetable NPC or mob by distance from the
+    // player, wrapping around at the end. Feeds the SAME selection system
+    // as click-select (rpg::selecttarget / selectnpc), so the target display,
+    // F-to-talk, auto-attack etc. all behave identically.
+    // Tab is the stock scoreboard key; the rpg.cfg bind routes Tab here on
+    // RPG maps only (battlegrounds keep the scoreboard), so per Ed's call
+    // cycling takes precedence over the scoreboard on RPG maps. The chat box
+    // World|Clan|System tabs are mouse-driven (rpg_chattabclick in fps.cpp),
+    // so the Tab key has no chat function to conflict with.
+    static const float RPG_TABCYCLE_RANGE = 60.0f; // "nearby", engine units; tune freely
+    struct rpg_tabcand { bool npc; int idx; int clientnum; float dist; };
+    static bool rpg_tabcmp(const rpg_tabcand &a, const rpg_tabcand &b) { return a.dist < b.dist; }
+    static void rpg_tabcycle()
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(!player1 || player1->state != CS_ALIVE) return;
+        vector<rpg_tabcand> cands;
+        int nn = rpg::npccount();
+        loopi(nn)
+        {
+            const rpg::npcdef *nd = rpg::npcat(i);
+            if(!nd) continue;
+            float d = vec(nd->x, nd->y, nd->z).dist(player1->o);
+            if(d <= RPG_TABCYCLE_RANGE) { rpg_tabcand c = { true, i, -1, d }; cands.add(c); }
+        }
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(!d || d == player1 || d->state != CS_ALIVE || d->ai.type != ai::AI_TYPE_MONSTER) continue;
+            float dist = d->o.dist(player1->o);
+            if(dist <= RPG_TABCYCLE_RANGE) { rpg_tabcand c = { false, -1, d->clientnum, dist }; cands.add(c); }
+        }
+        if(cands.empty())
+        {
+            if(rpg::selectedtarget() >= 0 || rpg::selectednpc() >= 0) conoutf("rpg: deselected");
+            rpg::selecttarget(-1); rpg::selectnpc(-1); rpg::setautoattack(false);
+            return;
+        }
+        cands.sort(rpg_tabcmp);
+        int cur = -1, selc = rpg::selectedtarget(), seln = rpg::selectednpc();
+        loopv(cands) if((cands[i].npc && cands[i].idx == seln) || (!cands[i].npc && cands[i].clientnum == selc)) { cur = i; break; }
+        rpg_tabcand &c = cands[(cur + 1) % cands.length()];
+        if(c.npc)
+        {
+            const rpg::npcdef *nd = rpg::npcat(c.idx);
+            rpg::selectnpc(c.idx);
+            rpg::setautoattack(false);
+            conoutf("rpg: selected '%s'", nd ? nd->name : "npc");
+        }
+        else
+        {
+            fpsent *m = NULL;
+            loopv(clients) if(clients[i] && clients[i]->clientnum == c.clientnum) { m = clients[i]; break; }
+            rpg::selecttarget(c.clientnum);
+            if(m) conoutf("rpg: selected '%s' (%d/%d hp)", m->name, m->health, m->maxhealth);
+        }
+    }
+    // "D" signature like rpgclick: act on press only, release is a no-op.
+    ICOMMAND(rpgtabcycle, "D", (int *down), { if(*down) rpg_tabcycle(); });
     // "D" signature: press arms / release fires (see below).
     // --- Playtest fix (Oct 19): character/camera turning on world maps ---
     // A/D (the strafe keys) ROTATE the character and the follow camera at a
@@ -2009,6 +2069,19 @@ namespace game
 
     extern int deathscore;
 
+    // Log routing (Oct 21, user call): every console line owned by the RPG
+    // layer ("rpg: " prefix) is hidden from the on-screen console feed. The
+    // meaningful ones live in the chat box System tab (rpg_chat_tap in
+    // fps.cpp routes them there, skipping the high-frequency debug chatter);
+    // the debug chatter stays available in the full console (F11). The engine
+    // feed filter (console.cpp) calls this.
+    bool rpg_ownline(int type, const char *line)
+    {
+        if(!rpg::connected()) return false;
+        if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
+        return line && !strncmp(line, "rpg: ", 5);
+    }
+
     void parsemessages(int cn, fpsent *d, ucharbuf &p)
     {
         static char text[MAXTRANS];
@@ -2717,6 +2790,20 @@ namespace game
             {
                 int ability = getint(p), waitms = getint(p);
                 rpg::setcooldown(ability, waitms, totalmillis);
+                // RPG attack animation (Issue 5): this message is only sent
+                // from the server's validated rpg_cast(), so the cast landed.
+                // The RPG cast path never touches lastaction, which is why no
+                // attack animation ever played on RPG maps; stamping it here
+                // makes renderclient play ANIM_ATTACK1+gunselect ("attack 1"
+                // = sword swing on all 4 Quaternius player models) for the
+                // attackdelay window. Cosmetic only: nothing on the RPG path
+                // derives damage, cooldown or targeting from lastaction, and
+                // the mapactive gate keeps stock modes untouched.
+                if(player1 && player1->state == CS_ALIVE && rpg::mapactive(getclientmap()))
+                {
+                    player1->lastaction = lastmillis;
+                    player1->lastattackgun = player1->gunselect;
+                }
                 break;
             }
             case N_RPG_HPMAX:
