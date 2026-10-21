@@ -2599,6 +2599,24 @@ namespace server
            target->state.ai.type == ai::AI_TYPE_MONSTER && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
            rpg::mapactive(smapname))
             return;
+        // --- RPG: Shattered Shield starter tuning (Oct 21, user-approved) ---
+        // The imp is the weakest ambient mob and the q1 hunt target: its
+        // bite is halved on RPG maps so a level-1 character can win starter
+        // hunts. Gated on the monster type name so puglins, zombies and the
+        // champion are untouched. Runs before armor mitigation so the armor
+        // log line shows the final numbers.
+        if(damage > 0 && rpg::connected() && target && target->state.ai.type == ai::AI_TYPE_NONE &&
+           actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
+           rpg::mapactive(smapname))
+        {
+            const ::monster::MonsterType &mt = ::monster::getMonsterType(actor->state.getMonsterType());
+            if(mt.classInfo.name && !strcmp(mt.classInfo.name, "imp"))
+            {
+                int newdmg = max(1, damage/2);
+                if(newdmg != damage) conoutf("rpg: imp bite halved (%d -> %d)", damage, newdmg);
+                damage = newdmg;
+            }
+        }
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // DDO-style PERCENTAGE mitigation: taken = raw*100/(100 + armor*10).
         // Same gating as before (monster attacker + RPG map only): PvP damage,
@@ -3608,7 +3626,15 @@ namespace server
                     defformatstring(it)("Received: %s", rpg::itemname(rpg::finditem(qd.itemreward)));
                     rpg_qmsg(cq, it);
                 }
-                rpg_qmsg(cq, "Tomas: Take the tunic — you'll want it out there. Maren has real work for you now.");
+                // TUNING Oct 21 (user-approved): the errand also arms the
+                // new character - a puglin stick from Tomas, so starter
+                // hunts are winnable with the new Basic Attack base damage.
+                if(rpg::additem(name, "puglin_stick", 1))
+                {
+                    defformatstring(it2)("Received: %s", rpg::itemname(rpg::finditem("puglin_stick")));
+                    rpg_qmsg(cq, it2);
+                }
+                rpg_qmsg(cq, "Tomas: Take the tunic and this stick — you'll want them out there. Maren has real work for you now.");
                 rpg_syncinv(cq);
             }
             else rpg_qmsg(cq, "Tomas: Maren said you'd bring a health potion. If you've none, ask her for another.");

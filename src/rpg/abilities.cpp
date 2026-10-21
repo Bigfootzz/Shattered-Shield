@@ -21,9 +21,11 @@ namespace rpg
         { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash" },
         { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark" },
         // CLEANUP item 8: the basic weapon swing behind right-click
-        // auto-attack. damage 0 = no flat base: the server melee formula
-        // (base + weapon + Strength) yields exactly weapon + Strength.
-        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 0,    true,  "slash" },
+        // auto-attack. damage 7 = flat base: the server melee formula
+        // (base + weapon + Strength) yields 7 + weapon + Strength.
+        // TUNING Oct 21 (user-approved): a weaponless level-1 fists
+        // (0 + 0 + 1 = 1/tick) could never win starter hunts.
+        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash" },
     };
 
     const abilitydef &ability(int id)

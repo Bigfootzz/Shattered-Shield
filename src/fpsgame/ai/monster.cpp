@@ -63,7 +63,10 @@ namespace monster
             // (180 HP) and the Rotting Champion (400 HP). freq 0: named types
             // never enter the random "zombie" pool; they spawn only where the
             // RPG spawn table names them (rpg_resolvespawntype).
-            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 200,    0,          0,      100,        "imp",      0},
+            // TUNING Oct 21 (user-approved): 90 HP, not 200 - the
+            // weakest ambient mob and the q1 hunt target was unwinnable
+            // for a level-1 character.
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 90,     0,          0,      100,        "imp",      0},
                0,       0,      100,    400,    1,          S_PAINB,    S_DEATHB, 0,
             { "playermodels/imp",               NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "imp",          NULL,       NULL,       "hudguns/zombie",   false,      true,       3.2f,   14.0f,      1.0f,       0 },
         },
