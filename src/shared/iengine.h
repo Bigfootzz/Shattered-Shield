@@ -244,6 +244,7 @@ enum
 };
 
 extern bool setfont(const char *name);
+extern char *deffont; // engine default font name (rendertext.cpp); boot splash selects it up front (issue #1a)
 extern void pushfont();
 extern bool popfont();
 extern void gettextres(int &w, int &h);

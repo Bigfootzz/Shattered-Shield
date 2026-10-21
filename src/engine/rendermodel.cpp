@@ -367,12 +367,14 @@ void flushpreloadedmodels(bool msg)
     loopv(preloadmodels)
     {
         loadprogress = float(i+1)/preloadmodels.length();
+        int pt0 = SDL_GetTicks(); // boot-perf instrumentation (Oct 21)
         model *m = loadmodel(preloadmodels[i], -1, msg);
         if(!m) { if(msg) conoutf(CON_WARN, "could not load model: %s", preloadmodels[i]); }
         else
         {
             m->preloadmeshes();
         }
+        printf("Init: [model] '%s' took %dms\n", preloadmodels[i], SDL_GetTicks() - pt0);
     }
     preloadmodels.deletearrays();
     loadprogress = 0;

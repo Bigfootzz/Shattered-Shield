@@ -450,6 +450,17 @@ VARF(fullscreen, 0, 0, 1, setfullscreen(fullscreen!=0));
 VARF(fullscreen, 0, 1, 1, setfullscreen(fullscreen!=0));
 #endif
 
+#if defined(WIN32)
+// Fullscreen presentation on Windows: 1 = borderless, 0 = exclusive.
+// Borderless is the default because exclusive fullscreen forces a display
+// mode drop-out whenever the Windows volume OSD appears, which flashes the
+// screen and resizes the game window; borderless keeps the desktop mode so
+// the OSD composites over the game with no mode switch, and alt-tab is
+// smoother as well. Set to 0 to restore exclusive mode (allows sub-native
+// display modes, at the cost of the OSD flash). Requires a video reset.
+VARF(borderless, 0, 1, 1, initwarning("fullscreen mode"));
+#endif
+
 void screenres(int *w, int *h)
 {
 #if !defined(WIN32) && !defined(__APPLE__)
@@ -501,7 +512,17 @@ void setupscreen(int &usedcolorbits, int &useddepthbits, int &usedfsaa)
     #if defined(WIN32) || defined(__APPLE__)
     winflags = SDL_WINDOW_OPENGL;
     #endif
-    if(fullscreen) winflags |= SDL_WINDOW_FULLSCREEN;
+    if(fullscreen)
+    {
+#if defined(WIN32)
+        // Borderless ("fake") fullscreen: keeps the desktop display mode,
+        // so the Windows volume OSD can composite over the game without the
+        // exclusive-mode drop-out that flashes and resizes the window.
+        winflags |= borderless ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
+#else
+        winflags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    }
     screen_fullscreen = fullscreen;
     int nummodes = SDL_GetNumDisplayModes(0);
     if(nummodes > 0)
@@ -1076,8 +1097,13 @@ int main(int argc, char **argv)
     uv_loop_t *loop = uv_default_loop();
     char *load = NULL, *initscript = NULL;
 
-    #define INIT_LOG(s) puts("Init: " s)
+    // Boot-performance instrumentation (Oct 21): every INIT_LOG line carries
+    // milliseconds since the start of main, so a slow boot can be broken
+    // down by stage from the console log.
+    static int initlog_t0 = 0;
+    #define INIT_LOG(s) printf("Init: [%6dms] " s "\n", SDL_GetTicks() - initlog_t0)
 
+    initlog_t0 = SDL_GetTicks();
     initing = INIT_RESET;
 
     findRootDirectory("data");
@@ -1231,6 +1257,13 @@ int main(int argc, char **argv)
     if(!execfile("data/stdlib.cfg", false)) fatal("cannot find data files (data/stdlib.cfg)");   // this is the first file we load.
     if(!execfile("data/font.cfg", false)) fatal("cannot find font definitions");
     if(!setfont("default")) fatal("no default font specified");
+    // Boot text (issue #1a, Oct 21): the splash caption is drawn with
+    // whatever font is current, and renderprogress() re-renders it on
+    // every later boot step. data/defaults.cfg sets deffont "digital"
+    // during the cfg stage, which used to visibly swap the caption
+    // from "default" to "digital" mid-boot. Select the engine default
+    // font up front so the first frame already uses it.
+    setfont(deffont);
 
     inbetweenframes = true;
     renderbackground("initializing...");
@@ -1240,12 +1273,15 @@ int main(int argc, char **argv)
     particleinit();
     initdecals();
 
-    INIT_LOG("world");
+    INIT_LOG("world: physics");
     #ifdef RR_USE_BULLET
         physics::init();
     #endif
+    INIT_LOG("world: player");
     camera1 = player = game::iterdynents(0);
+    INIT_LOG("world: emptymap");
     emptymap(0, true, NULL, false);
+    INIT_LOG("world: done");
 
     INIT_LOG("sound");
     initsound();
