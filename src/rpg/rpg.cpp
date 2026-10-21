@@ -897,11 +897,10 @@ namespace rpg
     static const npcdef NPCS[] =
     {
         { "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f },
-        // CLEANUP item 6: Tomas, the errand's delivery target - a villager a
-        // short walk northeast of Maren. Placed on verified open ground:
-        // (2246,1994) is inside a building wall; (2244,1992,2110) was probed
-        // walkable in the real client.
-        { "Tomas", "playermodels/peasant_male", 2244.0f, 1992.0f, 2110.0f, 225.0f },
+        // CLEANUP item 6: Tomas, the errand's delivery target. Placed in the
+        // open spawn clearing (walkable, no building between him and Maren)
+        // so the errand is a short unobstructed walk as designed.
+        { "Tomas", "playermodels/peasant_male", 2232.0f, 1984.0f, 2110.0f, 225.0f },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
 
