@@ -3915,6 +3915,80 @@ namespace server
     // XP and the reward are granted here, and completion persists through
     // questsetcomplete like any other quest.
 
+    // --- RPG: projectile spells (Oct 21, additive) ---
+    // Target-following bolts (RANGED DELIVERY DESIGN v1). Server-authoritative:
+    // range + line-of-sight are validated at release inside rpg_cast (shared
+    // with instant spells); the bolt then tracks the target's LIVE position
+    // each tick. Moving after release does not dodge; the bolt fizzles only
+    // if the target dies or disconnects first. Clients render the flight
+    // from N_RPG_PROJ / N_RPG_PROJHIT / N_RPG_PROJFIZZLE.
+    struct rpg_projectile
+    {
+        int id;
+        int castercn;
+        int targetcn;
+        int ability;   // ability id, selects the client visual style
+        int damage;    // computed at release (base + 2*Knowledge, crit rolled)
+        vec pos;       // current position, world units
+        int born;      // totalmillis at spawn (5s safety timeout)
+    };
+    static vector<rpg_projectile> rpg_projectiles;
+    static int rpg_projnextid = 1;
+    static const float RPG_PROJ_SPEED = 130.0f;  // u/s: 40u range in ~0.3s
+    static const float RPG_PROJ_HITDIST = 6.0f;  // torso-proximity hit radius
+
+    static clientinfo *rpg_projfind(int cn, bool monsteronly)
+    {
+        loopv(clients)
+        {
+            clientinfo *t = clients[i];
+            if(t->clientnum != cn) continue;
+            if(monsteronly && t->state.ai.type != ai::AI_TYPE_MONSTER) return NULL;
+            return t;
+        }
+        return NULL;
+    }
+
+    static void rpg_projectiletick()
+    {
+        if(rpg_projectiles.empty() || !rpg::connected()) return;
+        float dt = curtime/1000.0f;
+        if(dt <= 0) return;
+        loopvrev(rpg_projectiles)
+        {
+            rpg_projectile &pr = rpg_projectiles[i];
+            clientinfo *t = rpg_projfind(pr.targetcn, true);
+            bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
+            bool timeout = totalmillis - pr.born > 5000;
+            if(gone || timeout)
+            {
+                sendf(-1, 1, "ri2", N_RPG_PROJFIZZLE, pr.id);
+                rpg_projectiles.remove(i);
+                continue;
+            }
+            vec top(t->state.o); top.z += 4; // torso height, matches the LoS check
+            vec d(top); d.sub(pr.pos);
+            float dist = d.magnitude();
+            if(dist <= RPG_PROJ_HITDIST)
+            {
+                clientinfo *caster = rpg_projfind(pr.castercn, false);
+                vec push(t->state.o); push.sub(pr.pos); push.z = 0;
+                if(push.squaredlen() > 0.01f) push.normalize();
+                int hpbefore = t->state.health;
+                dodamage(t, caster, pr.damage, WEAP_FIST, push, false);
+                sendf(-1, 1, "ri4", N_RPG_PROJHIT, pr.id, pr.targetcn, pr.damage);
+                const rpg::abilitydef &ab = rpg::ability(pr.ability);
+                conoutf("rpg: projectile %s hits '%s' for %d (%d -> %d hp)",
+                        ab.name, t->name, pr.damage, hpbefore, t->state.health);
+                rpg_projectiles.remove(i);
+                continue;
+            }
+            d.normalize();
+            d.mul(min(dist, RPG_PROJ_SPEED*dt));
+            pr.pos.add(d);
+        }
+    }
+
     void rpg_cast(clientinfo *cq, int ability, int yaw, int advisory)
     {
         if(!rpg::connected() || !rpg::validability(ability)) return;
@@ -3953,6 +4027,19 @@ namespace server
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
             return;
         }
+        // Class gating (Oct 21): the projectile spells are wizard/sorceress-only.
+        // Basic Attack and the instant spells stay universal.
+        if(ab.delivery == rpg::DELIVERY_PROJECTILE)
+        {
+            char arch[32]; arch[0] = '\0';
+            rpg::chararchetype(cq->name, arch, sizeof(arch));
+            if(strcmp(arch, "Wizard") && strcmp(arch, "Sorceress"))
+            {
+                defformatstring(gmsg)("\f2%s: \f7only wizards and sorceresses can cast this.", ab.name);
+                sendf(cq->clientnum, 1, "ris", N_SERVMSG, gmsg);
+                return;
+            }
+        }
         rpg::spendmana(cq->name, ab.manacost);
         vec push(target->state.o);
         push.sub(cq->state.o);
@@ -3971,13 +4058,42 @@ namespace server
         if(rpg::mapactive(smapname))
         {
             if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::attrscore(level, rpg::ATTR_STRENGTH);
-            else castdmg = rpg::stat_sparkbolt(level);
+            // Spell damage: ability base + 2xKnowledge. (stat_sparkbolt() is
+            // exactly this with base 50; the table now carries each spell's
+            // own base so the formula stays uniform.)
+            else castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_KNOWLEDGE);
             if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
             {
                 crit = true;
                 castdmg = int(castdmg*rpg::stat_critmult(level) + 0.5f);
             }
             rpg_forcecrit = false; // one-shot: the hook never leaks into real casts
+        }
+        // Projectile delivery (Oct 21): range + LoS were already validated at
+        // release above (shared with instant spells). Spawn the bolt; the
+        // server tick moves it and applies damage on arrival.
+        if(ab.delivery == rpg::DELIVERY_PROJECTILE)
+        {
+            rpg_projectile pr;
+            pr.id = rpg_projnextid++;
+            pr.castercn = cq->clientnum;
+            pr.targetcn = target->clientnum;
+            pr.ability = ability;
+            pr.damage = castdmg;
+            pr.pos = cq->state.o; pr.pos.z += 14; // ~chest height at release
+            pr.born = totalmillis;
+            rpg_projectiles.add(pr);
+            sendf(-1, 1, "ri8", N_RPG_PROJ, pr.id, pr.castercn, pr.targetcn, ability,
+                  int(pr.pos.x*DMF), int(pr.pos.y*DMF), int(pr.pos.z*DMF));
+            conoutf("rpg: '%s' casts %s at '%s' (projectile %d, %d dmg)",
+                    cq->name, ab.name, target->name, pr.id, castdmg);
+            defformatstring(cmsg)("\f2%s \f7flies toward %s.", ab.name, target->name);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, cmsg);
+            // push fresh mana + cooldown to the caster for the RPG HUD
+            rpg::getmana(cq->name, mana, maxmana);
+            sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
+            sendf(cq->clientnum, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+            return;
         }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
         conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
@@ -4304,6 +4420,8 @@ namespace server
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
         rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
+        // --- RPG: projectile spells (Oct 21, additive) ---
+        rpg_projectiletick(); // moves bolts, applies hits/fizzles; no-op when empty
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Loot: server-validated walk-over pickup + expiry, RPG maps only.
         if(rpg::connected() && rpg::mapactive(smapname))

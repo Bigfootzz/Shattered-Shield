@@ -19,9 +19,17 @@ namespace rpg
         int damage;        // base damage, applied through the engine damage path
         bool melee;        // true: front-cone target check; false: line-of-sight check
         const char *damagetype; // data only (behavior later): "slash", "spark" ...
+        int delivery;      // DELIVERY_INSTANT or DELIVERY_PROJECTILE (below)
+        const char *projectile; // visual style for projectiles: "arcane", "ice", or NULL
     };
 
-    const int ABILITY_COUNT = 3;
+    const int DELIVERY_INSTANT = 0;    // damage applied at cast (existing)
+    const int DELIVERY_PROJECTILE = 1; // target-following projectile (Oct 21):
+                                       // range + LoS checked at release, then
+                                       // tracks and lands; fizzles if target
+                                       // dies first. Spark Bolt stays instant.
+
+    const int ABILITY_COUNT = 5;
 
     // Melee: short range, free, fast cooldown.
     // Spell: long range, costs mana, slower cooldown.

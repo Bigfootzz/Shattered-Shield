@@ -3,12 +3,13 @@
 
 #include "abilities.h"
 #include "stats.h"
+#include <cstddef> // NULL
 
 namespace rpg
 {
     static const abilitydef ABILITIES[ABILITY_COUNT] =
     {
-        // key            name            cooldown  mana  range   dmg   melee  type
+        // key            name            cooldown  mana  range   dmg   melee  type       delivery             projectile
         // Power Strike range is CENTER-TO-CENTER (client pre-check + server
         // validation both measure origin distance). Two characters in body
         // contact already stand ~7 units apart (model radii 3.5 + 3.5), and a
@@ -18,14 +19,25 @@ namespace rpg
         // covers real fighting distance with margin and stays clearly melee
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
-        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash" },
-        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark" },
+        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL },
+        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL },
         // CLEANUP item 8: the basic weapon swing behind right-click
         // auto-attack. damage 7 = flat base: the server melee formula
         // (base + weapon + Strength) yields 7 + weapon + Strength.
         // TUNING Oct 21 (user-approved): a weaponless level-1 fists
         // (0 + 0 + 1 = 1/tick) could never win starter hunts.
-        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash" },
+        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL },
+        // PROJECTILE SPELLS (Oct 21, Ed's request for wizard testing): the
+        // first implementation of the RANGED DELIVERY DESIGN. Range + LoS are
+        // checked at release exactly like Spark Bolt; the bolt then tracks
+        // the target and lands — moving after release does not dodge; it
+        // fizzles only if the target dies first. Numbers vs Spark Bolt
+        // (25 mana / 3.5s / 50+2xKNOW, instant): Arcane is the spammable
+        // workhorse (cheaper, faster, slightly softer, travel time is the
+        // tradeoff); Ice is the heavy nuke (longer cooldown, bigger hit).
+        // No slow/freeze v1 — damage + visuals only, keep it testable.
+        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane" },
+        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice" },
     };
 
     const abilitydef &ability(int id)

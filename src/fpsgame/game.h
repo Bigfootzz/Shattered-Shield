@@ -704,6 +704,11 @@ enum
     N_RPG_CLAN,     // s->c: clan membership sync (clan id, rank, name, tag; id 0 = none)
     N_RPG_HP,       // s->c: RPG current-HP sync (health) - out-of-combat regen push
     N_RPG_MOBHOME,  // s->c: RPG ambient mob anchor (cn, x, y, z) - spawn-point placement for the owning client
+    // Shattered Shield projectile spells (Oct 21, additive): target-following
+    // bolts. Server is authoritative for movement + hit; clients render.
+    N_RPG_PROJ,     // s->c: projectile spawned (projid, castercn, targetcn, ability, x, y, z)
+    N_RPG_PROJHIT,  // s->c: projectile landed (projid, targetcn, damage)
+    N_RPG_PROJFIZZLE, // s->c: projectile fizzled, target gone (projid)
     NUMSV
 };
 
@@ -740,6 +745,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
     N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
+    N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     -1
 };
 

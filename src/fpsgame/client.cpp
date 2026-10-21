@@ -75,6 +75,9 @@ namespace game
     }
     ICOMMAND(ability1, "", (), rpg_castability(0));
     ICOMMAND(ability2, "", (), rpg_castability(1));
+    // Projectile spells (Oct 21): wizard/sorceress-only, server-gated.
+    ICOMMAND(ability3, "", (), rpg_castability(3));
+    ICOMMAND(ability4, "", (), rpg_castability(4));
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
     // The client only ASKS (item id / slot); the server validates and pushes
@@ -188,6 +191,69 @@ namespace game
             if(d && d->clientnum == cn && d->ai.type == ai::AI_TYPE_MONSTER && d->state == CS_ALIVE) return d;
         }
         return NULL;
+    }
+
+    // --- RPG: projectile spell visuals (Oct 21, additive) ---
+    // The server is authoritative for movement + hit (N_RPG_PROJ / HIT /
+    // FIZZLE); the client renders a tracking bolt with a particle trail and
+    // a dynamic light riding it. The visual tracks the target's live
+    // position like the server does; the hit/fizzle message ends it.
+    // Purely cosmetic: nothing here affects damage, cooldowns or targeting.
+    struct rpg_projfx
+    {
+        int id;
+        int targetcn;
+        int ability; // 3 = arcane (violet), 4 = ice (pale blue)
+        vec pos;
+        vec prev;    // last-frame pos, for the trail segment
+    };
+    static vector<rpg_projfx> rpg_projfxs;
+    static const float RPG_PROJFX_SPEED = 130.0f; // matches the server
+
+    static fpsent *rpg_projmon(int cn)
+    {
+        if(cn < 0) return NULL;
+        loopv(clients)
+        {
+            fpsent *d = clients[i];
+            if(d && d->clientnum == cn && d->ai.type == ai::AI_TYPE_MONSTER && d->state == CS_ALIVE) return d;
+        }
+        return NULL;
+    }
+
+    // Spell visual style: violet for arcane, pale blue/white for ice.
+    static void rpg_projfxstyle(int ability, vec &col, int &part)
+    {
+        if(ability == 4) { col = vec(0.62f, 0.85f, 1.0f); part = 0xBFE8FF; }
+        else { col = vec(0.62f, 0.30f, 1.0f); part = 0x9D4DFF; }
+    }
+
+    static void updateprojectilefx()
+    {
+        if(rpg_projfxs.empty()) return;
+        float dt = curtime/1000.0f;
+        if(dt <= 0) return;
+        loopvrev(rpg_projfxs)
+        {
+            rpg_projfx &fx = rpg_projfxs[i];
+            fpsent *t = rpg_projmon(fx.targetcn);
+            if(!t) { rpg_projfxs.remove(i); continue; } // server fizzles; drop silently
+            vec top(t->o); top.z += 4; // torso height, matches the server
+            vec d(top); d.sub(fx.pos);
+            float dist = d.magnitude();
+            if(dist > 0.5f)
+            {
+                d.normalize();
+                d.mul(min(dist, RPG_PROJFX_SPEED*dt));
+                fx.prev = fx.pos;
+                fx.pos.add(d);
+            }
+            vec col; int part;
+            rpg_projfxstyle(fx.ability, col, part);
+            particle_trail(PART_STREAK, 120, fx.prev, fx.pos, part, 1.2f, 0);
+            particle_splash(PART_GLOW, 2, 80, fx.pos, part, 2.0f, 30, 0);
+            adddynlight(fx.pos, 90, col);
+        }
     }
 
     static int rpg_facetill = 0; // face the target until this time (manual casts)
@@ -690,6 +756,7 @@ namespace game
             }
         }
         if((!rpg_testforce && !rpg::mapactive(getclientmap())) || !player1) return;
+        updateprojectilefx(); // projectile spell visuals (no-op when none)
         int w, h; rpg_screenwh(w, h);
         if(w <= 0 || h <= 0) return;
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
@@ -2804,6 +2871,41 @@ namespace game
                     player1->lastaction = lastmillis;
                     player1->lastattackgun = player1->gunselect;
                 }
+                break;
+            }
+            case N_RPG_PROJ:
+            {
+                // Server spawned a bolt: render the flight. (castercn is for
+                // a future cast-flash; unused for now.)
+                rpg_projfx fx;
+                fx.id = getint(p);
+                int castercn = getint(p); (void)castercn;
+                fx.targetcn = getint(p);
+                fx.ability = getint(p);
+                fx.pos.x = getint(p)/DMF; fx.pos.y = getint(p)/DMF; fx.pos.z = getint(p)/DMF;
+                fx.prev = fx.pos;
+                rpg_projfxs.add(fx);
+                break;
+            }
+            case N_RPG_PROJHIT:
+            {
+                int id = getint(p), tcn = getint(p), dmg = getint(p);
+                (void)tcn; (void)dmg;
+                loopvrev(rpg_projfxs) if(rpg_projfxs[i].id == id)
+                {
+                    vec col; int part;
+                    rpg_projfxstyle(rpg_projfxs[i].ability, col, part);
+                    particle_splash(PART_EXPLOSION_BLUE, 14, 300, rpg_projfxs[i].pos, part, 2.2f, 120, 2);
+                    adddynlight(rpg_projfxs[i].pos, 170, col, 350, 0);
+                    rpg_projfxs.remove(i);
+                    break;
+                }
+                break;
+            }
+            case N_RPG_PROJFIZZLE:
+            {
+                int id = getint(p);
+                loopvrev(rpg_projfxs) if(rpg_projfxs[i].id == id) { rpg_projfxs.remove(i); break; }
                 break;
             }
             case N_RPG_HPMAX:
