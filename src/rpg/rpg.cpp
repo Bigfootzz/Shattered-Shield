@@ -1563,6 +1563,26 @@ namespace rpg
         }
         return false;
     }
+    // --- radar combat tracking (Oct 21): client-side "in combat with" set ---
+    // Keyed by monster clientnum (stable per spawn, visible to the radar's
+    // client loop). Entries expire after REGEN_DELAY_MS with no new signal;
+    // pruning happens on insert so the map can't grow over a long session.
+    static std::map<int, int> combatmarks;
+    void notecombatsignal(int clientnum)
+    {
+        if(clientnum < 0) return;
+        combatmarks[clientnum] = lastmillis;
+        for(std::map<int, int>::iterator it = combatmarks.begin(); it != combatmarks.end();)
+        {
+            if(lastmillis - it->second >= REGEN_DELAY_MS) { std::map<int, int>::iterator kill = it++; combatmarks.erase(kill); }
+            else ++it;
+        }
+    }
+    bool incombatwith(int clientnum)
+    {
+        std::map<int, int>::iterator it = combatmarks.find(clientnum);
+        return it != combatmarks.end() && lastmillis - it->second < REGEN_DELAY_MS;
+    }
     // --- J-key quest log: derived view (no new table) ---
     static std::vector<std::string> journalines;
     static void journaladdwrapped(const char *prefix, const char *text)

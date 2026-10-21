@@ -365,6 +365,15 @@ namespace rpg
     int clientqueststate(int qid); // -1 when the client has no row for qid
     // True when a monster with this display name is a current quest target.
     bool isquestmobtarget(const char *monname);
+    // --- radar combat tracking (Oct 21): client-side "in combat with" set ---
+    // The client learns about combat from N_DAMAGE (player damages a mob, or
+    // a mob damages the player). A mob counts as in combat with the player
+    // while damage was exchanged within REGEN_DELAY_MS (the game's own
+    // out-of-combat window). The radar uses this for its aggro override: a
+    // mob marker is drawn when the mob is an active quest objective OR in
+    // combat with the player - never hide something that is attacking you.
+    void notecombatsignal(int clientnum); // record a damage exchange with this mob
+    bool incombatwith(int clientnum);     // damage exchanged within REGEN_DELAY_MS
     void rpg_buildjournal(); // rebuild the J-key log from the quest caches
     int rpg_journal_lines();
     void rpg_journal_line(int i, char *buf, int buflen);

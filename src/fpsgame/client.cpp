@@ -2303,6 +2303,16 @@ namespace game
                 target->health = health;
                 if(target->state == CS_ALIVE && actor != player1) target->lastpain = lastmillis;
                 damaged(damage, target, actor, false, gun);
+                // Oct 21 radar: track player<->monster damage exchange so the
+                // radar keeps a marker on mobs in combat with the player
+                // (aggro override). RPG maps only; stock modes never read it.
+                if(rpg::mapactive(getclientmap()))
+                {
+                    fpsent *foe = NULL;
+                    if(target == player1 && actor && actor->ai.type == ai::AI_TYPE_MONSTER) foe = actor;
+                    else if(actor == player1 && target && target->ai.type == ai::AI_TYPE_MONSTER) foe = target;
+                    if(foe) rpg::notecombatsignal(foe->clientnum);
+                }
                 break;
             }
 

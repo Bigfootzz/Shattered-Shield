@@ -2865,13 +2865,15 @@ namespace game
     // RPG radar (user design, Oct 19): PvE tracker in the upper-right corner on
     // RPG maps only. Same frame geometry as the stock radar, but no compass
     // dials and no FPS pickups/teammates: markers are color-coded by category.
-    //   NPCs (quest givers, vendors) ...... gold/yellow  (wired, none exist yet)
-    //   active quest mobs ................. bright orange, larger (wired, none exist yet)
-    //   regular hostile mobs .............. red         (LIVE, from AI state)
+    //   NPCs (quest givers, vendors) ...... gold/yellow
+    //   active quest mobs ................. bright orange, larger
+    //   mobs in combat with the player .... red (aggro override)
     //   gathering materials/nodes ......... green       (wired, none exist yet)
-    // The NPC/quest/gathering sources return 0 today and light up automatically
-    // once those systems land (quest chain v1 is next in the queue); no data is
-    // faked for the empty categories. The FPS radar path is untouched.
+    // Oct 21 (Ed's call): hostile mobs are NOT all drawn. A mob marker
+    // appears only when the mob's type is an objective of a quest in the
+    // player's log, or the mob is in combat with the player - quieter map,
+    // and never hide something that is attacking you. The FPS radar path is
+    // untouched.
     static void rpg_drawmarker(fpsent *d, float x, float y, float s, const vec &pos, float size, float r, float g, float b)
     {
         // Stock blip pattern: textured quad tinted per category. (The neutral
@@ -2923,15 +2925,17 @@ namespace game
         // (When the quest system lands, quest mobs come out of the hostile pass.)
         n = rpg::questmobmarkers(m, 64);
         loopi(n) { vec p(m[3*i], m[3*i+1], m[3*i+2]); rpg_drawmarker(d, x, y, s, p, qsize, 1.0f, 0.50f, 0.10f); }
-        // hostiles, enumerated live from AI state: current quest targets draw
-        // orange and larger (quest chain v1, via the client quest cache);
-        // everything else stays red.
+        // hostiles, enumerated live from AI state: a mob marker is drawn only
+        // when the mob is an objective of an active quest (orange, larger,
+        // via the client quest cache) or is in combat with the player (red,
+        // the aggro override - never hide something attacking you). Oct 21:
+        // quiet radar; everything else is hidden to cut map clutter.
         loopv(clients)
         {
             fpsent *e = clients[i];
             if(!e || e->ai.type != ai::AI_TYPE_MONSTER || e->state != CS_ALIVE) continue;
             if(rpg::isquestmobtarget(e->name)) rpg_drawmarker(d, x, y, s, e->o, qsize, 1.0f, 0.50f, 0.10f);
-            else rpg_drawmarker(d, x, y, s, e->o, msize, 1.0f, 0.20f, 0.15f);
+            else if(rpg::incombatwith(e->clientnum)) rpg_drawmarker(d, x, y, s, e->o, msize, 1.0f, 0.20f, 0.15f);
         }
         // gathering nodes: green
         n = rpg::gathermarkers(m, 64);
