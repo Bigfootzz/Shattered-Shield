@@ -3229,6 +3229,12 @@ namespace server
         const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
         if(!g)
         {
+            // Oct 21: this branch means the quest content failed to load
+            // server-side (nqgraphs == 0) - the graph names themselves are
+            // verified against the NPC table at content validation. Log the
+            // miss so the cause is identifiable from the console/System tab.
+            conoutf("rpg: talk: no dialogue graph '%s' for npc '%s' (quest content not loaded?)",
+                    nd->dialogue ? nd->dialogue : "?", nd->id ? nd->id : "?");
             rpg_qmsg(cq, "They have nothing to say.");
             return;
         }

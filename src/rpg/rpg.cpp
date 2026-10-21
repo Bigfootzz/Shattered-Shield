@@ -911,10 +911,12 @@ namespace rpg
     static const npcdef NPCS[] =
     {
         { "maren", "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main" },
-        // CLEANUP item 6: Tomas, the errand's delivery target. Stands beside
-        // Maren in the spawn clearing - the errand is a conversation, not a
-        // trek; the player talks to him from the same spot as Maren.
-        { "tomas", "Tomas", "playermodels/peasant_male", 2226.0f, 1978.0f, 2116.0f, 225.0f, "tomas_main" },
+        // CLEANUP item 6: Tomas, the errand's delivery target. A few paces
+        // east of Maren in the spawn clearing (10u - the Oct 21 fix for the
+        // two NPCs spawning on top of each other, which also made the F-talk
+        // nearest-NPC resolver grab the wrong one). The errand is still a
+        // conversation, not a trek.
+        { "tomas", "Tomas", "playermodels/peasant_male", 2238.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
         // QUEST BUILD (Oct 21): Corvin, the relay quest's recipient. The
         // design's "Tomas Reed" collided with the existing Tomas, so the
         // relay recipient is a distinct NPC: a hunter camped by the east
@@ -952,7 +954,7 @@ namespace rpg
         { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
         { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
         { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
-        { "imp",    3080.0f, 2280.0f, 2188.0f, "east clearing" },
+        { "imp",    3080.0f, 2280.0f, 2111.0f, "east clearing" }, // Oct 21: z was 2188, imp fell 68u through terrain (invisible)
         { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
         { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
         { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },

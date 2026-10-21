@@ -17,6 +17,7 @@ int commandflags = 0, commandpos = -1;
 // server build; the tap itself is a no-op off RPG maps.
 #ifndef STANDALONE
 namespace game { extern void rpg_chat_tap(int type, const char *line); }
+namespace game { extern bool rpg_ownline(int type, const char *line); } // Shattered Shield log routing: "rpg: " lines owned by the RPG layer
 // Chat surface (user ruling, Oct 19): the tabbed box is the chat surface on
 // EVERY map. While it is active, player chat (say/sayteam) and the chat input
 // live only in the box: the stock left-side feed and bottom-left input line
@@ -151,6 +152,19 @@ ICOMMAND(miniconskip, "i", (int *n), setconskip(miniconskip, miniconfilter, *n))
 
 ICOMMAND(clearconsole, "", (), { while(conlines.length()) delete[] conlines.pop().line; });
 
+#ifndef STANDALONE
+// Shattered Shield log routing (additive): lines the RPG layer owns ("rpg: "
+// prefix, see game::rpg_ownline in fpsgame/client.cpp) are suppressed from
+// the on-screen console feed (main + mini). The full console (F11) keeps
+// them, and the chat box System tab collects them via rpg_chat_tap.
+static bool rpg_hidefromfeed(int type, const char *line)
+{
+    return !fullconsole && game::rpg_ownline(type, line);
+}
+#else
+static bool rpg_hidefromfeed(int type, const char *line) { (void)type; (void)line; return false; }
+#endif
+
 int drawconlines(int conskip, int confade, int conwidth, int conheight, int conoff, int filter, int y = 0, int dir = 1)
 {
     int numl = conlines.length(), offset = min(conskip, numl);
@@ -171,6 +185,7 @@ int drawconlines(int conskip, int confade, int conwidth, int conheight, int cono
         // shuffle backwards to fill if necessary
         int idx = offset+i < numl ? offset+i : --offset;
         if(!(conlines[idx].type&filter)) continue;
+        if(rpg_hidefromfeed(conlines[idx].type, conlines[idx].line)) continue;
         char *line = conlines[idx].line;
         int width, height;
         text_bounds(line, width, height, conwidth);
@@ -182,6 +197,7 @@ int drawconlines(int conskip, int confade, int conwidth, int conheight, int cono
     {
         int idx = offset + (dir > 0 ? numl-i-1 : i);
         if(!(conlines[idx].type&filter)) continue;
+        if(rpg_hidefromfeed(conlines[idx].type, conlines[idx].line)) continue;
         char *line = conlines[idx].line;
         int width, height;
         text_bounds(line, width, height, conwidth);

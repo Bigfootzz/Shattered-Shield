@@ -196,7 +196,16 @@ namespace rpg
             qd.npool = 0;
             loopi(argc)
             {
-                if(finditem(argv[i]) < 0) QERR("unknown pool item '%s'", argv[i]);
+                // Oct 21: one unknown pool item used to fail the WHOLE quest
+                // content load (nqdefs/nqgraphs zeroed), leaving every NPC
+                // with "nothing to say" at talk time. Skip it loudly instead;
+                // quest 6 rolls from whatever is left. An emptied pool still
+                // fails validation ("repeatable with empty fetch pool").
+                if(finditem(argv[i]) < 0)
+                {
+                    conoutf("rpg: quests: warning: quest %d: unknown pool item '%s' skipped", qd.qid, argv[i]);
+                    continue;
+                }
                 copystring(qd.pool[qd.npool++], argv[i], sizeof(qd.pool[0]));
             }
             return true;
