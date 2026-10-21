@@ -1896,14 +1896,17 @@ namespace game
     ICOMMAND(rpgwalk, "i", (int *d), { if(player1) { player1->k_up = *d!=0; player1->move = *d!=0 ? 1 : 0; } });
 
     // --- character select (ITEM 5): CubeScript bindings for the menu ---
-    // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2 (dir name) and rpg_charmodelidx0..2 (playermodel INDEX for guiplayerpreview; mapping must match data/game_fps.cfg playermodeldir0..3)
+    // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2 (dir name) and rpg_charmodelidx0..2 (playermodel INDEX; resolved data-driven from data/game_fps.cfg playermodeldir<i> aliases, so new archetypes only need playermodeldir entries to resolve)
     static int rpg_modelidx(const char *modeldir)
     {
         if(!modeldir || !modeldir[0]) return 0;
-        if(!strcmp(modeldir, "ranger_male"))    return 0;
-        if(!strcmp(modeldir, "ranger_female"))  return 1;
-        if(!strcmp(modeldir, "peasant_male"))   return 2;
-        if(!strcmp(modeldir, "peasant_female")) return 3;
+        for(int i = 0; i < 16; i++)
+        {
+            defformatstring(an)("playermodeldir%d", i);
+            const char *d = getalias(an);
+            if(!d || !d[0]) break;
+            if(!strcmp(modeldir, d)) return i;
+        }
         return 0;
     }
     ICOMMAND(rpg_charlist, "", (),
@@ -1923,9 +1926,17 @@ namespace game
     });
     ICOMMAND(rpg_createchar, "ss", (char *name, char *model),
     {
-        // model like "ranger_male"; archetype derived (Ranger/Peasant)
-        const char *arch = strstr(model, "ranger") ? "Ranger" : (strstr(model, "peasant") ? "Peasant" : "");
-        int ok = rpg::charcreate(name, arch, model) ? 1 : 0;
+        // model like "ranger_male"; archetype = capitalized prefix before the
+        // last '_' ("wizard_female" -> "Wizard") - generic, no per-archetype list.
+        char archbuf[32]; archbuf[0] = '\0';
+        if(model && model[0])
+        {
+            copystring(archbuf, model, sizeof(archbuf));
+            char *u = strrchr(archbuf, '_');
+            if(u) *u = '\0';
+            if(archbuf[0] >= 'a' && archbuf[0] <= 'z') archbuf[0] -= 32;
+        }
+        int ok = rpg::charcreate(name, archbuf, model) ? 1 : 0;
         defformatstring(cmd)("alias rpg_createok %d", ok); execute(cmd);
     });
     ICOMMAND(rpg_deletechar, "s", (char *name),
@@ -3198,21 +3209,13 @@ namespace game
 
     void loadconfigs()
     {
-        // CLEANUP item 2: preload the player models here, during startup,
-        // behind the boot splash. They used to load lazily inside the first
-        // character-select preview draw (guiplayerpreview -> renderplayer),
-        // which froze that screen for ~10 seconds on first open (measured:
-        // ~11s with three characters of three different models, ~2s with an
-        // empty roster - the cost scales with the distinct preview models).
-        // The character-create previews and Maren's NPC model use the same
-        // four models, so they are warm too. flushpreloadedmodels() drives
-        // the normal load-progress rendering while it works.
-        loopi(NUMPLAYERMODELS)
-        {
-            const playermodelinfo *mdl = getplayermodelinfo(i);
-            if(mdl && mdl->ffa) preloadmodel(mdl->ffa);
-        }
-        flushpreloadedmodels(false);
+        // Playtest round 2 (Oct 21, Ed's call): character select uses static
+        // portrait images now, not live 3D model previews. The old boot-time
+        // preload of the 4 player models (~22s on the VM) existed only for
+        // those previews, so it is gone - the selected character's model
+        // preloads at world entry via game::preload()/preloadplayermodel(),
+        // and quest-giver NPC models warm in the same map-load preload
+        // (src/fpsgame/render.cpp), behind the loading progress bar.
     }
 
     const char *getentname(dynent *d) // debugging helper function

@@ -656,6 +656,20 @@ namespace game
         if(hudgun) preloadweapons();
         preloadprojmodels();
         preloadplayermodel();
+        // --- RPG: Shattered Shield (additive, playtest round 2) ---
+        // The boot-time preload of the 4 player models is gone (character
+        // select uses static portraits now). The selected player model is
+        // covered above by preloadplayermodel(); warm the quest-giver NPC
+        // models here too, behind the map-load progress bar (rendergame
+        // idles NPC models via rendermodel, which would otherwise cold-decode
+        // them on the first frame - the ~5.5s/model stall the removed boot
+        // preload used to hide). RPG maps only; battlegrounds unchanged.
+        if(rpg::mapactive(getclientmap()))
+            for(int i = 0; i < rpg::npccount(); i++)
+            {
+                const rpg::npcdef *nd = rpg::npcat(i);
+                if(nd && nd->model && nd->model[0]) preloadmodel(nd->model);
+            }
         preloadsounds();
         entities::preloadentities();
         // if(m_sp) preloadmonsters(); TODO
