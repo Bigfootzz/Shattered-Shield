@@ -1958,6 +1958,11 @@ namespace game
     ICOMMAND(rpg_enterworld, "s", (char *name),
     {
         if(!name || !name[0]) return;
+        // Load-path profiling (Oct 22, fix-list item 1): gated, silent by
+        // default. The heavy work lands in changemapserv/load_world (client)
+        // and rpg::onconnect (server); those log their own stages.
+        extern int rpg_loadprofile;
+        if(rpg_loadprofile) conoutf("rpgprof: rpg_enterworld(%s): connect+changemap issued", name);
         // character name is the persistence key
         string cname; copystring(cname, name);
         // ITEM 5 fix: the server reads player1->name (sent in N_CONNECT),
@@ -2090,16 +2095,18 @@ namespace game
 
         // action slots (lower recess): 10 slots on keys 1-0; v0.1.8: the
         // character's class abilities fill slots 1..N in classabilities()
-        // order (Warrior: Power Strike; Magi: Spark/Arcane/Ice Bolt; Ranger:
-        // Arrow Shot). Remaining slots are empty kit frames.
+        // order (Warrior: Power Strike, Rend; Magi: Spark/Arcane/Ice Bolt;
+        // Ranger: Arrow Shot, Venom Shot). Remaining slots are empty kit frames.
         Texture *slottex = rpg_loadtex("packages/ui/rpg/slots/slot.png");
-        static const char *abiconfiles[6] = {
+        static const char *abiconfiles[8] = {
             "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
             "packages/ui/rpg/hud/icon_sparkbolt.png",   // 1 Spark Bolt
             NULL,                                       // 2 Basic (right-click)
             "packages/ui/rpg/hud/icon_arcanebolt.png",  // 3 Arcane Bolt
             "packages/ui/rpg/hud/icon_icebolt.png",     // 4 Ice Bolt
             "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
+            "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot (v0.1.8)
+            "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend (v0.1.8)
         };
         char hudarch[32]; hudarch[0] = '\0';
         if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
@@ -2113,7 +2120,7 @@ namespace game
             if(i < hudn)
             {
                 int aid = hudids[i];
-                if(aid >= 0 && aid < 6 && abiconfiles[aid])
+                if(aid >= 0 && aid < 8 && abiconfiles[aid])
                 {
                     Texture *abtex = rpg_loadtex(abiconfiles[aid]);
                     glBindTexture(GL_TEXTURE_2D, abtex->id);
@@ -2233,6 +2240,11 @@ namespace game
     {
         if(!chatboxactive()) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        // v0.1.8: chat text uses the plain "default" face (Ed: the Cinzel GUI
+        // font is unreadable at chat sizes). Scoped to the chat box only - the
+        // HUD strip and quest tracker keep the GUI font.
+        pushfont();
+        setfont("default");
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
@@ -2249,9 +2261,11 @@ namespace game
         float by1 = 1800.0f - 24.0f, by0 = by1 - bh;
         float msgby1 = by1 - fieldh; // message area bottom (above the field)
 
-        // dark smoke translucent plate + thin steel border (readability
-        // backing behind the text area, inside the panel rect)
-        rpg_fillrect(bx0, by0, bw, bh, 0.055f, 0.055f, 0.085f, 0.62f);
+        // black transparent plate behind the chat area (readability backing
+        // over the 3D scene). v0.1.8: drawn via rpg_solidquad (texture-backed
+        // quad) instead of the bare-quad rpg_fillrect - the plate was not
+        // visibly rendering for Ed. Kept the thin steel border.
+        rpg_solidquad(bx0, by0, bw, bh, 0.0f, 0.0f, 0.0f, 0.72f);
         rpg_fillrect(bx0, by0, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
         rpg_fillrect(bx0, by1-2, bw, 2, 0.45f, 0.47f, 0.52f, 0.9f);
         rpg_fillrect(bx0, by0, 2, bh, 0.45f, 0.47f, 0.52f, 0.9f);
@@ -2267,7 +2281,8 @@ namespace game
             float cr = rpg_chancol[i][0], cg = rpg_chancol[i][1], cb = rpg_chancol[i][2];
             if(i == rpg_chattab)
             {
-                rpg_fillrect(tx0+2, by0+2, tabw-4, tabh-2, 0.12f, 0.13f, 0.18f, 0.9f);
+                // v0.1.8: solidquad so the active-tab wash always rasterizes
+                rpg_solidquad(tx0+2, by0+2, tabw-4, tabh-2, 0.12f, 0.13f, 0.18f, 0.9f);
                 rpg_fillrect(tx0+8, by0+tabh-5, tabw-16, 3, cr, cg, cb, 1.0f);
             }
             else { cr = cg = cb = 0.55f; }
@@ -2292,8 +2307,8 @@ namespace game
         if(inputopen)
         {
             float fx0 = bx0 + 8, fx1 = bx1 - 8, fy1 = by1 - 8, fy0 = fy1 - 40.0f;
-            // field fill + steel frame
-            rpg_fillrect(fx0, fy0, fx1-fx0, fy1-fy0, 0.03f, 0.03f, 0.05f, 0.92f);
+            // field fill + steel frame (v0.1.8: solidquad fill, same as panel)
+            rpg_solidquad(fx0, fy0, fx1-fx0, fy1-fy0, 0.0f, 0.0f, 0.0f, 0.85f);
             rpg_fillrect(fx0, fy0, fx1-fx0, 2, 0.45f, 0.47f, 0.52f, 0.9f);
             rpg_fillrect(fx0, fy1-2, fx1-fx0, 2, 0.45f, 0.47f, 0.52f, 0.9f);
             rpg_fillrect(fx0, fy0, 2, fy1-fy0, 0.45f, 0.47f, 0.52f, 0.9f);
@@ -2310,6 +2325,7 @@ namespace game
             draw_text(is, int(fx0+8), int(fy0 + (fy1-fy0-th)/2), 255, 255, 255, 255, cursor);
             settextscale(save);
         }
+        popfont(); // restore the GUI font saved at the top of drawrpgchat
     }
 
     // RPG: free world cursor (mouse & targeting v1). Drawn from the kit cursor

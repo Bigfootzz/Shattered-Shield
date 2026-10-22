@@ -294,6 +294,15 @@ struct gui : g3d_gui
         return oldval;
     }
 
+    bool nopressed(bool on)
+    {
+        bool oldval = gui::shouldnopressed;
+        gui::shouldnopressed = on;
+        return oldval;
+    }
+
+    int layoutbox(int w, int h) { return layout(w, h); }
+
     bool ishit(int w, int h, int x = curx, int y = cury)
     {
         if(shouldmergehits) return windowhit==this && (ishorizontal() ? hitx>=x && hitx<x+w : hity>=y && hity<y+h);
@@ -639,7 +648,7 @@ struct gui : g3d_gui
         x += int((size-xs)/2);
         y += int((size-ys)/2);
         glBindTexture(GL_TEXTURE_2D, t->id);
-        if(hit && actionon)
+        if(hit && actionon && !shouldnopressed)
         {
             glColor4f(0, 0, 0, 0.75f);
             rect_(x+SHADOW, y+SHADOW, xs, ys, 0);
@@ -955,6 +964,10 @@ struct gui : g3d_gui
     static bool passthrough;
     static float alpha;
     static vec light;
+    // v0.1.8: opt-out for the pressed-state dark overlay in icon_() (set by
+    // the guinopressed cfg command). The inventory grid wraps its cells in it
+    // so clicking a cell doesn't flash/shift the dark pressed ghost.
+    static bool shouldnopressed;
 
     void adjustscale()
     {
@@ -1193,7 +1206,7 @@ const gui::patch gui::patches[] =
 
 vector<gui::list> gui::lists;
 float gui::basescale, gui::maxscale = 1, gui::hitx, gui::hity, gui::alpha;
-bool gui::passthrough, gui::shouldmergehits = false, gui::shouldautotab = true;
+bool gui::passthrough, gui::shouldmergehits = false, gui::shouldautotab = true, gui::shouldnopressed = false;
 vec gui::light;
 int gui::curdepth, gui::curlist, gui::xsize, gui::ysize, gui::curx, gui::cury;
 int gui::ty, gui::tx, gui::tpos, *gui::tcurrent, gui::tcolor;

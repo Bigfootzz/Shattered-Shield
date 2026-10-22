@@ -21,7 +21,11 @@ namespace rpg
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
         { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior" },
-        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Magi" },
+        // MANA RETUNE Oct 22 (v0.1.8 fix 8): 25 -> 12. Level-1 pool is 80
+        // (stat_maxmana base 40 -> 60): ~6.7 raw casts; the 3.5s Spark weave
+        // (3.4 mana/s) sits under the 6/s regen, so steady casting is
+        // sustainable while Ice dumps still drain the pool.
+        { "sparkbolt",    "Spark Bolt",   3500,     12,   120.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Magi" },
         // CLEANUP item 8: the basic weapon swing behind right-click
         // auto-attack. damage 7 = flat base: the server melee formula
         // (base + weapon + Strength) yields 7 + weapon + Strength.
@@ -37,16 +41,40 @@ namespace rpg
         // workhorse (cheaper, faster, slightly softer, travel time is the
         // tradeoff); Ice is the heavy nuke (longer cooldown, bigger hit).
         // No slow/freeze v1 — damage + visuals only, keep it testable.
-        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Magi" },
-        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Magi" },
+        { "arcanebolt",   "Arcane Bolt",  3000,     8,    120.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Magi" },
+        { "icebolt",      "Ice Bolt",     6000,     15,   120.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Magi" },
         // ARROW SHOT (Oct 21, Ed's "perfect world"): the ranger's ranged
         // attack. Uses the same DELIVERY_PROJECTILE system as the spells
         // (range + LoS at release, tracks target, fizzles if target dies) —
         // proving the delivery works for non-spell projectiles. Physical
         // damage: 40 + 2xDexterity (mirrors the spell formula's 2xKnowledge).
         // 0 mana (it's an arrow, not a spell), 2.5s cooldown. Ranger-only.
-        { "arrowshot",    "Arrow Shot",   2500,     0,    45.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger" },
+        { "arrowshot",    "Arrow Shot",   2500,     0,    120.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger" },
+        // VENOM SHOT (v0.1.8 fix 10): the ranger's second starting attack.
+        // Poison arrow: upfront physical hit (Dex-scaled like Arrow Shot)
+        // plus a 10s poison DoT (see abilitydot() below). 0 mana (it's an
+        // arrow), 8s cooldown — an opener, not a spam button.
+        { "poisonshot",   "Venom Shot",   8000,     0,    120.0f, 20,   false, "poison", DELIVERY_PROJECTILE, "arrow", "Ranger" },
+        // REND (v0.1.8 fix 15): the warrior's second starting attack. Bleed
+        // flavor of the same design: upfront melee hit (Strength-scaled)
+        // plus a 10s bleed DoT. 8s cooldown, melee range.
+        { "rend",         "Rend",         8000,     0,    15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior" },
     };
+
+    // DoT definitions for the two v0.1.8 DoT attacks. 1s ticks x 10 = 10s.
+    // Tick = base 5 + 1x primary attr: level-1 ranger (DEX 1) ticks 6, total
+    // 60 over the duration vs 22 upfront (20 + 2xDEX); level-1 warrior (STR 1)
+    // ticks 6, total 60 vs ~21 upfront (15 + weapon + STR). DoT total ~2.7x
+    // the upfront hit: a strong opener that still needs follow-up against
+    // 180-HP starter zombies. Refresh-on-recast, no stacking.
+    const dotdef *abilitydot(int id)
+    {
+        static const dotdef venom = { 10000, 1000, 5, ATTR_DEXTERITY, "poison" };
+        static const dotdef rend  = { 10000, 1000, 5, ATTR_STRENGTH,  "bleed"  };
+        if(id == 6) return &venom; // "poisonshot"
+        if(id == 7) return &rend;  // "rend"
+        return NULL;
+    }
 
     const abilitydef &ability(int id)
     {
@@ -72,6 +100,7 @@ namespace rpg
         if(arch && !strcmp(arch, "Warrior"))
         {
             if(n < max) out[n++] = 0; // Power Strike
+            if(n < max) out[n++] = 7; // Rend (bleed DoT, v0.1.8 fix 15)
         }
         else if(arch && !strcmp(arch, "Magi"))
         {
@@ -82,6 +111,7 @@ namespace rpg
         else if(arch && !strcmp(arch, "Ranger"))
         {
             if(n < max) out[n++] = 5; // Arrow Shot
+            if(n < max) out[n++] = 6; // Venom Shot (poison DoT, v0.1.8 fix 10)
         }
         return n;
     }

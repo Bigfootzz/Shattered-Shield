@@ -1304,6 +1304,12 @@ namespace game
     extern void sendmapinfo();
     extern void stopdemo();
     extern void changemap(const char *name, int mode);
+    // Incoming map for preload-time gating (load-time fix, Oct 22):
+    // game::preload() runs inside load_world(), before game::startmap()
+    // publishes the new clientmap — so preload-time RPG gating keys off
+    // this (set in changemapserv from the incoming map name), not
+    // getclientmap() which still holds the previous map at that point.
+    extern const char *getincomingmapname();
     extern void c2sinfo(bool force = false);
     extern void sendposition(fpsent *d, packetbuf &q);
     extern void sendposition(fpsent *d, bool reliable = false);

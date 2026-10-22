@@ -597,6 +597,8 @@ struct g3d_gui
     virtual char *field(const char *name, int color, int length, int height = 0, const char *initval = NULL, int initmode = EDITORFOCUSED) = 0;
     virtual void textbox(const char *text, int width, int height, int color = 0xFFFFFF) = 0;
     virtual bool mergehits(bool on) = 0;
+    virtual bool nopressed(bool on) = 0;
+    virtual int layoutbox(int w, int h) = 0;
 };
 
 struct g3d_callback

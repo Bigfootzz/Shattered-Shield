@@ -85,6 +85,10 @@ namespace game
 
     void preloadplayermodel()
     {
+        // RPG maps are third-person only, so the first-person hudgun set
+        // (mdl->quad) is never drawn there - skip it (load-time fix, Oct 22).
+        // The vwep (hand weapon) IS drawn in third person; keep it.
+        bool rpgmap = rpg::mapactive(getincomingmapname());
         loopi(NUMPLAYERMODELS)
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
@@ -97,7 +101,7 @@ namespace game
             }
             else preloadmodel(mdl->ffa);
             if(mdl->vwep) preloadmodel(mdl->vwep);
-            if(mdl->quad) preloadmodel(mdl->quad);
+            if(mdl->quad && !rpgmap) preloadmodel(mdl->quad);
             loopj(3) if(mdl->armour[j]) preloadmodel(mdl->armour[j]);
         }
         ::monster::preloadMonsters();
@@ -115,6 +119,30 @@ namespace game
                                                          : clamp<int, int>(ANIM_HOLD1+d->gunselect, ANIM_HOLD1, ANIM_HOLD7)|ANIM_LOOP,
             attack = clamp<int, int>(ANIM_ATTACK1+d->gunselect, ANIM_ATTACK1, ANIM_ATTACK7),
             delay = mdl.vwep ? 300 : weapons[d->gunselect].attackdelay+50;
+
+        // --- RPG: Shattered Shield (additive, Oct 22; RPG maps only) ---
+        // 1) Ability anim slots: the N_RPG_CD handler forces lastattackgun to
+        //    the cast's anim slot (bow-draw = attack 7 for Arrow Shot / Venom
+        //    Shot). Honor it for the BODY attack anim so the ranger actually
+        //    draws the bow; other casts set lastattackgun = gunselect, so this
+        //    is a no-op for them.
+        // 2) Swing priority: the warrior fights in bite range, and the pain
+        //    flinch (jump-start clip) was overriding every swing, reading as
+        //    "attack plays the jump animation". While a fresh attack swing is
+        //    active, defer the flinch (it still shows after the swing; damage
+        //    sound + vignette are untouched).
+        bool rpgattackwin = false;
+        if(rpg::mapactive(getclientmap()) && d->state==CS_ALIVE && !intermission &&
+           lastaction && lastmillis-lastaction < delay)
+        {
+            rpgattackwin = true;
+            if(d == player1)
+                attack = clamp<int, int>(ANIM_ATTACK1+d->lastattackgun, ANIM_ATTACK1, ANIM_ATTACK7);
+        }
+        int showpain = d->lastpain;
+        if(rpgattackwin && attack >= ANIM_ATTACK1 && attack <= ANIM_ATTACK7 &&
+           showpain >= lastaction && lastmillis-showpain < 300)
+            showpain = 0;
 
         //Zombies use attack indexes based on the zombie class
         if(d->isInfected())
@@ -185,7 +213,7 @@ namespace game
             case 1: mdlname = mdl.blueteam; break;
             case 2: mdlname = mdl.redteam; break;
         }
-        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : d->lastpain, fade, ragdoll && mdl.ragdoll, d==player1);
+        renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : showpain, fade, ragdoll && mdl.ragdoll, d==player1);
 
         const playerclassinfo &pci = game::getplayerclassinfo(hudplayer());
         if(pci.abilities & ABILITY_SEE_HEALTH && d->state == CS_ALIVE && !d->isInfected() && !hudplayer()->isInfected())
@@ -653,23 +681,18 @@ namespace game
 
     void preload()
     {
-        if(hudgun) preloadweapons();
+        // --- RPG: Shattered Shield (load-time fix, Oct 22) ---
+        // RPG maps are always played in the detached follow cam (third
+        // person; drawhudgun() also bails in edit mode), so the first-person
+        // hudgun models are never drawn there - skip their load-time decodes.
+        // Quest-giver NPC models are warmed in changemapserv(), before
+        // load_world() (preload() runs before startmap() publishes the new
+        // clientmap, so keying that loop on getclientmap() never fired on
+        // first entry). FPS maps unchanged.
+        bool rpgmap = rpg::mapactive(getincomingmapname());
+        if(hudgun && !rpgmap) preloadweapons();
         preloadprojmodels();
         preloadplayermodel();
-        // --- RPG: Shattered Shield (additive, playtest round 2) ---
-        // The boot-time preload of the 4 player models is gone (character
-        // select uses static portraits now). The selected player model is
-        // covered above by preloadplayermodel(); warm the quest-giver NPC
-        // models here too, behind the map-load progress bar (rendergame
-        // idles NPC models via rendermodel, which would otherwise cold-decode
-        // them on the first frame - the ~5.5s/model stall the removed boot
-        // preload used to hide). RPG maps only; battlegrounds unchanged.
-        if(rpg::mapactive(getclientmap()))
-            for(int i = 0; i < rpg::npccount(); i++)
-            {
-                const rpg::npcdef *nd = rpg::npcat(i);
-                if(nd && nd->model && nd->model[0]) preloadmodel(nd->model);
-            }
         preloadsounds();
         entities::preloadentities();
         // if(m_sp) preloadmonsters(); TODO

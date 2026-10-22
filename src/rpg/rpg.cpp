@@ -14,6 +14,10 @@
 #include <string>
 #include <vector>
 
+// Load-path profiling flag (Oct 22, fix-list item 1); defined in
+// fpsgame/client.cpp as VARP(rpg_loadprofile) inside namespace game.
+namespace game { extern int rpg_loadprofile; }
+
 namespace rpg
 {
     static sqlite3 *db = NULL;
@@ -192,13 +196,34 @@ namespace rpg
         conoutf("rpg: character database closed");
     }
 
-    static bool loadrow(const char *name, int &level, int &xp)
+    static bool loadrow(const char *name, int &level, int &xp, char *arch = NULL, int archmax = 0)
     {
         sqlite3_stmt *st = NULL;
-        if(sqlite3_prepare_v2(db, "SELECT level, xp FROM characters WHERE name=?1", -1, &st, NULL) != SQLITE_OK) return false;
+        if(sqlite3_prepare_v2(db, "SELECT level, xp, archetype, appearance FROM characters WHERE name=?1", -1, &st, NULL) != SQLITE_OK) return false;
         sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
         bool found = sqlite3_step(st) == SQLITE_ROW;
-        if(found) { level = sqlite3_column_int(st, 0); xp = sqlite3_column_int(st, 1); }
+        if(found)
+        {
+            level = sqlite3_column_int(st, 0); xp = sqlite3_column_int(st, 1);
+            // Archetype: prefer the stored column, but fall back to deriving
+            // from the model name (same logic as rpg_createchar) — the stored
+            // value has proven unreliable across DB connections.
+            const char *dbarch = (const char *)sqlite3_column_text(st, 2);
+            const char *model = (const char *)sqlite3_column_text(st, 3);
+            if(arch && archmax > 0)
+            {
+                if(dbarch && dbarch[0]) copystring(arch, dbarch, archmax);
+                else if(model && model[0])
+                {
+                    copystring(arch, model, archmax);
+                    char *u = strrchr(arch, '_');
+                    if(u) *u = '\0';
+                    if(!strcmp(arch, "wizard") || !strcmp(arch, "sorceress")) copystring(arch, "magi", archmax);
+                    if(arch[0] >= 'a' && arch[0] <= 'z') arch[0] -= 32;
+                }
+                else arch[0] = '\0';
+            }
+        }
         sqlite3_finalize(st);
         return found;
     }
@@ -216,8 +241,11 @@ namespace rpg
     bool onconnect(const char *name)
     {
         if(!db || !name || !name[0]) return false;
+        // Load-path profiling (Oct 22, fix-list item 1): gated, silent by default.
+        int t0 = game::rpg_loadprofile ? SDL_GetTicks() : 0;
         int level = 1, xp = 0;
-        bool existed = loadrow(name, level, xp);
+        char archbuf[32]; archbuf[0] = '\0';
+        bool existed = loadrow(name, level, xp, archbuf, sizeof(archbuf));
         if(!existed)
         {
             sqlite3_stmt *st = NULL;
@@ -245,13 +273,70 @@ namespace rpg
         // --- quest engine v2: quest rows + repeatable rows into the session caches ---
         questcacheload(name);
         rpcacheload(name);
-        if(!existed)
+        // Starter kit: new characters, OR existing characters with no items
+        // at all (rpg_createchar inserts the DB row before onconnect runs, so
+        // !existed is false for fresh characters — they arrive with an empty
+        // pack and nothing equipped). v0.1.8 fix 9: rangers get the wooden
+        // bow, everyone else the puglin stick. Archetype comes from the
+        // loadrow above (same DB handle, no fragile re-query).
+        itemstack invcheck[1]; int ninv = 0;
+        getinventory(name, invcheck, 1, ninv);
+        bool hasitems = ninv > 0 || equippeditem(name, SLOT_MAINHAND) >= 0;
+        if(!existed || !hasitems)
         {
-            // starter kit: a stick in hand and two potions in the pack
-            additem(name, "puglin_stick", 1);
-            equipitem(name, "puglin_stick");
+            // starter kit: a class weapon in hand and two potions in the pack
+            // (v0.1.8 fix 9: rangers start with the wooden bow, not a
+            // stick/mace; everyone else keeps the puglin stick).
+            // Archetype derived from the character's MODEL via charmodel()
+            // (reliable) — the stored archetype column is empty due to a DB
+            // write issue. Same derivation logic as rpg_createchar.
+            char arch[32]; arch[0] = '\0';
+            char modeldir[64]; modeldir[0] = '\0';
+            if(charmodel(name, modeldir, sizeof(modeldir)) && modeldir[0])
+            {
+                copystring(arch, modeldir, sizeof(arch));
+                char *u = strrchr(arch, '_');
+                if(u) *u = '\0';
+                if(!strcmp(arch, "wizard") || !strcmp(arch, "sorceress")) copystring(arch, "magi", sizeof(arch));
+                if(arch[0] >= 'a' && arch[0] <= 'z') arch[0] -= 32;
+            }
+            int bowid = finditem("wooden_bow");
+            const char *starter = (!strcmp(arch, "Ranger") && bowid >= 0)
+                ? "wooden_bow" : "puglin_stick";
+            additem(name, starter, 1);
+            equipitem(name, starter);
             additem(name, "health_potion", 2);
         }
+        // v0.1.8 fix 9 (migration): rangers created before the bow starter
+        // kit keep everything they own; grant + equip a wooden bow only if
+        // they don't have one. Nothing is ever removed (equipitem swaps the
+        // old weapon back into the pack).
+        {
+            // Derive archetype from model (charmodel is reliable; the stored
+            // archetype column is not).
+            char march[32]; march[0] = '\0';
+            char mmodel[64]; mmodel[0] = '\0';
+            if(charmodel(name, mmodel, sizeof(mmodel)) && mmodel[0])
+            {
+                copystring(march, mmodel, sizeof(march));
+                char *u = strrchr(march, '_');
+                if(u) *u = '\0';
+                if(!strcmp(march, "wizard") || !strcmp(march, "sorceress")) copystring(march, "magi", sizeof(march));
+                if(march[0] >= 'a' && march[0] <= 'z') march[0] -= 32;
+            }
+            if(!strcmp(march, "Ranger") &&
+               finditem("wooden_bow") >= 0 && itemcount(name, "wooden_bow") <= 0)
+            {
+                int mainhand = equippeditem(name, SLOT_MAINHAND);
+                if(mainhand < 0 || strcmp(item(mainhand).id, "wooden_bow"))
+                {
+                    additem(name, "wooden_bow", 1);
+                    if(equipitem(name, "wooden_bow"))
+                        conoutf("rpg: '%s' (Ranger) issued a Wooden Bow", name);
+                }
+            }
+        }
+        if(game::rpg_loadprofile) conoutf("rpgprof: rpg::onconnect(%s): character+inventory+quest DB load %dms", name, SDL_GetTicks()-t0);
         return existed;
     }
 
@@ -1512,9 +1597,9 @@ namespace rpg
         bool ok = false;
         if(sqlite3_prepare_v2(cdb, "INSERT INTO characters(name, level, xp, archetype, appearance, created_at, last_seen) VALUES(?1, 1, 0, ?2, ?3, ?4, ?4)", -1, &st, NULL) == SQLITE_OK)
         {
-            sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
-            sqlite3_bind_text(st, 2, archetype ? archetype : "", -1, SQLITE_STATIC);
-            sqlite3_bind_text(st, 3, model ? model : "", -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, archetype ? archetype : "", -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 3, model ? model : "", -1, SQLITE_TRANSIENT);
             sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
             ok = sqlite3_step(st) == SQLITE_DONE;
             sqlite3_finalize(st);

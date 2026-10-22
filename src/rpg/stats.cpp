@@ -45,9 +45,16 @@ namespace rpg
         return 90 + 10*attrscore(level, ATTR_VITALITY);
     }
 
+    // MANA RETUNE Oct 22 (v0.1.8 fix 8): base 40 -> 60. Level-1 pool is now
+    // 80 (was 60): Spark Bolt (12) x ~6.7 casts raw, Arcane (8) x 10,
+    // Ice (15) x ~5.3. A disciplined 6s rotation (Ice+Arcane+Spark = 35 mana
+    // = 5.8/s) sits just under the 6/s regen and is sustainable; spamming
+    // every cooldown drains slowly, so spell choice still matters. Per Ed's
+    // MMO model, skill ranks (stronger + costlier) will retune this again
+    // later; the pool still grows 10/level + 10/Wisdom.
     int stat_maxmana(int level)
     {
-        return 40 + 10*level + 10*attrscore(level, ATTR_WISDOM);
+        return 60 + 10*level + 10*attrscore(level, ATTR_WISDOM);
     }
 
     int stat_manaregen(int level)

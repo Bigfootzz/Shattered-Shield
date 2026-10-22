@@ -32,7 +32,26 @@ namespace rpg
                                        // tracks and lands; fizzles if target
                                        // dies first. Spark Bolt stays instant.
 
-    const int ABILITY_COUNT = 6;
+    // --- damage-over-time (v0.1.8, Oct 22) ---
+    // Applied server-side when a DoT ability's hit lands (instant or
+    // projectile). Ticks are server-authoritative: the server owns the
+    // per-target list and applies damage through the normal damage path,
+    // so kills feed XP exactly like direct hits. Re-casting on a target
+    // that already has this DoT REFRESHES the duration (no stacking).
+    // tickdmg is the base per-tick damage; attr adds per-tick scaling
+    // (attrscore(level, attr), -1 = flat). resist is data for the future
+    // resist behavior (stats.h RESIST_*); it changes nothing yet.
+    struct dotdef
+    {
+        int durationms;    // total DoT duration
+        int tickms;        // ms between ticks
+        int tickdmg;       // base damage per tick
+        int attr;          // ATTR_* for per-tick scaling, -1 = flat
+        const char *resist;// "poison", "bleed", ...
+    };
+    const dotdef *abilitydot(int id); // NULL when the ability has no DoT
+
+    const int ABILITY_COUNT = 8;
 
     // Melee: short range, free, fast cooldown.
     // Spell: long range, costs mana, slower cooldown.
@@ -49,5 +68,5 @@ namespace rpg
 
     // --- mana model (session state only, NOT persisted — see BUILD-STEP-3.md) ---
     // Formulas live in stats.h (milestone step 5): stat_maxmana / stat_manaregen.
-    int maxmana(int level);            // stat_maxmana: 40 + 10*level + 10*Wisdom
+    int maxmana(int level);            // stat_maxmana: 60 + 10*level + 10*Wisdom
 }

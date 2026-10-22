@@ -1,4 +1,5 @@
 #include "game.h"
+#include "rpg/rpg.h" // Shattered Shield: RPG-map preload gate
 
 namespace entities
 {
@@ -91,6 +92,13 @@ namespace entities
 
     void preloadentities()
     {
+        // Shattered Shield (load-time fix, Oct 22): RPG maps (rpg_01, krpg)
+        // ship with gametype "rpg" != gameident "fps", so samegame==false at
+        // load and every game-specific entity (all FPS pickups, teleports,
+        // carrots, ...) is deleted - none can exist or spawn. Warming their
+        // models would decode for nothing. FPS maps unchanged.
+        // (If an RPG map ever ships with FPS pickups, revisit this gate.)
+        if(rpg::mapactive(game::getincomingmapname())) return;
         loopi(MAXENTTYPES)
         {
             switch(i)

@@ -3991,6 +3991,7 @@ namespace server
         int targetcn;
         int ability;   // ability id, selects the client visual style
         int damage;    // computed at release (base + 2*Knowledge, crit rolled)
+        int level;     // caster level snapshot (DoT attr scaling at apply time)
         vec pos;       // current position, world units
         int born;      // totalmillis at spawn (5s safety timeout)
     };
@@ -4010,6 +4011,8 @@ namespace server
         }
         return NULL;
     }
+
+    static void rpg_applydot(clientinfo *caster, clientinfo *target, int ability, int level);
 
     static void rpg_projectiletick()
     {
@@ -4042,12 +4045,80 @@ namespace server
                 const rpg::abilitydef &ab = rpg::ability(pr.ability);
                 conoutf("rpg: projectile %s hits '%s' for %d (%d -> %d hp)",
                         ab.name, t->name, pr.damage, hpbefore, t->state.health);
+                rpg_applydot(caster, t, pr.ability, pr.level); // Venom Shot poison
                 rpg_projectiles.remove(i);
                 continue;
             }
             d.normalize();
             d.mul(min(dist, RPG_PROJ_SPEED*dt));
             pr.pos.add(d);
+        }
+    }
+
+    // --- RPG: damage-over-time (v0.1.8, Oct 22; Venom Shot + Rend) ---
+    // Server-authoritative DoTs. The server owns the per-target list and
+    // ticks it in serverupdate(); damage goes through dodamage() so kills
+    // feed the XP hook exactly like direct hits. Re-applying the same
+    // ability's DoT to a target REFRESHES it (duration reset, no stacking).
+    // Ticks stop when the target dies, disconnects, or the duration ends.
+    struct rpg_dot
+    {
+        int targetcn;
+        int casterncn;  // -1 when the caster is gone; dodamage accepts NULL
+        int ability;    // ability id (logging + refresh matching)
+        int tickdmg;    // damage per tick, computed at apply (base + attr)
+        int tickms;     // ms between ticks
+        int ticksleft;
+        int nexttick;   // totalmillis timestamp of the next tick
+    };
+    static vector<rpg_dot> rpg_dots;
+
+    static void rpg_applydot(clientinfo *caster, clientinfo *target, int ability, int level)
+    {
+        const rpg::dotdef *dd = rpg::abilitydot(ability);
+        if(!dd || !target) return;
+        int ticks = dd->durationms / dd->tickms;
+        if(ticks < 1) ticks = 1;
+        loopv(rpg_dots) if(rpg_dots[i].targetcn == target->clientnum && rpg_dots[i].ability == ability)
+        {
+            // Refresh: reset the clock, keep the caster/level snapshot.
+            rpg_dots[i].ticksleft = ticks;
+            rpg_dots[i].nexttick = totalmillis + dd->tickms;
+            return;
+        }
+        rpg_dot d;
+        d.targetcn = target->clientnum;
+        d.casterncn = caster ? caster->clientnum : -1;
+        d.ability = ability;
+        d.tickdmg = dd->tickdmg + (dd->attr >= 0 ? rpg::attrscore(level, dd->attr) : 0);
+        d.tickms = dd->tickms;
+        d.ticksleft = ticks;
+        d.nexttick = totalmillis + dd->tickms;
+        rpg_dots.add(d);
+        const rpg::abilitydef &ab = rpg::ability(ability);
+        conoutf("rpg: %s applies to '%s' (%ds)", ab.name, target->name, dd->durationms/1000);
+    }
+
+    static void rpg_dottick()
+    {
+        if(rpg_dots.empty() || !rpg::connected()) return;
+        loopvrev(rpg_dots)
+        {
+            rpg_dot &d = rpg_dots[i];
+            clientinfo *t = rpg_projfind(d.targetcn, true);
+            bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
+            if(gone || d.ticksleft <= 0) { rpg_dots.remove(i); continue; }
+            if(totalmillis < d.nexttick) continue;
+            d.nexttick += d.tickms;
+            d.ticksleft--;
+            clientinfo *caster = d.casterncn >= 0 ? rpg_projfind(d.casterncn, false) : NULL;
+            vec nopush(0, 0, 0); // DoT: no knockback
+            int hpbefore = t->state.health;
+            dodamage(t, caster, d.tickdmg, WEAP_FIST, nopush, false);
+            const rpg::abilitydef &ab = rpg::ability(d.ability);
+            conoutf("rpg: %s ticks '%s' for %d (%d -> %d hp, %d ticks left)",
+                    ab.name, t->name, d.tickdmg, hpbefore, t->state.health, d.ticksleft);
+            if(d.ticksleft <= 0) rpg_dots.remove(i);
         }
     }
 
@@ -4139,7 +4210,9 @@ namespace server
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
             // Arrow Shot (physical pierce): base + 2xDexterity instead.
-            else if(!strcmp(ab.damagetype, "pierce")) castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_DEXTERITY);
+            // Venom Shot (poison arrow, v0.1.8): same Dex scaling -- it's
+            // an arrow, not a spell.
+            else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_DEXTERITY);
             else castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_KNOWLEDGE);
             if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
             {
@@ -4159,6 +4232,7 @@ namespace server
             pr.targetcn = target->clientnum;
             pr.ability = ability;
             pr.damage = castdmg;
+            pr.level = level;
             pr.pos = cq->state.o; pr.pos.z += 14; // ~chest height at release
             pr.born = totalmillis;
             rpg_projectiles.add(pr);
@@ -4175,6 +4249,7 @@ namespace server
             return;
         }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
+        rpg_applydot(cq, target, ability, level); // Rend bleed (no-op for non-DoT abilities)
         conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
         defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
@@ -4501,6 +4576,8 @@ namespace server
         rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
         // --- RPG: projectile spells (Oct 21, additive) ---
         rpg_projectiletick(); // moves bolts, applies hits/fizzles; no-op when empty
+        // --- RPG: damage-over-time (v0.1.8, additive) ---
+        rpg_dottick(); // ticks poison/bleed; no-op when empty
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Loot: server-validated walk-over pickup + expiry, RPG maps only.
         if(rpg::connected() && rpg::mapactive(smapname))

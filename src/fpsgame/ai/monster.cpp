@@ -1,5 +1,6 @@
 // monster.h: implements AI for single player monsters, currently client only
 #include "game.h"
+#include <cstring>
 #include "rpg/rpg.h" // Shattered Shield: RPG map gate + mob-behaviour constants
 
 extern int physsteps;
@@ -168,8 +169,29 @@ namespace monster
 #ifndef STANDALONE
     void preloadMonsters()
     {
+        // Shattered Shield (load-time fix, Oct 22): on RPG maps only warm
+        // the monster types that can actually appear. The quest champion
+        // draws from the random (freq>0) pool and ambient spawns resolve by
+        // name against the RPG spawn table (rpg_resolvespawntype); anything
+        // else (e.g. the juggernaut: freq 0, FPS-mode-only) can never spawn
+        // on an RPG map. FPS maps unchanged.
+        bool rpgmap = rpg::mapactive(game::getincomingmapname());
         loopi(NUMMONSTERTYPES)
         {
+            if(rpgmap)
+            {
+                const MonsterType &mt = monstertypes[i];
+                bool needed = mt.freq > 0;
+                if(!needed)
+                {
+                    loopj(rpg::spawnpointcount())
+                    {
+                        const rpg::spawndef *sp = rpg::spawnpoint(j);
+                        if(sp && sp->type && !strcmp(sp->type, mt.classInfo.name)) { needed = true; break; }
+                    }
+                }
+                if(!needed) continue;
+            }
             preloadmodel(monstertypes[i].modelInfo.ffa);
         }
     }

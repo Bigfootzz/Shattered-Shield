@@ -265,6 +265,18 @@ void guistayopen(uint *contents)
     shouldclearmenu = oldclearmenu;
 }
 
+// v0.1.8: scoped opt-out for the pressed-state dark overlay on clickable
+// images (gui::icon_). The RPG inventory grid wraps its cells in this so a
+// click doesn't flash the dark pressed ghost shifted by SHADOW (Ed: click
+// flicker + "a millimeter" downward shift). Default off everywhere else.
+void guinopressed(uint *contents)
+{
+    if(!cgui) { execute(contents); return; }
+    bool oldval = cgui->nopressed(true);
+    execute(contents);
+    cgui->nopressed(oldval);
+}
+
 void guinoautotab(uint *contents)
 {
     if(!cgui) return;
@@ -307,7 +319,16 @@ void guiimage(char *path, char *action, float *scale, int *overlaid, char *alt, 
     if(t==notexture)
     {
         if(alt[0]) t = textureload(alt, 0, true, false);
-        if(t==notexture) return;
+        if(t==notexture)
+        {
+            // v0.1.8: missing art still reserves its layout box so grids
+            // don't collapse (RPG quest-item cells have no cell_*.png yet).
+            // Nothing is drawn and no click target is created.
+            float s = *scale; if(s==0) s = 1;
+            int size = int(s*2*FONTH)-4; // SHADOW, as in gui::image()
+            cgui->layoutbox(size+4, size+4);
+            return;
+        }
     }
     int ret = cgui->image(t, *scale, *overlaid!=0, *colour);
     if(ret&G3D_UP)
@@ -615,6 +636,7 @@ COMMAND(togglegui, "s"); // RR
 COMMAND(guionclear, "s");
 COMMAND(guinoskin, "");
 COMMAND(guistayopen, "e");
+COMMAND(guinopressed, "e");
 COMMAND(guinoautotab, "e");
 COMMAND(guitextscale, "fe");
 COMMAND(guimerge, "e");

@@ -994,9 +994,16 @@ static uint mapcrc = 0;
 uint getmapcrc() { return mapcrc; }
 void clearmapcrc() { mapcrc = 0; }
 
+namespace game { extern int rpg_loadprofile; } // defined in fpsgame/client.cpp (VARP rpg_loadprofile)
+
+// Load-path stage profiling (Oct 22, fix-list item 1): RPGPROF(stage) logs a
+// gated millisecond checkpoint. Silent unless rpg_loadprofile is 1.
+#define RPGPROF(stage) do { if(game::rpg_loadprofile) { int _n = SDL_GetTicks(); conoutf("rpgprof: load_world [%s] +%dms (total %dms)", stage, _n - rpgprof_last, _n - loadingstart); rpgprof_last = _n; } } while(0)
+
 bool load_world(const char *mname, const char *cname)        // still supports all map formats that have existed since the earliest cube betas!
 {
     int loadingstart = SDL_GetTicks();
+    int rpgprof_last = loadingstart;
     setmapfilenames(mname, cname);
     stream *f = opengzfile(ogzname, "rb");
     if(!f) { conoutf(CON_ERROR, "could not read map %s", ogzname); return false; }
@@ -1237,12 +1244,14 @@ bool load_world(const char *mname, const char *cname)        // still supports a
     delete f;
 
     conoutf("read map %s (%.1f seconds)", ogzname, (SDL_GetTicks()-loadingstart)/1000.0f);
+    RPGPROF("ogz read + octree + lightmaps");
 
     clearmainmenu();
 
     identflags |= IDF_OVERRIDDEN;
     execfile("data/default_map_settings.cfg", false);
     execfile(cfgname, false);
+    RPGPROF("map cfg exec");
     identflags &= ~IDF_OVERRIDDEN;
 
     extern void fixlightmapnormals();
@@ -1251,23 +1260,30 @@ bool load_world(const char *mname, const char *cname)        // still supports a
     if(hdr.version <= 31) fixrotatedlightmaps();
 
     preloadusedmapmodels(true);
+    RPGPROF("mapmodels preload");
 
     game::preload();
+    RPGPROF("game preload (queue)");
     flushpreloadedmodels();
+    RPGPROF("model decode + GPU upload");
 
     preloadmapsounds();
+    RPGPROF("map sounds");
 
     entitiesinoctanodes();
     attachentities();
     initlights();
     allchanged(true);
+    RPGPROF("entities + lights + geometry");
 
     //renderbackground("loading...", mapshot, bgshot, mname, game::getmapinfo());
 
     if(maptitle[0] && strcmp(maptitle, "Untitled Map by Unknown")) conoutf(CON_ECHO, "%s", maptitle);
 
     startmap(cname ? cname : mname);
+    RPGPROF("startmap (incl drawminimap)");
 
+#undef RPGPROF
     return true;
 }
 

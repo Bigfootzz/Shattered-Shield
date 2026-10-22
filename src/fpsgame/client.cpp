@@ -21,6 +21,10 @@ namespace game
     captureclientmode capturemode;
     // TEST-ONLY (harness): bypass the RPG-map gate for turning/steering tests
     VARP(rpg_testforce, 0, 0, 1);
+    // Load-time profiling (Oct 22, fix-list item 1): set to 1 to log
+    // millisecond stage timings for the enter-world load path
+    // (changemapserv / load_world / rpg::onconnect). Default 0 = silent.
+    VARP(rpg_loadprofile, 0, 0, 1);
     ctfclientmode ctfmode;
     infectionclientmode infectionmode;
     dmspclientmode dmspmode;
@@ -261,9 +265,10 @@ namespace game
                 fx.prev = fx.pos;
                 fx.pos.add(d);
             }
-            // Arrow Shot (ability 5): render the physical arrow model,
-            // oriented along travel direction. No trail/light (plain arrow).
-            if(fx.ability == 5)
+            // Arrow Shot (ability 5) / Venom Shot (ability 6): render the
+            // physical arrow model, oriented along travel direction.
+            // No trail/light (plain arrow).
+            if(fx.ability == 5 || fx.ability == 6)
             {
                 vec dir(fx.pos); dir.sub(fx.prev);
                 float yaw = 0, pitch = 0;
@@ -580,16 +585,20 @@ namespace game
             size_t plen = nl ? (size_t)(nl - p) : strlen(p);
             if(plen >= sizeof(para)) plen = sizeof(para) - 1;
             memcpy(para, p, plen); para[plen] = '\0';
-            // then wrap the paragraph at ~64 chars on word boundaries
+            // then wrap the paragraph on word boundaries. v0.1.8: 50 chars, not
+            // 64 - the dialogue column is 36 FONTW wide and the text renders
+            // at 0.7 scale, so 50*0.7 = 35 < 36. The old 64-char wrap drew
+            // 44.8-FONTW lines that stretched the column past the frame and
+            // pushed text off the left edge (Ed's photo).
             const char *w = para;
             while(*w)
             {
                 size_t len = strlen(w);
-                if(len > 64)
+                if(len > 50)
                 {
-                    len = 64;
+                    len = 50;
                     while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
-                    if(len == 0) len = 64;
+                    if(len == 0) len = 50;
                 }
                 char line[72];
                 memcpy(line, w, len); line[len] = '\0';
@@ -1339,6 +1348,10 @@ namespace game
 
     int gamemode = INT_MAX, nextmode = INT_MAX;
     string clientmap = "";
+    // Incoming map for preload-time gating (load-time fix, Oct 22): set in
+    // changemapserv() before load_world(); read via getincomingmapname().
+    static string incomingmapname = "";
+    const char *getincomingmapname() { return incomingmapname; }
 
     void changemapserv(const char *name, int mode)        // forced map change from the server
     {
@@ -1359,12 +1372,27 @@ namespace game
         nextmode = mode;
         if(editmode) toggleedit();
         if(m_demo) { entities::resetspawns(); return; }
+        copystring(incomingmapname, name ? name : "");
+        // --- RPG: Shattered Shield (load-time fix, Oct 22) ---
+        // Warm the quest-giver NPC models BEFORE load_world() queues and
+        // flushes. game::preload() runs before startmap() publishes the new
+        // clientmap, so the old home of this loop (keyed on getclientmap())
+        // never fired on first entry — Maren/Tomas/Corvin then cold-decoded
+        // on the first frame instead of behind the progress bar.
+        if(rpg::mapactive(name))
+            for(int i = 0; i < rpg::npccount(); i++)
+            {
+                const rpg::npcdef *nd = rpg::npcat(i);
+                if(nd && nd->model && nd->model[0]) preloadmodel(nd->model);
+            }
+        int t0 = SDL_GetTicks();
         if((m_edit && !name[0]) || !load_world(name))
         {
             emptymap(0, true, name);
             senditemstoserver = false;
         }
         startgame();
+        if(rpg_loadprofile) conoutf("rpgprof: changemapserv(%s): load_world+startgame %dms", name ? name : "", SDL_GetTicks()-t0);
     }
 
     int getmode() { return gamemode; };
@@ -2900,9 +2928,11 @@ namespace game
                 if(player1 && player1->state == CS_ALIVE && rpg::mapactive(getclientmap()))
                 {
                     player1->lastaction = lastmillis;
-                    // Arrow Shot (ability 5): force the bow-draw anim (attack 7,
-                    // slot index 6) instead of the weapon-based slot.
-                    player1->lastattackgun = (ability == 5) ? 6 : player1->gunselect;
+                    // Arrow Shot (ability 5) / Venom Shot (ability 6): force
+                    // the bow-draw anim (attack 7, slot index 6) instead of
+                    // the weapon-based slot. renderplayer honors lastattackgun
+                    // for the body anim on RPG maps (v0.1.8 fix).
+                    player1->lastattackgun = (ability == 5 || ability == 6) ? 6 : player1->gunselect;
                 }
                 break;
             }

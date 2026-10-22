@@ -1,6 +1,7 @@
 // weapon.cpp: all shooting and effects code, projectile management
 #include "game.h"
 #include "weapons.h"
+#include "rpg/rpg.h" // Shattered Shield: RPG-map preload gate
 
 VARP(quakemillis, 0, 400, 10000);
 
@@ -1292,10 +1293,21 @@ static void addentdynlights()
 
     void preloadprojmodels()
     {
-        loopi(sizeof(projmodels)/sizeof(projmodels[0])) preloadmodel(projmodels[i]);
+        // Shattered Shield (load-time fix, Oct 22): RPG maps have no
+        // firearms, so FPS projectile models never render there (the ranger
+        // Arrow Shot uses its own "playermodels/projectiles/arrow" path,
+        // which already lazy-loads on first cast). Gibs ARE kept - monster
+        // deaths gib via deathstate()->gibeffect() on RPG maps too. Debris
+        // needs barrels/movables, which are game-specific entities deleted
+        // at load on RPG maps (samegame==false). FPS maps unchanged.
+        bool rpgmap = rpg::mapactive(getincomingmapname());
+        if(!rpgmap) loopi(sizeof(projmodels)/sizeof(projmodels[0])) preloadmodel(projmodels[i]);
         loopi(sizeof(gibmodels)/sizeof(gibmodels[0])) preloadmodel(gibmodels[i]);
-        loopi(sizeof(debrismodels)/sizeof(debrismodels[0])) preloadmodel(debrismodels[i]);
-        loopi(sizeof(barreldebrismodels)/sizeof(barreldebrismodels[0])) preloadmodel(barreldebrismodels[i]);
+        if(!rpgmap)
+        {
+            loopi(sizeof(debrismodels)/sizeof(debrismodels[0])) preloadmodel(debrismodels[i]);
+            loopi(sizeof(barreldebrismodels)/sizeof(barreldebrismodels[0])) preloadmodel(barreldebrismodels[i]);
+        }
     }
 
     void renderbouncers()
