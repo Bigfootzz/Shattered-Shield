@@ -156,7 +156,7 @@ namespace rpg
     {
         const char *id;      // stable id ("maren") used by quest data
         const char *name;    // display name ("Elder Maren")
-        const char *model;   // model path ("playermodels/peasant_female")
+        const char *model;   // model path ("playermodels/warrior_female")
         float x, y, z;       // feet position on the map
         float yaw;           // facing (degrees, engine yaw convention)
         const char *dialogue;// root dialogue graph name ("maren_main")

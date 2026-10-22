@@ -1,0 +1,2 @@
+/usr/bin/x86_64-w64-mingw32-ar qc librpg.a CMakeFiles/rpg.dir/rpg.cpp.obj CMakeFiles/rpg.dir/abilities.cpp.obj CMakeFiles/rpg.dir/stats.cpp.obj CMakeFiles/rpg.dir/items.cpp.obj CMakeFiles/rpg.dir/quests.cpp.obj CMakeFiles/rpg.dir/sqlite3.c.obj
+/usr/bin/x86_64-w64-mingw32-ranlib librpg.a

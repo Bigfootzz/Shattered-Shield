@@ -1,0 +1,64 @@
+BUILD NOTES — wizard_male (Shattered Shield player model)
+Built 2026-10-21 via /tmp/wiz/build_wizard.py (Blender 4.0.2 headless + iqm_export).
+
+SOURCE
+- ~/workspace/shattered-shield-assets/wizard-class/male_mage/Wizard.gltf (CC0)
+- Boots grafted from Male_Ranger_Feet_Boots.gltf (Fantasy outfits pack, CC0)
+
+STEP 0 — BOOT SWAP (Ed: no bare feet in game)
+- Deleted bare Foot_M_L / Foot_M_R meshes.
+- UAL2 boots warped onto the wizard rig via ankle-anchored PCHIP warp
+  (wizard chibi feet 0.583m vs boot 0.301m; warp scales sx=2.113 sy=1.936 sz=2.515).
+- Boot vertex groups rebound: foot_l/ball_l->Foot.L, calf_l->LowerLeg.L,
+  thigh_l->UpperLeg.L, root->Root (zero-weight groups dropped).
+
+STEP 1 — CONVERSION
+- Rig faces -Y; mdlyaw measured -90 via foot-vector FK (matches ranger_male).
+- Accessories (staff, shoulderpads, pouch) were bone-parented; headless 4.0.2
+  evaluates bone-parented matrix_world with broken identity rotation, so the
+  glTF-authored world transforms were recovered from the .gltf JSON and baked
+  into world-space verts (unparented + Armature modifier, rigid 1-bone weights).
+- tag_weapon bone added, parented to Fist1.R (the rig's weapon-bone parent),
+  head at palm center, +Y along staff-up (+Z at rest).
+- 33 joints (32 + tag_weapon). char.iqm from REST; 16 anim IQMs carry
+  0 joints + 33 poses (same convention as ranger_male).
+- usescale: 65.0 / 2.3149 = 28.078805. Body height = Head bone (2.015) + 0.30m
+  margin; the tall wizard hat (Hair mesh to 2.728m) is excluded so the torso
+  matches other players at 65 units (hat extends above in-game).
+- Ground shift: armature lowered 0.0222m so boot soles touch z=0.
+
+MESH -> TEXTURE (iqmskin)
+- Wizard_Eyebrows  -> T_Hair_1_BaseColor.png
+- Wizard_Eyes      -> T_Eye_Brown.png
+- Wizard_Beard     -> T_Hair_1_BaseColor.png
+- Wizard_Hair      -> T_Hair_1_BaseColor.png
+- Wizard_Head      -> T_Superhero_Male_Dark.png
+- Wizard_Body      -> Wizard_Texture.png
+- Wizard_Boots     -> T_Ranger_BaseColor.png
+- Wizard_Staff     -> Wizard_Staff_Texture.png
+- Wizard_ShoulderPad_L/R -> Wizard_Texture.png
+- Wizard_Pouch     -> Wizard_Texture.png
+
+ANIM SLOT -> FILE (anims/wizard_male_<Clip>.iqm)
+- idle->Idle, forward->Run, backward/left/right->Walk, edit->Idle, jump->Run,
+  lag->Walk, dying->Death, dead->Death (LAST frame 28, prone, 1-frame STATIC),
+  lose->RecieveHit_2, pain->RecieveHit, sink->Roll, swim->Walk, taunt->PickUp,
+  win->Idle_Weapon, hold 1-7->Idle, attack 1->Staff_Attack, attack 2->Spell1,
+  attack 3->Spell2, attack 4->Punch, attack 5->Idle_Attacking,
+  attack 6->Idle_Weapon, attack 7->Run_Weapon (wired; engine div-by-zero guard).
+
+PAIN / DEATH VERIFICATION (measured, not eyeballed)
+- Death: head z 2.11 -> 0.37 (knockdown, prone at end). ONLY knockdown clip.
+- RecieveHit: head z 2.06..2.10 (upright flinch) -> pain slot. CORRECT.
+- RecieveHit_2: head z 2.01..2.02 (upright) -> lose slot.
+
+DEVIATION FROM TASK SPEC
+- dead uses Death's LAST frame (28, prone), not frame 0 (standing); frame 0
+  would leave a standing corpse. Matches ranger precedent (prone frame).
+
+VERIFICATION (struct-based IQM decode, 2026-10-21)
+- char.iqm: 33 joints incl. tag_weapon parented to Fist1.R; 11 meshes; no NaN.
+- All 16 anim IQMs: 0 joints + 33 poses each (joint/pose counts match).
+- All iqmskin meshes exist in char.iqm; all PNGs on disk.
+- Cycles idle render: /tmp/wiz/male_idle.png — boots on feet, staff in right
+  hand, pouch at hip, shoulderpads placed, proportions sane.

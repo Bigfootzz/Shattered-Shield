@@ -1,0 +1,1 @@
+See ../weapons/BUILD-NOTES.txt for the arrow.iqm build notes (orientation, scale, verification).

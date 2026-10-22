@@ -76,14 +76,14 @@ namespace game
             "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/peasant_male",  "playermodels/peasant_male",  "playermodels/peasant_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
+            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
             { NULL, NULL, NULL },
-            "playermodels/peasant_female",  "playermodels/peasant_female",  "playermodels/peasant_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
+            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
     };
 

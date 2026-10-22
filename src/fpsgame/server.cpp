@@ -4088,15 +4088,30 @@ namespace server
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
             return;
         }
-        // Class gating (Oct 21): the projectile spells are wizard/sorceress-only.
-        // Basic Attack and the instant spells stay universal.
-        if(ab.delivery == rpg::DELIVERY_PROJECTILE)
+        // Class gating (Oct 21): abilities with a reqclass are restricted to
+        // the listed archetypes. Basic Attack (NULL) stays universal.
+        // Matrix: Basic Attack = all; Power Strike = Warrior;
+        // Spark/Arcane/Ice Bolt = Wizard/Sorceress; Arrow Shot = Ranger.
+        if(ab.reqclass)
         {
             char arch[32]; arch[0] = '\0';
             rpg::chararchetype(cq->name, arch, sizeof(arch));
-            if(strcmp(arch, "Wizard") && strcmp(arch, "Sorceress"))
+            bool allowed = false;
+            // reqclass is a space-separated list of display names
+            const char *p = ab.reqclass;
+            char token[32];
+            while(*p)
             {
-                defformatstring(gmsg)("\f2%s: \f7only wizards and sorceresses can cast this.", ab.name);
+                while(*p == ' ') p++;
+                if(!*p) break;
+                int i = 0;
+                while(*p && *p != ' ' && i < 31) token[i++] = *p++;
+                token[i] = '\0';
+                if(!strcmp(arch, token)) { allowed = true; break; }
+            }
+            if(!allowed)
+            {
+                defformatstring(gmsg)("\f2%s: \f7requires %s.", ab.name, ab.reqclass);
                 sendf(cq->clientnum, 1, "ris", N_SERVMSG, gmsg);
                 return;
             }
@@ -4122,6 +4137,8 @@ namespace server
             // Spell damage: ability base + 2xKnowledge. (stat_sparkbolt() is
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
+            // Arrow Shot (physical pierce): base + 2xDexterity instead.
+            else if(!strcmp(ab.damagetype, "pierce")) castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_DEXTERITY);
             else castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_KNOWLEDGE);
             if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
             {

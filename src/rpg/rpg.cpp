@@ -910,18 +910,18 @@ namespace rpg
     // table is the single place a second quest giver slots in later.
     static const npcdef NPCS[] =
     {
-        { "maren", "Elder Maren", "playermodels/peasant_female", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main" },
+        { "maren", "Elder Maren", "playermodels/warrior_female", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main" },
         // CLEANUP item 6: Tomas, the errand's delivery target. A few paces
         // east of Maren in the spawn clearing (10u - the Oct 21 fix for the
         // two NPCs spawning on top of each other, which also made the F-talk
         // nearest-NPC resolver grab the wrong one). The errand is still a
         // conversation, not a trek.
-        { "tomas", "Tomas", "playermodels/peasant_male", 2238.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
+        { "tomas", "Tomas", "playermodels/warrior_male", 2238.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
         // QUEST BUILD (Oct 21): Corvin, the relay quest's recipient. The
         // design's "Tomas Reed" collided with the existing Tomas, so the
         // relay recipient is a distinct NPC: a hunter camped by the east
-        // homesteads. peasant_male per the approved recommendation.
-        { "corvin", "Corvin", "playermodels/peasant_male", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main" },
+        // homesteads. warrior_male per the approved recommendation.
+        { "corvin", "Corvin", "playermodels/warrior_male", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main" },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
     int npcindexbyid(const char *id)

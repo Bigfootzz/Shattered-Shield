@@ -203,7 +203,7 @@ namespace game
     {
         int id;
         int targetcn;
-        int ability; // 3 = arcane (violet), 4 = ice (pale blue)
+        int ability; // 3 = arcane (violet), 4 = ice (pale blue), 5 = arrow (model)
         vec pos;
         vec prev;    // last-frame pos, for the trail segment
     };
@@ -248,11 +248,27 @@ namespace game
                 fx.prev = fx.pos;
                 fx.pos.add(d);
             }
-            vec col; int part;
-            rpg_projfxstyle(fx.ability, col, part);
-            particle_trail(PART_STREAK, 120, fx.prev, fx.pos, part, 1.2f, 0);
-            particle_splash(PART_GLOW, 2, 80, fx.pos, part, 2.0f, 30, 0);
-            adddynlight(fx.pos, 90, col);
+            // Arrow Shot (ability 5): render the physical arrow model,
+            // oriented along travel direction. No trail/light (plain arrow).
+            if(fx.ability == 5)
+            {
+                vec dir(fx.pos); dir.sub(fx.prev);
+                float yaw = 0, pitch = 0;
+                if(dir.magnitude() > 0.01f)
+                {
+                    yaw = atan2f(-dir.x, dir.y)*180/PI;
+                    pitch = asinf(dir.z/dir.magnitude())*180/PI;
+                }
+                rendermodel(NULL, "playermodels/projectiles/arrow", ANIM_IDLE, fx.pos, yaw, pitch, 0, NULL, NULL, 0, 0, 1.0f);
+            }
+            else
+            {
+                vec col; int part;
+                rpg_projfxstyle(fx.ability, col, part);
+                particle_trail(PART_STREAK, 120, fx.prev, fx.pos, part, 1.2f, 0);
+                particle_splash(PART_GLOW, 2, 80, fx.pos, part, 2.0f, 30, 0);
+                adddynlight(fx.pos, 90, col);
+            }
         }
     }
 
@@ -2893,10 +2909,14 @@ namespace game
                 (void)tcn; (void)dmg;
                 loopvrev(rpg_projfxs) if(rpg_projfxs[i].id == id)
                 {
-                    vec col; int part;
-                    rpg_projfxstyle(rpg_projfxs[i].ability, col, part);
-                    particle_splash(PART_EXPLOSION_BLUE, 14, 300, rpg_projfxs[i].pos, part, 2.2f, 120, 2);
-                    adddynlight(rpg_projfxs[i].pos, 170, col, 350, 0);
+                    // Arrow Shot: no impact splash (plain arrow thunk)
+                    if(rpg_projfxs[i].ability != 5)
+                    {
+                        vec col; int part;
+                        rpg_projfxstyle(rpg_projfxs[i].ability, col, part);
+                        particle_splash(PART_EXPLOSION_BLUE, 14, 300, rpg_projfxs[i].pos, part, 2.2f, 120, 2);
+                        adddynlight(rpg_projfxs[i].pos, 170, col, 350, 0);
+                    }
                     rpg_projfxs.remove(i);
                     break;
                 }

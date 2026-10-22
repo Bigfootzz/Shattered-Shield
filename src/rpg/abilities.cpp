@@ -19,14 +19,14 @@ namespace rpg
         // covers real fighting distance with margin and stays clearly melee
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
-        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL },
-        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL },
+        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior" },
+        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Wizard Sorceress" },
         // CLEANUP item 8: the basic weapon swing behind right-click
         // auto-attack. damage 7 = flat base: the server melee formula
         // (base + weapon + Strength) yields 7 + weapon + Strength.
         // TUNING Oct 21 (user-approved): a weaponless level-1 fists
         // (0 + 0 + 1 = 1/tick) could never win starter hunts.
-        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL },
+        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL, NULL },
         // PROJECTILE SPELLS (Oct 21, Ed's request for wizard testing): the
         // first implementation of the RANGED DELIVERY DESIGN. Range + LoS are
         // checked at release exactly like Spark Bolt; the bolt then tracks
@@ -36,8 +36,15 @@ namespace rpg
         // workhorse (cheaper, faster, slightly softer, travel time is the
         // tradeoff); Ice is the heavy nuke (longer cooldown, bigger hit).
         // No slow/freeze v1 — damage + visuals only, keep it testable.
-        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane" },
-        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice" },
+        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Wizard Sorceress" },
+        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Wizard Sorceress" },
+        // ARROW SHOT (Oct 21, Ed's "perfect world"): the ranger's ranged
+        // attack. Uses the same DELIVERY_PROJECTILE system as the spells
+        // (range + LoS at release, tracks target, fizzles if target dies) —
+        // proving the delivery works for non-spell projectiles. Physical
+        // damage: 40 + 2xDexterity (mirrors the spell formula's 2xKnowledge).
+        // 0 mana (it's an arrow, not a spell), 2.5s cooldown. Ranger-only.
+        { "arrowshot",    "Arrow Shot",   2500,     0,    45.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger" },
     };
 
     const abilitydef &ability(int id)

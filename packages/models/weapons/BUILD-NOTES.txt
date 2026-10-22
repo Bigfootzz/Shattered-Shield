@@ -1,0 +1,30 @@
+BUILD NOTES — arrow + bow_wooden (static, 0 joints)
+Built 2026-10-21 via /tmp/wiz/build_weapons.py (Blender 4.0.2 headless + iqm_export).
+
+SOURCE
+- ~/workspace/shattered-shield-assets/medieval-weapons/FBX/Arrow.fbx (CC0)
+- ~/workspace/shattered-shield-assets/medieval-weapons/FBX/Bow_Wooden.fbx (CC0)
+
+METHOD
+- Single-mesh rigid conversions (no armature): orientation baked into verts,
+  exported with useskel=False. Scale usescale=28.078805 (= player-char scale,
+  so the weapons are world-size-consistent with the characters).
+- The FBX files ship NO textures and NO UVs — color-only materials. The IQMs
+  are therefore untextured (vertex meshes only); iqm.cfg has no iqmskin line.
+  A skin texture or flat-shader decision belongs to the wiring step.
+
+ORIENTATION CONVENTIONS (first pass; eyeball in-game at wiring)
+- arrow.iqm: tip (steel head) points +Y; nock/fletch end at origin. Mirrors
+  the vwep/mace convention (business end toward +Y, grip at origin).
+  120 verts / 4 material-split meshes / 336 verts total; ~2.73 m -> ~76.7 units.
+- bow_wooden.iqm: limbs along Y, grip centered on the origin, string/belly
+  side facing +X. 370 verts / 3 material-split meshes / 1400 verts total;
+  ~5.44 m -> ~152.6 units tip to tip.
+
+VERIFICATION (struct-based IQM decode)
+- arrow.iqm: 0 joints, 4 meshes, 336 verts, no NaN/inf.
+- bow_wooden.iqm: 0 joints, 3 meshes, 1400 verts, no NaN/inf.
+
+NOTES
+- iqm.cfg files are minimal (iqmload only); the wiring step should add
+  iqmdir / tags (e.g. tag_muzzle-style tags) as needed.

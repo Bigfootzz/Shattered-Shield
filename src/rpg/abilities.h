@@ -20,7 +20,10 @@ namespace rpg
         bool melee;        // true: front-cone target check; false: line-of-sight check
         const char *damagetype; // data only (behavior later): "slash", "spark" ...
         int delivery;      // DELIVERY_INSTANT or DELIVERY_PROJECTILE (below)
-        const char *projectile; // visual style for projectiles: "arcane", "ice", or NULL
+        const char *projectile; // visual style for projectiles: "arcane", "ice", "arrow", or NULL
+        const char *reqclass;   // class gate (Oct 21): NULL = universal (all classes);
+                                // otherwise a space-separated list of allowed archetype
+                                // display names, e.g. "Wizard Sorceress", "Warrior", "Ranger".
     };
 
     const int DELIVERY_INSTANT = 0;    // damage applied at cast (existing)
@@ -29,7 +32,7 @@ namespace rpg
                                        // tracks and lands; fizzles if target
                                        // dies first. Spark Bolt stays instant.
 
-    const int ABILITY_COUNT = 5;
+    const int ABILITY_COUNT = 6;
 
     // Melee: short range, free, fast cooldown.
     // Spell: long range, costs mana, slower cooldown.
