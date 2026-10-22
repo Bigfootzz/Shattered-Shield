@@ -2250,7 +2250,10 @@ namespace game
     bool rpg_serverline(const char *line); // fps.cpp: shared matcher
     bool rpg_ownline(int type, const char *line)
     {
-        if(!rpg::connected()) return false;
+        // v0.1.10 fix 5: drop the connected() gate -- the System tab tap
+        // (fps.cpp) routes these lines without it, and the gate was letting
+        // system lines leak to the top-left feed. The matchers below are
+        // RPG-specific, so no gate is needed.
         if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
         if(line && !strncmp(line, "rpg: ", 5)) return true;
         if((type & CON_INFO) && rpg_serverline(line)) return true;
@@ -2981,7 +2984,12 @@ namespace game
                     // the bow-draw anim (attack 7, slot index 6) instead of
                     // the weapon-based slot. renderplayer honors lastattackgun
                     // for the body anim on RPG maps (v0.1.8 fix).
-                    player1->lastattackgun = (ability == 5 || ability == 6) ? 6 : player1->gunselect;
+                    // v0.1.10 fix 7: Ice Bolt (ability 4) had no cast anim;
+                    // force the spell-cast (attack 2, slot index 1) like the
+                    // other Magi spells should show.
+                    if(ability == 5 || ability == 6) player1->lastattackgun = 6;
+                    else if(ability == 4) player1->lastattackgun = 1;
+                    else player1->lastattackgun = player1->gunselect;
                 }
                 break;
             }
