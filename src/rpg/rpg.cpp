@@ -1411,7 +1411,7 @@ namespace rpg
             const char *h = getenv("HOME");
             if(h)
             {
-                defformatstring(hp)("%s/.revelade-revolution/rpg.db", h);
+                defformatstring(hp)("%s/.shattered-shield/rpg.db", h);
                 FILE *f = fopen(hp, "r");
                 if(f) { fclose(f); p = hp; }
             }
