@@ -85,6 +85,16 @@ namespace game
             { NULL, NULL, NULL },
             "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
+        {
+            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
+        },
+        {
+            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
+        },
     };
 
     const int NUMPLAYERMODELS = sizeof(playermodels)/sizeof(playermodels[0]);
