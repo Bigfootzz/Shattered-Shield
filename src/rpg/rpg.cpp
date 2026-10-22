@@ -916,7 +916,10 @@ namespace rpg
         // two NPCs spawning on top of each other, which also made the F-talk
         // nearest-NPC resolver grab the wrong one). The errand is still a
         // conversation, not a trek.
-        { "tomas", "Tomas", "playermodels/warrior_male", 2238.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
+        // v0.1.8: moved from (2238,1980) — 10u east put him outside the spawn
+        // building (or in its wall); Ed couldn't find him. Now 8u west of
+        // Maren, inside the building near the player spawn.
+        { "tomas", "Tomas", "playermodels/warrior_male", 2220.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
         // QUEST BUILD (Oct 21): Corvin, the relay quest's recipient. The
         // design's "Tomas Reed" collided with the existing Tomas, so the
         // relay recipient is a distinct NPC: a hunter camped by the east
