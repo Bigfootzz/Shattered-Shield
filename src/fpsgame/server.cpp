@@ -971,7 +971,7 @@ namespace server
         loopv(clients)
         {
             clientinfo *ci = clients[i];
-            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
+            if((ci->connectionState == CONNECTION_STATE_CONNECTED || ci->local) && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
         }
         if(!caster) { conoutf("rpgspawnmonster: no live player to spawn next to"); return; }
         clientinfo *mi = aiman::addai(50, -1, ai::AI_TYPE_MONSTER);
@@ -1011,6 +1011,60 @@ namespace server
     }
     ICOMMAND(rpgtestforcerangesrv, "i", (int *v), { rpg_testforcerange_srv = *v ? 1 : 0; conoutf("rpgtestforcerangesrv: %s", rpg_testforcerange_srv ? "ON" : "OFF"); });
     COMMANDN(rpgtestgod, rpgtestgod_cmd, "iV");
+    // TEST-ONLY LoS diagnostic (Oct 21): reports the old single-ray vs new
+    // multi-ray LoS check against the nearest live monster. Proves the
+    // terrain-bump fix: old ray (eye+12 -> feet+4) vs new (any of +4/+14/+24).
+    void rpgtestlos_cmd(tagval *args, int numargs)
+    {
+        if(!rpg::connected()) { conoutf("rpgtestlos: character database is not open"); return; }
+        clientinfo *caster = NULL;
+        conoutf("rpgtestlos: scanning %d clients", clients.length());
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            conoutf("rpgtestlos: client %d name='%s' local=%d conn=%d aitype=%d state=%d",
+                    ci->clientnum, ci->name, ci->local ? 1 : 0, ci->connectionState,
+                    ci->state.ai.type, ci->state.state);
+            if((ci->connectionState == CONNECTION_STATE_CONNECTED || ci->local) && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
+        }
+        if(!caster) { conoutf("rpgtestlos: no live player"); return; }
+        clientinfo *best = NULL; float bestd = 1e9f;
+        loopv(clients)
+        {
+            clientinfo *t = clients[i];
+            if(t == caster || t->state.ai.type != ai::AI_TYPE_MONSTER) continue;
+            if(t->state.state != CS_ALIVE || t->state.health <= 0) continue;
+            vec d(t->state.o); d.sub(caster->state.o);
+            float dist = d.magnitude();
+            if(dist < bestd) { bestd = dist; best = t; }
+        }
+        if(!best) { conoutf("rpgtestlos: no live monster"); return; }
+        // Old single-ray check (eye+12 -> feet+4)
+        vec from(caster->state.o); from.z += 12.0f;
+        vec to_old(best->state.o); to_old.z += 4.0f;
+        vec hitpos;
+        bool old_clear = raycubelos(from, to_old, hitpos);
+        // New multi-ray check (individual heights)
+        static const float heights[3] = { 4.0f, 14.0f, 24.0f };
+        bool new_heights[3] = { false, false, false };
+        loopi(3)
+        {
+            vec to(best->state.o); to.z += heights[i];
+            new_heights[i] = raycubelos(from, to, hitpos);
+        }
+        bool new_clear = new_heights[0] || new_heights[1] || new_heights[2];
+        conoutf("rpgtestlos: '%s' at %.1fu | OLD single-ray: %s | NEW +4:%s +14:%s +24:%s => %s",
+                best->name, bestd,
+                old_clear ? "CLEAR" : "BLOCKED",
+                new_heights[0] ? "clear" : "BLOCKED",
+                new_heights[1] ? "clear" : "BLOCKED",
+                new_heights[2] ? "clear" : "BLOCKED",
+                new_clear ? "CLEAR" : "BLOCKED");
+        conoutf("rpgtestlos: caster at (%.1f, %.1f, %.1f) target at (%.1f, %.1f, %.1f)",
+                caster->state.o.x, caster->state.o.y, caster->state.o.z,
+                best->state.o.x, best->state.o.y, best->state.o.z);
+    }
+    COMMANDN(rpgtestlos, rpgtestlos_cmd, "V");
     // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
     static void rpg_syncinv(clientinfo *cq); // defined with the other inventory ops below
     // TEST-ONLY debug commands (server console only, like rpgspawnmonster).
@@ -1037,7 +1091,7 @@ namespace server
         loopv(clients)
         {
             clientinfo *ci = clients[i];
-            if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
+            if((ci->connectionState == CONNECTION_STATE_CONNECTED || ci->local) && ci->state.ai.type == ai::AI_TYPE_NONE && ci->state.state == CS_ALIVE) { caster = ci; break; }
         }
         if(!caster) { conoutf("rpgforceloot: no live player"); return; }
         vec ahead;
@@ -2842,6 +2896,25 @@ namespace server
     // is touched. Yaw is advisory: it only steers the melee front-cone target
     // pick, never damage/cooldown/mana.
 
+    // Line-of-sight for spells (Oct 21 fix): the old single ray (eye+12 ->
+    // feet+4) hugged the ground and was blocked by any terrain bump, making
+    // 45-range spells unusable at range on bumpy maps. Now test three heights
+    // on the target (ankle+4, torso+14, head+24); LoS holds if ANY ray is
+    // clear. raycubelos only hits world geometry, never entities, so the
+    // target's own body can't block the ray.
+    static bool rpg_hasspelllos(clientinfo *cq, clientinfo *t)
+    {
+        vec from(cq->state.o); from.z += 12.0f; // ~eye height; gamestate has no eyeheight field
+        static const float heights[3] = { 4.0f, 14.0f, 24.0f };
+        loopi(3)
+        {
+            vec to(t->state.o); to.z += heights[i];
+            vec hitpos;
+            if(raycubelos(from, to, hitpos)) return true;
+        }
+        return false;
+    }
+
     static clientinfo *rpg_findtarget(clientinfo *cq, const rpg::abilitydef &ab, int yaw, int advisory)
     {
         // Targeting v1: an explicit client selection (advisory target clientnum)
@@ -2860,13 +2933,7 @@ namespace server
             vec delta(t->state.o);
             delta.sub(cq->state.o);
             if(!rpg_testforcerange_srv && delta.magnitude() > ab.range) return NULL; // TEST-ONLY bypass
-            if(!ab.melee)
-            {
-                vec from(cq->state.o); from.z += 12.0f;
-                vec to(t->state.o); to.z += 4;
-                vec hitpos;
-                if(!raycubelos(from, to, hitpos)) return NULL; // no line of sight
-            }
+            if(!ab.melee && !rpg_hasspelllos(cq, t)) return NULL; // no line of sight
             return t;
         }
         clientinfo *best = NULL;
@@ -2891,13 +2958,7 @@ namespace server
                     if(fwd.dot(dir) < 0.5f) continue; // ~60-degree front cone
                 }
             }
-            else
-            {
-                vec from(cq->state.o); from.z += 12.0f; // ~eye height; gamestate has no eyeheight field
-                vec to(t->state.o); to.z += 4;
-                vec hitpos;
-                if(!raycubelos(from, to, hitpos)) continue; // no line of sight
-            }
+            else if(!rpg_hasspelllos(cq, t)) continue; // no line of sight
             if(!best || dist < bestdist) { best = t; bestdist = dist; }
         }
         return best;
