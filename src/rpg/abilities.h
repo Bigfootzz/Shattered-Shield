@@ -23,7 +23,7 @@ namespace rpg
         const char *projectile; // visual style for projectiles: "arcane", "ice", "arrow", or NULL
         const char *reqclass;   // class gate (Oct 21): NULL = universal (all classes);
                                 // otherwise a space-separated list of allowed archetype
-                                // display names, e.g. "Wizard Sorceress", "Warrior", "Ranger".
+                                // display names, e.g. "Magi", "Warrior", "Ranger".
     };
 
     const int DELIVERY_INSTANT = 0;    // damage applied at cast (existing)

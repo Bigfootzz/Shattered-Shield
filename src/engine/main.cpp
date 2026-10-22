@@ -626,7 +626,7 @@ void setupscreen(int &usedcolorbits, int &useddepthbits, int &usedfsaa)
         }
         if(screen) { SDL_DestroyWindow(screen); screen = NULL; }
         if(glcontext) { SDL_GL_DeleteContext(glcontext); glcontext = NULL; }
-        screen = SDL_CreateWindow("Revelade Revolution", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, scr_w, scr_h, winflags);
+        screen = SDL_CreateWindow("Shattered Shield", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, scr_w, scr_h, winflags);
         if(screen)
         {
             glcontext = SDL_GL_CreateContext(screen);
@@ -1133,9 +1133,9 @@ int main(int argc, char **argv)
     if(!homeDirectory)
     {
         #ifdef WIN32
-        homeDirectory = sethomedir("$APPDATA\\ReveladeRevolution");
+        homeDirectory = sethomedir("$APPDATA\\ShatteredShield");
         #else
-            homeDirectory = sethomedir("$HOME/.revelade-revolution");
+            homeDirectory = sethomedir("$HOME/.shattered-shield");
         #endif
     }
 
@@ -1239,13 +1239,13 @@ int main(int argc, char **argv)
 
     INIT_LOG("video: misc");
 
-    defformatstring(windowtitle)("Revelade Revolution %s", version::getVersionString());
+    defformatstring(windowtitle)("Shattered Shield %s", version::getVersionString());
 
     if(screen) SDL_SetWindowTitle(screen, windowtitle);
     keyrepeat(false);
     SDL_ShowCursor(0);
 
-    conoutf(CON_INIT, "Revelade Revolution %s - %s", version::getVersionString(), version::getVersionDate());
+    conoutf(CON_INIT, "Shattered Shield %s - %s", version::getVersionString(), version::getVersionDate());
 
     INIT_LOG("gl");
     gl_checkextensions();

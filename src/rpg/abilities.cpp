@@ -20,7 +20,7 @@ namespace rpg
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
         { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior" },
-        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Wizard Sorceress" },
+        { "sparkbolt",    "Spark Bolt",   3500,     25,   45.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Magi" },
         // CLEANUP item 8: the basic weapon swing behind right-click
         // auto-attack. damage 7 = flat base: the server melee formula
         // (base + weapon + Strength) yields 7 + weapon + Strength.
@@ -36,8 +36,8 @@ namespace rpg
         // workhorse (cheaper, faster, slightly softer, travel time is the
         // tradeoff); Ice is the heavy nuke (longer cooldown, bigger hit).
         // No slow/freeze v1 — damage + visuals only, keep it testable.
-        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Wizard Sorceress" },
-        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Wizard Sorceress" },
+        { "arcanebolt",   "Arcane Bolt",  3000,     20,   45.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Magi" },
+        { "icebolt",      "Ice Bolt",     6000,     30,   45.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Magi" },
         // ARROW SHOT (Oct 21, Ed's "perfect world"): the ranger's ranged
         // attack. Uses the same DELIVERY_PROJECTILE system as the spells
         // (range + LoS at release, tracks target, fizzles if target dies) —
