@@ -608,8 +608,14 @@ struct gui : g3d_gui
     void text_(const char *text, int x, int y, int color, bool shadow, bool force = false) 
     {
         // v0.1.8: always draw shadow for readability (Ed: font too faint)
-        draw_text(text, x+SHADOW, y+SHADOW, 0x00, 0x00, 0x00, -0xC0);
-        draw_text(text, x, y, color>>16, (color>>8)&0xFF, color&0xFF, force ? -0xFF : 0xFF);
+        // v0.1.10 fix 2: skip the black shadow for DARK text (e.g. dark brown
+        // on parchment) -- black-on-dark creates a muddy double-image. Light
+        // text keeps the shadow for the v0.1.8 readability win.
+        int r = color>>16, g = (color>>8)&0xFF, b = color&0xFF;
+        int lum = (r*299 + g*587 + b*114) / 1000;
+        if(lum > 100)
+            draw_text(text, x+SHADOW, y+SHADOW, 0x00, 0x00, 0x00, -0xC0);
+        draw_text(text, x, y, r, g, b, force ? -0xFF : 0xFF);
     }
 
     void background(int color, int inheritw, int inherith)
