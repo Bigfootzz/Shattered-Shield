@@ -4,6 +4,7 @@
 #include "abilities.h"
 #include "stats.h"
 #include <cstddef> // NULL
+#include <cstring> // strcmp
 
 namespace rpg
 {
