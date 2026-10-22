@@ -2885,7 +2885,9 @@ namespace game
                 if(player1 && player1->state == CS_ALIVE && rpg::mapactive(getclientmap()))
                 {
                     player1->lastaction = lastmillis;
-                    player1->lastattackgun = player1->gunselect;
+                    // Arrow Shot (ability 5): force the bow-draw anim (attack 7,
+                    // slot index 6) instead of the weapon-based slot.
+                    player1->lastattackgun = (ability == 5) ? 6 : player1->gunselect;
                 }
                 break;
             }
