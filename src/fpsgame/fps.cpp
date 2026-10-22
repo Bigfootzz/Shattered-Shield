@@ -2088,24 +2088,38 @@ namespace game
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/bar_xp.png")->id);
         if(xpf > 0) rpg_drawtexuv(bx0, by0, bw*xpf, bh, 0, 0, xpf, 1);
 
-        // action slots (lower recess): 10 slots on keys 1-0; slot 1 = Power
-        // Strike, slot 2 = Spark Bolt, slots 3-0 are empty kit frames.
+        // action slots (lower recess): 10 slots on keys 1-0; v0.1.8: the
+        // character's class abilities fill slots 1..N in classabilities()
+        // order (Warrior: Power Strike; Magi: Spark/Arcane/Ice Bolt; Ranger:
+        // Arrow Shot). Remaining slots are empty kit frames.
         Texture *slottex = rpg_loadtex("packages/ui/rpg/slots/slot.png");
-        Texture *abicons[2] = {
-            rpg_loadtex("packages/ui/rpg/hud/icon_powerstrike.png"),
-            rpg_loadtex("packages/ui/rpg/hud/icon_sparkbolt.png")
+        static const char *abiconfiles[6] = {
+            "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
+            "packages/ui/rpg/hud/icon_sparkbolt.png",   // 1 Spark Bolt
+            NULL,                                       // 2 Basic (right-click)
+            "packages/ui/rpg/hud/icon_arcanebolt.png",  // 3 Arcane Bolt
+            "packages/ui/rpg/hud/icon_icebolt.png",     // 4 Ice Bolt
+            "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
         };
+        char hudarch[32]; hudarch[0] = '\0';
+        if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
+        int hudids[6]; int hudn = rpg::classabilities(hudarch, hudids, 6);
         float slotn = 56*s, sloty = sy + 92*s;
         loopi(10)
         {
             float qx = sx + (160 + i*70)*s;
             glBindTexture(GL_TEXTURE_2D, slottex->id);
             rpg_drawtexuv(qx, sloty, slotn, slotn, 0, 0, 1, 1);
-            if(i < 2)
+            if(i < hudn)
             {
-                glBindTexture(GL_TEXTURE_2D, abicons[i]->id);
-                rpg_drawtexuv(qx + 4*s, sloty + 4*s, slotn - 8*s, slotn - 8*s, 0, 0, 1, 1);
-                int cd = rpg::cooldownleft(i, totalmillis);
+                int aid = hudids[i];
+                if(aid >= 0 && aid < 6 && abiconfiles[aid])
+                {
+                    Texture *abtex = rpg_loadtex(abiconfiles[aid]);
+                    glBindTexture(GL_TEXTURE_2D, abtex->id);
+                    rpg_drawtexuv(qx + 4*s, sloty + 4*s, slotn - 8*s, slotn - 8*s, 0, 0, 1, 1);
+                }
+                int cd = rpg::cooldownleft(aid, totalmillis);
                 if(cd > 0)
                 {
                     rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);

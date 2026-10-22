@@ -41,6 +41,11 @@ namespace rpg
     // cooldown, damage = ability base (0) + weapon + Strength.
     const abilitydef &ability(int id); // id in [0, ABILITY_COUNT)
     bool validability(int id);
+    // v0.1.8: class ability list for the HUD and keybinds. Fills out[] with
+    // ability ids in display order for the archetype ("Warrior", "Magi",
+    // "Ranger"); returns count. Basic Attack (2) is intentionally excluded —
+    // it's the right-click auto-attack, not a hotbar slot.
+    int classabilities(const char *arch, int *out, int max);
 
     // --- mana model (session state only, NOT persisted — see BUILD-STEP-3.md) ---
     // Formulas live in stats.h (milestone step 5): stat_maxmana / stat_manaregen.

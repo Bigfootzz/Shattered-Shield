@@ -62,4 +62,26 @@ namespace rpg
     {
         return stat_maxmana(level);
     }
+
+    // v0.1.8: class ability lists for the HUD hotbar and keybinds.
+    int classabilities(const char *arch, int *out, int max)
+    {
+        if(!out || max <= 0) return 0;
+        int n = 0;
+        if(arch && !strcmp(arch, "Warrior"))
+        {
+            if(n < max) out[n++] = 0; // Power Strike
+        }
+        else if(arch && !strcmp(arch, "Magi"))
+        {
+            if(n < max) out[n++] = 1; // Spark Bolt
+            if(n < max) out[n++] = 3; // Arcane Bolt
+            if(n < max) out[n++] = 4; // Ice Bolt
+        }
+        else if(arch && !strcmp(arch, "Ranger"))
+        {
+            if(n < max) out[n++] = 5; // Arrow Shot
+        }
+        return n;
+    }
 }

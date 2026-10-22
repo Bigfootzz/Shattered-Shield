@@ -73,11 +73,24 @@ namespace game
         rpg_facetarget(); // face the selected target; yaw is client-advisory
         addmsg(N_RPG_CAST, "ri3", ability, int(player1->yaw), rpg::selectedtarget());
     }
-    ICOMMAND(ability1, "", (), rpg_castability(0));
-    ICOMMAND(ability2, "", (), rpg_castability(1));
+    // v0.1.8: hotbar slots 1-5 cast the nth ability in the character's class
+    // list (rpg::classabilities), so each class sees and casts its own kit.
+    // Slot with no ability for the class does nothing.
+    static void rpg_castslot(int slot)
+    {
+        if(!player1 || slot < 1) return;
+        char arch[32]; arch[0] = '\0';
+        rpg::chararchetype(player1->name, arch, sizeof(arch));
+        int ids[6]; int n = rpg::classabilities(arch, ids, 6);
+        if(slot <= n) rpg_castability(ids[slot-1]);
+    }
+    ICOMMAND(ability1, "", (), rpg_castslot(1));
+    ICOMMAND(ability2, "", (), rpg_castslot(2));
     // Projectile spells (Oct 21): wizard/sorceress-only, server-gated.
-    ICOMMAND(ability3, "", (), rpg_castability(3));
-    ICOMMAND(ability4, "", (), rpg_castability(4));
+    ICOMMAND(ability3, "", (), rpg_castslot(3));
+    ICOMMAND(ability4, "", (), rpg_castslot(4));
+    // Arrow Shot (v0.1.8): ranger's ranged attack, ability index 5.
+    ICOMMAND(ability5, "", (), rpg_castslot(5));
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
     // The client only ASKS (item id / slot); the server validates and pushes
