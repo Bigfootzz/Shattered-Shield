@@ -321,7 +321,10 @@ namespace game
 
     static void rpg_doclick(int button)
     {
-        if(!rpg::mapactive(getclientmap())) return;
+        // TEST-ONLY: rpg_testforce bypasses the mapactive gate (same idiom as
+        // rpg_rmbpress) so the harness can drive the real click path on stock
+        // maps; production behavior unchanged (rpg_testforce defaults 0).
+        if((!rpg_testforce && !rpg::mapactive(getclientmap()))) return;
         if(!player1 || player1->state != CS_ALIVE) return;
         int w = 0; int h = 0; rpg_screenwh(w, h);
         float cx = 0; float cy = 0;
@@ -478,7 +481,18 @@ namespace game
         if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE || g3d_gui2dopen()) return;
         rpg_doclick(button); // classic right-click: select + auto-attack
     }
-    ICOMMAND(rpgclick, "Di", (int *down, int *button),
+    // v0.1.9 playtest fix (chat tabs never switched - ROOT CAUSE): the "Di"
+    // params were swapped. The engine appends the D down-state AFTER the
+    // script args (CODE_COMD in command.cpp appends it at args[numargs]) -
+    // the same convention as the stock attack command's (int *altfire,
+    // int *down). So the first proto param receives the script's button
+    // literal and the second receives the down-state. As written, a MOUSE1
+    // press ("rpgclick 0") arrived as down=0,button=1 and fell into
+    // rpg_rmbrelease(1), which no-ops when no RMB press is armed - the left
+    // click did absolutely nothing, so tab clicks (and left-click target
+    // selection) were dead. Right-click worked only by accident. The body is
+    // unchanged; only the proto order now matches the engine.
+    ICOMMAND(rpgclick, "Di", (int *button, int *down),
     {
         if(*button == 1) { if(*down) rpg_rmbpress(); else rpg_rmbrelease(*button); }
         else if(*down) rpg_doclick(*button); // left click unchanged: fires on press
@@ -712,6 +726,34 @@ namespace game
     ICOMMAND(rpgtestshottaken, "", (), intret(rpg_shotarm[0] ? 0 : 1));
     ICOMMAND(rpgtestsnapclick, "i", (int *b), { rpg_snapok = 0; rpg_snapclick_btn = *b; rpg_snapwait_until = totalmillis + 15000; conoutf("rpgtestsnapclick: snap+click(%d)", *b); });
     ICOMMAND(rpgtestcursorset, "ii", (int *x, int *y), rpg::cursorset(float(*x), float(*y)););
+    // TEST-ONLY (harness): prove chat tab clicks switch through the REAL click
+    // path. Reads the recorded rpg_chattabs[i] rect (fps.cpp), parks the free
+    // cursor on its center (virtual -> screen px), and fires rpg_doclick(0)
+    // exactly as the fixed MOUSE1 bind does. Prints rpg_chattab before/after.
+    // Needs rpg_testforce=1, a live player1, and a frame where drawrpgchat has
+    // recorded the rects (chatboxactive() is true under rpg_testforce).
+    bool rpg_chattabrect(int i, float *r); // fps.cpp
+    int rpg_chattabval();                 // fps.cpp
+    ICOMMAND(rpgtesttabclick, "i", (int *i),
+    {
+        float r[4];
+        int before = rpg_chattabval();
+        if(!rpg_chattabrect(*i, r)) { conoutf("rpgtesttabclick: bad tab index %d", *i); return; }
+        if(r[2] <= r[0] || r[3] <= r[1])
+        {
+            conoutf("rpgtesttabclick: tab %d rect not recorded yet (drawrpgchat has not run)", *i);
+            return;
+        }
+        int w = 0; int h = 0; rpg_screenwh(w, h);
+        if(h <= 0) { conoutf("rpgtesttabclick: no window"); return; }
+        float cx = (r[0] + r[2])*0.5f; float cy = (r[1] + r[3])*0.5f; // virtual center
+        float sx = cx*h/1800.0f; float sy = cy*h/1800.0f;             // -> screen px
+        rpg::cursorset(sx, sy);
+        rpg_doclick(0);
+        int after = rpg_chattabval();
+        conoutf("rpgtesttabclick: tab %d center virtual (%.0f,%.0f) -> screen (%.0f,%.0f); rpg_chattab %d -> %d %s",
+            *i, cx, cy, sx, sy, before, after, after == *i ? "OK" : "NO-SWITCH");
+    });
     ICOMMAND(rpgteststats, "", (), { int l = 0; int x = 0; rpg::getclientstats(l, x); conoutf("rpgteststats: level=%d xp=%d", l, x); });
     // Target-frame queries for the HUD (never authoritative)
     ICOMMAND(rpgtargetname, "", (), { fpsent *d = rpg_selmon(); result(d ? d->name : ""); });
@@ -2201,11 +2243,18 @@ namespace game
     // fps.cpp routes them there, skipping the high-frequency debug chatter);
     // the debug chatter stays available in the full console (F11). The engine
     // feed filter (console.cpp) calls this.
+    // v0.1.9: specific server status lines ("Server requests ...", "All
+    // clients loaded the map", pause/resume broadcasts) are also owned lines:
+    // they live in the System tab (rpg_chat_tap routes them) and are hidden
+    // from the main feed. Specific matches only - never blanket CON_INFO.
+    bool rpg_serverline(const char *line); // fps.cpp: shared matcher
     bool rpg_ownline(int type, const char *line)
     {
         if(!rpg::connected()) return false;
         if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
-        return line && !strncmp(line, "rpg: ", 5);
+        if(line && !strncmp(line, "rpg: ", 5)) return true;
+        if((type & CON_INFO) && rpg_serverline(line)) return true;
+        return false;
     }
 
     void parsemessages(int cn, fpsent *d, ucharbuf &p)

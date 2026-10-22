@@ -2178,6 +2178,7 @@ namespace game
         return rpg::connected() && player1 && player1->state == CS_ALIVE;
     }
 
+    bool rpg_serverline(const char *line); // defined below, next to rpg_chattabclick
     void rpg_chat_tap(int type, const char *line)
     {
         if(!rpg::connected()) return;
@@ -2191,6 +2192,9 @@ namespace game
             if(strstr(line, "auto-attack tick")) return;
             tab = RPG_CHAT_SYSTEM;
         }
+        // v0.1.9: specific server status lines go to the System tab, not the
+        // main feed (mirrored in game::rpg_ownline, client.cpp). CON_INFO only.
+        else if((type & CON_INFO) && rpg_serverline(line)) tab = RPG_CHAT_SYSTEM;
         if(tab < 0) return;
         vector<rpg_chatline> &b = rpg_chatbuf[tab];
         rpg_chatline cl; copystring(cl.text, line);
@@ -2236,15 +2240,55 @@ namespace game
         return false;
     }
 
+    // TEST-ONLY accessors (harness): the current tab and the tab hit-rect
+    // recorded by the last drawrpgchat, for the rpgtesttabclick proof.
+    int rpg_chattabval() { return rpg_chattab; }
+    bool rpg_chattabrect(int i, float *r)
+    {
+        if(i < 0 || i >= RPG_CHAT_NTABS || !r) return false;
+        r[0] = rpg_chattabs[i][0]; r[1] = rpg_chattabs[i][1];
+        r[2] = rpg_chattabs[i][2]; r[3] = rpg_chattabs[i][3];
+        return true;
+    }
+
+    // v0.1.9: server status lines that belong in the chat System tab rather
+    // than the main on-screen feed. Specific known messages only - never
+    // blanket CON_INFO (engine spam stays in the feed). Shared with
+    // game::rpg_ownline (client.cpp) so the tap and the feed filter agree.
+    bool rpg_serverline(const char *line)
+    {
+        if(!line) return false;
+        static const char *prefixes[] = {
+            "Server requests map integrity check.",
+            "Server requests our items.",
+            "All clients loaded the map",
+            "Some clients were too slow", // same sendservmsg site as above
+            "game is resumed",  // N_PAUSEGAME broadcast (client.cpp)
+            "game is paused",
+        };
+        loopi(sizeof(prefixes)/sizeof(prefixes[0]))
+        {
+            size_t n = strlen(prefixes[i]);
+            if(!strncmp(line, prefixes[i], n)) return true;
+        }
+        // N_PAUSEGAME with a named actor: "<name> resumed the game" -
+        // colorname() prefixes color codes, so match the stable tail.
+        if(strstr(line, "resumed the game")) return true;
+        if(strstr(line, "paused the game")) return true;
+        return false;
+    }
+
     void drawrpgchat(fpsent *d, int w, int h)
     {
         if(!chatboxactive()) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
-        // v0.1.8: chat text uses the plain "default" face (Ed: the Cinzel GUI
-        // font is unreadable at chat sizes). Scoped to the chat box only - the
-        // HUD strip and quest tracker keep the GUI font.
+        // v0.1.9: chat text uses the "digital" face. data/fonts/default.png
+        // turned out to be a BLACKLETTER font, not the stock readable face -
+        // that was the gothic World/Clan/System tab labels (and chat body).
+        // digital.png is the clean readable sans. Scoped to the chat box only -
+        // the HUD strip keeps the GUI font.
         pushfont();
-        setfont("default");
+        setfont("digital");
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
@@ -2413,6 +2457,9 @@ namespace game
 
     // Quest tracker (quest chain v1): current quest name + objective progress,
     // tucked under the radar in the upper right. Only while a quest is ACTIVE.
+    // v0.1.9: readable digital face (Ed: the Cinzel GUI font is unreadable at
+    // tracker sizes) + a transparent black plate behind the two text lines,
+    // sized from the text extents (same idiom as the chat box plate).
     void drawrpgquest(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -2420,11 +2467,12 @@ namespace game
         if(!rpg::getclientquest(qid, st, kills, need)) return;
         const rpg::questdef *qd = rpg::questdefbyid(qid);
         if(!qd || !qd->name[0]) return;
+        pushfont();
+        setfont("digital");
         float X = w*1800.0f/h;
         int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
         float ty = rs + rs/10 + 36.0f;
         float nmw = float(strlen(qd->name))*0.5f*30.0f;
-        rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
         // quest engine v2: the server sends the objective display text
         // (N_RPG_QTEXT); kill quests fall back to kills/need.
         static string progbuf;
@@ -2433,7 +2481,14 @@ namespace game
         if(rpg::getclientquesttext(qid, objtext, sizeof(objtext))) prog = objtext;
         else { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
         float pgw = float(strlen(prog))*0.5f*26.0f;
+        // plate behind both lines (right-aligned pair ending at rx+rs),
+        // sized from the wider line's extent plus padding
+        float platew = max(nmw, pgw);
+        rpg_solidquad(rx + rs - platew - 12.0f, ty - 10.0f, platew + 24.0f,
+                      38.0f + 26.0f + 20.0f, 0.0f, 0.0f, 0.0f, 0.72f);
+        rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
         rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
+        popfont();
     }
 
     void drawhudicons(fpsent *d, int w, int h)
@@ -2629,20 +2684,24 @@ namespace game
         glEnd();
     }
 
-    // RPG radar minimap: same 16-point fan as drawminimap, but at the
-    // full-map rpg_radarscale() so the whole map fits the ring.
+    // RPG radar minimap: same fan as drawminimap, but at the full-map
+    // rpg_radarscale() so the whole map fits the ring.
+    // v0.1.9b (Ed: minimap must stay inside the ring): the fan is drawn at
+    // 0.78 of the rect (matching the marker clamp) so terrain never escapes
+    // the stone-ring opening; 48 segments for a visibly smooth circle.
+    // Texcoords scale with the vertices so the mapping stays truthful.
     void rpg_drawminimap(fpsent *d, float x, float y, float s)
     {
         vec pos = vec(d->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir;
         vecfromyawpitch(camera1->yaw, 0, 1, 0, dir);
-        float scale = rpg_radarscale();
+        float scale = rpg_radarscale()*0.78f;
         glBegin(GL_TRIANGLE_FAN);
-        loopi(16)
+        loopi(48)
         {
-            vec tc = vec(dir).rotate_around_z(i/16.0f*2*M_PI);
+            vec tc = vec(dir).rotate_around_z(i/48.0f*2*M_PI);
             glTexCoord2f(pos.x + tc.x*scale*minimapscale.x, pos.y + tc.y*scale*minimapscale.y);
-            vec v = vec(0, -1, 0).rotate_around_z(i/16.0f*2*M_PI);
-            glVertex2f(x + 0.5f*s*(1.0f + v.x), y + 0.5f*s*(1.0f + v.y));
+            vec v = vec(0, -1, 0).rotate_around_z(i/48.0f*2*M_PI);
+            glVertex2f(x + 0.5f*s*(1.0f + 0.78f*v.x), y + 0.5f*s*(1.0f + 0.78f*v.y));
         }
         glEnd();
     }
