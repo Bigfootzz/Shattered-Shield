@@ -198,9 +198,12 @@ namespace rpg
     }
 
     // ---------- the content-file parser ----------
+    // findfile("e") only checks homedir + packagedirs, never cwd — so also
+    // try a cwd-relative access() or data/rpg/*.cfg are silently "missing"
+    // and quests/dialogue stay disabled (bug found Oct 22).
     bool contentfileexists(const char *path)
     {
-        return path && findfile(path, "e") != NULL;
+        return path && (findfile(path, "e") != NULL || fileexists(path, "r"));
     }
 
     bool parsecontentfile(const char *path, sslinehandler handler, std::string &err)
