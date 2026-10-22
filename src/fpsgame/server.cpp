@@ -4091,7 +4091,7 @@ namespace server
         // Class gating (Oct 21): abilities with a reqclass are restricted to
         // the listed archetypes. Basic Attack (NULL) stays universal.
         // Matrix: Basic Attack = all; Power Strike = Warrior;
-        // Spark/Arcane/Ice Bolt = Wizard/Sorceress; Arrow Shot = Ranger.
+        // Spark/Arcane/Ice Bolt = Magi; Arrow Shot = Ranger.
         if(ab.reqclass)
         {
             char arch[32]; arch[0] = '\0';

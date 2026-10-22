@@ -1444,7 +1444,9 @@ namespace rpg
         return n;
     }
     // Archetype for one character (class gating). Direct DB read; casts are
-    // infrequent so no session caching.
+    // infrequent so no session caching. Magi class (Ed, Oct 21): characters
+    // created before the merge store "Wizard"/"Sorceress" - normalize to
+    // "Magi" so their spells keep gating correctly.
     bool chararchetype(const char *name, char *out, int max)
     {
         if(out && max > 0) out[0] = '\0';
@@ -1459,6 +1461,7 @@ namespace rpg
             if(sqlite3_step(st) == SQLITE_ROW)
             {
                 copystring(out, (const char *)sqlite3_column_text(st, 0), max);
+                if(!strcmp(out, "Wizard") || !strcmp(out, "Sorceress")) copystring(out, "Magi", max);
                 ok = true;
             }
             sqlite3_finalize(st);

@@ -1927,13 +1927,17 @@ namespace game
     ICOMMAND(rpg_createchar, "ss", (char *name, char *model),
     {
         // model like "ranger_male"; archetype = capitalized prefix before the
-        // last '_' ("wizard_female" -> "Wizard") - generic, no per-archetype list.
+        // last '_' - generic, no per-archetype list. Magi class (Ed, Oct 21):
+        // wizard/sorceress are one class, so both model dirs ("wizard_male",
+        // "sorceress_female") map to the "Magi" archetype (ability gating and
+        // display compare against "Magi").
         char archbuf[32]; archbuf[0] = '\0';
         if(model && model[0])
         {
             copystring(archbuf, model, sizeof(archbuf));
             char *u = strrchr(archbuf, '_');
             if(u) *u = '\0';
+            if(!strcmp(archbuf, "wizard") || !strcmp(archbuf, "sorceress")) copystring(archbuf, "magi", sizeof(archbuf));
             if(archbuf[0] >= 'a' && archbuf[0] <= 'z') archbuf[0] -= 32;
         }
         int ok = rpg::charcreate(name, archbuf, model) ? 1 : 0;
