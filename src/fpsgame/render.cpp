@@ -119,6 +119,11 @@ namespace game
                                                          : clamp<int, int>(ANIM_HOLD1+d->gunselect, ANIM_HOLD1, ANIM_HOLD7)|ANIM_LOOP,
             attack = clamp<int, int>(ANIM_ATTACK1+d->gunselect, ANIM_ATTACK1, ANIM_ATTACK7),
             delay = mdl.vwep ? 300 : weapons[d->gunselect].attackdelay+50;
+        // v0.1.10 fix 4: BowDraw anim (41 frames @ speed 20) runs ~2s; the
+        // 300ms vwep window cut it off before it was visible. Extend the
+        // window for bow shots (lastattackgun==6) so the full draw plays.
+        if(rpg::mapactive(getclientmap()) && d == player1 && d->lastattackgun == 6)
+            delay = 2000;
 
         // --- RPG: Shattered Shield (additive, Oct 22; RPG maps only) ---
         // 1) Ability anim slots: the N_RPG_CD handler forces lastattackgun to
