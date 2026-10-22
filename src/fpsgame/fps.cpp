@@ -1954,18 +1954,11 @@ namespace game
         // switchname() updates the live entity (and persists the var too).
         switchname(cname);
         setsvar("name", cname);
-        const char *srv = getalias("__char_server");
-        if(!srv || !srv[0] || !strcmp(srv, "local"))
-        {
-            // local: host our own world
-            if(!isconnected()) localconnect();
-            changemap("rpg_01");
-        }
-        else
-        {
-            // remote: connect then the server drives the map
-            connectserv(srv, 16960, "");
-        }
+        // Server hardcoded to local (Oct 21, Ed's call): the Server text
+        // field was removed from the select screen. For testing it's always
+        // local; when it's not, hardcode the server address here.
+        if(!isconnected()) localconnect();
+        changemap("rpg_01");
         cleargui();
     });
 

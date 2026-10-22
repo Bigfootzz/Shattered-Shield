@@ -1,0 +1,14 @@
+# Cinzel Font License
+
+The `cinzel.png` / `cinzel.cfg` bitmap font in this directory was generated
+from Cinzel Regular, an OFL-licensed font.
+
+Cinzel is licensed under the SIL Open Font License 1.1:
+https://openfontlicense.org
+
+Source: https://github.com/google/fonts/tree/main/ofl/cinzel
+Copyright: Natanael Gama (https://www.ndiscovered.com/)
+
+The bitmap rendering (PNG atlas + .cfg metrics) was generated 2026-10-21
+for Shattered Shield via a Python/Pillow script. The OFL permits this
+modification and redistribution.
