@@ -331,6 +331,7 @@ namespace rpg
     // Opens its own SQLite handle; safe to call from the main menu.
     int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max);
     bool chararchetype(const char *name, char *out, int max); // archetype for one character ("" if unknown)
+    bool charmodel(const char *name, char *out, int max); // model dir for one character ("" if unknown)
     bool charcreate(const char *name, const char *archetype, const char *model); // false if name taken or 3+ chars
     bool chardelete(const char *name);
     // Champion tracking (server-side session state; the champion is a real

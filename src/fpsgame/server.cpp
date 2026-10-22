@@ -3228,7 +3228,8 @@ namespace server
         }
         const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
         if(!g || t->nodeidx < 0 || t->nodeidx >= g->nnodes) { rpg_closetalk(cq); return; }
-        if(idx < 0 || idx >= t->nsentresp) return; // forged index
+        if(idx < 0) { rpg_closetalk(cq); return; } // v0.1.8: client X button
+        if(idx >= t->nsentresp) return; // forged index
         const rpg::dlgnode &node = g->nodes[t->nodeidx];
         int respidx = t->sentresp[idx];
         if(respidx < 0 || respidx >= node.nresp) return;

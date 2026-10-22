@@ -1469,6 +1469,29 @@ namespace rpg
         sqlite3_close(cdb);
         return ok;
     }
+    // Model dir for one character (used by rpg_enterworld to set the player
+    // model). Direct DB read; infrequent so no session caching.
+    bool charmodel(const char *name, char *out, int max)
+    {
+        if(out && max > 0) out[0] = '\0';
+        if(!name || !name[0]) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "SELECT appearance FROM characters WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+            if(sqlite3_step(st) == SQLITE_ROW)
+            {
+                copystring(out, (const char *)sqlite3_column_text(st, 0), max);
+                ok = true;
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
     bool charcreate(const char *name, const char *archetype, const char *model)
     {
         if(!name || !name[0] || strlen(name) > 32) return false;

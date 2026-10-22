@@ -598,7 +598,8 @@ struct gui : g3d_gui
 
     void text_(const char *text, int x, int y, int color, bool shadow, bool force = false) 
     {
-        if(shadow) draw_text(text, x+SHADOW, y+SHADOW, 0x00, 0x00, 0x00, -0xC0);
+        // v0.1.8: always draw shadow for readability (Ed: font too faint)
+        draw_text(text, x+SHADOW, y+SHADOW, 0x00, 0x00, 0x00, -0xC0);
         draw_text(text, x, y, color>>16, (color>>8)&0xFF, color&0xFF, force ? -0xFF : 0xFF);
     }
 

@@ -1909,6 +1909,13 @@ namespace game
         }
         return 0;
     }
+    // v0.1.8: current character's archetype (for class-aware HUD)
+    ICOMMAND(rpg_myarch, "", (),
+    {
+        char arch[32]; arch[0] = '\0';
+        if(player1 && player1->name[0]) rpg::chararchetype(player1->name, arch, sizeof(arch));
+        result(arch);
+    });
     ICOMMAND(rpg_charlist, "", (),
     {
         char names[3][64]; int levels[3]; char archs[3][32]; char models[3][64];
@@ -1958,6 +1965,19 @@ namespace game
         // switchname() updates the live entity (and persists the var too).
         switchname(cname);
         setsvar("name", cname);
+        // v0.1.8 fix (Ed's playtest): the player model was never set from the
+        // character's appearance — everyone got the default (or stale)
+        // playermodel. Look up the character's model dir and set playermodel
+        // to the matching index before entering.
+        {
+            char modeldir[64]; modeldir[0] = '\0';
+            if(rpg::charmodel(cname, modeldir, sizeof(modeldir)) && modeldir[0])
+            {
+                int idx = rpg_modelidx(modeldir);
+                // rpg_modelidx returns 0 if not found; only set if valid
+                playermodel = idx;
+            }
+        }
         // Server hardcoded to local (Oct 21, Ed's call): the Server text
         // field was removed from the select screen. For testing it's always
         // local; when it's not, hardcode the server address here.
@@ -2160,6 +2180,9 @@ namespace game
     // colored text helpers (the strip helpers are white-only)
     static void rpg_chattext(const char *str, int left, int top, float pxh, float r, float g, float b)
     {
+        // v0.1.8: shadow for readability (Ed: quest tracker unreadable)
+        glColor4f(0, 0, 0, 1.0f);
+        rpg_hudtext(str, left+2, top+2, pxh);
         glColor4f(r, g, b, 1.0f);
         rpg_hudtext(str, left, top, pxh);
         glColor4f(1, 1, 1, 1.0f);

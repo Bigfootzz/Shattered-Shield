@@ -597,6 +597,8 @@ namespace game
         result(*i >= 0 && *i < rpg_dlg_nresp ? rpg_dlg_resps[*i] : ""));
     ICOMMAND(rpgdlgo, "", (), intret(rpg_dlg_open ? 1 : 0)); // 1 while the dialogue panel is open
     ICOMMAND(rpgrespond, "i", (int *i), if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i));
+    // v0.1.8: close dialogue from the X button (sends a -1 response to end)
+    ICOMMAND(rpg_closerdlg, "", (), { if(rpg_dlg_open) { addmsg(N_RPG_RESPOND, "ri", -1); rpg_dlg_open = false; cleargui(1); } });
     // J-key quest log: a derived view (no new table). rpgjournal rebuilds the
     // lines from the client quest caches and opens the panel.
     ICOMMAND(rpgjournal, "", (), { rpg::rpg_buildjournal(); showgui("rpgjournal"); });
