@@ -13,5 +13,5 @@
 
 #define RR_VERSION_VAL              ((RR_VERSION_MAJOR << 16) | (RR_VERSION_MINOR <<  8) | (RR_VERSION_PATCH))
 
-#define RR_VERSION_STRING   "0.1.7-test"
+#define RR_VERSION_STRING   "0.1.8-test"
 #define RR_VERSION_DATE     ""
