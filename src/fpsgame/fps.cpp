@@ -2040,7 +2040,7 @@ namespace game
         // (health/mana globe numerals, cooldowns, hints) - Ed: make sure
         // the globe text is legible.
         pushfont();
-        setfont("digital");
+        // v0.1.17: use default font (explicit setfont was failing)
         int mana = 0, maxmana = 0;
         rpg::getclientmana(mana, maxmana);
         float hpf = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
@@ -2298,7 +2298,7 @@ namespace game
         // digital.png is the clean readable sans. Scoped to the chat box only -
         // the HUD strip keeps the GUI font.
         pushfont();
-        setfont("digital");
+        // v0.1.17: use default font (explicit setfont was failing)
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
@@ -2478,7 +2478,7 @@ namespace game
         const rpg::questdef *qd = rpg::questdefbyid(qid);
         if(!qd || !qd->name[0]) return;
         pushfont();
-        setfont("digital");
+        // v0.1.17: use default font (explicit setfont was failing)
         float X = w*1800.0f/h;
         int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
         float ty = rs + rs/10 + 36.0f;
