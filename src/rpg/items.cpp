@@ -41,13 +41,13 @@ namespace rpg
     static const itemdef FALLBACK_ITEMS[] =
     {
         // id              name            type            slot           icon                                        vwep                         dmg  arm  heal  stack  value mana
-        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/mace",     15,  0,   0,   false, 60,   0 },
+        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     15,  0,   0,   false, 60,   0 },
         { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 },
         { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 },
         { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 },
         { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 },
         { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 },
-        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/bow",      12,  0,   0,   false, 25,   0 },
+        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
