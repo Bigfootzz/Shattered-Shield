@@ -178,7 +178,10 @@ namespace game
             delay = 1000;
         }
         modelattach a[5];
-        static const char * const vweps[] = {"playermodels/vwep/fist", "playermodels/vwep/shotg", "playermodels/vwep/chaing", "playermodels/vwep/rocket", "playermodels/vwep/rifle", "playermodels/vwep/flameg", "playermodels/vwep/cbow", "playermodels/vwep/gl", "playermodels/vwep/healer", "playermodels/vwep/mortar", "playermodels/vwep/pistol", "playermodels/vwep/hand"};
+        // v0.1.16: Revelade FPS vweps removed (Ed). Only RPG vweps remain.
+        // The array is sized for the weapon slots; unused slots fall back to
+        // the first entry (bow). New class vweps will be added here.
+        static const char * const vweps[] = {"playermodels/vwep/bow", "playermodels/vwep/mace", "playermodels/vwep/stick"};
         int ai = 0;
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // An equipped RPG weapon is always shown (even with fists selected, the normal RPG state).
