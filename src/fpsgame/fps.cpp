@@ -2036,6 +2036,11 @@ namespace game
     {
         if(!rpg::mapactive(getclientmap())) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        // v0.1.16: use the readable digital font for all HUD text
+        // (health/mana globe numerals, cooldowns, hints) - Ed: make sure
+        // the globe text is legible.
+        pushfont();
+        setfont("digital");
         int mana = 0, maxmana = 0;
         rpg::getclientmana(mana, maxmana);
         float hpf = d->maxhealth > 0 ? float(d->health) / float(d->maxhealth) : 0;
@@ -2142,6 +2147,7 @@ namespace game
 
         // hint line above the strip, smaller, contained in the gap
         rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
+        popfont();
     }
 
     // RPG chat box v1 (user design, Oct 19): tabbed World | Clan | System panel,
