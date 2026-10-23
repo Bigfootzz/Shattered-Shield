@@ -2090,6 +2090,10 @@ namespace game
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
         rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.20f);
 
+        // v0.1.17: mana numerals on the mana globe (Ed: mana has no text)
+        defformatstring(mps)("%d/%d", mana, maxmana);
+        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.20f);
+
         // experience bar (middle thin recess), native x 153-870, y 28-48
         // User design change Oct 19: center bar is XP (was health); fills toward level-up.
         float bx0 = sx + 153*s, by0 = sy + 28*s, bw = (870-153)*s, bh = (48-28)*s;

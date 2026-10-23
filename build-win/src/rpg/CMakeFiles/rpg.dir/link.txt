@@ -1,0 +1,2 @@
+/home/hatch/workspace/llvm-mingw/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-llvm-ar qc librpg.a CMakeFiles/rpg.dir/rpg.cpp.obj CMakeFiles/rpg.dir/abilities.cpp.obj CMakeFiles/rpg.dir/stats.cpp.obj CMakeFiles/rpg.dir/items.cpp.obj CMakeFiles/rpg.dir/quests.cpp.obj CMakeFiles/rpg.dir/sqlite3.c.obj
+/home/hatch/workspace/llvm-mingw/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-llvm-ranlib librpg.a

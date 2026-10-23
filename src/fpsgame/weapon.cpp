@@ -67,32 +67,32 @@ namespace game
     static const playermodelinfo playermodels[] =
     {
         {
-            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/advent/hudguns",  "playermodels/vwep/mace",   NULL,
+            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
             { NULL, NULL, NULL },
             "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
