@@ -352,7 +352,11 @@ namespace game
                 fade -= clamp(float(lastmillis - (d->lastupdate + max(ragdollmillis - ragdollfade, 0)))/min(ragdollmillis, ragdollfade), 0.0f, 1.0f);
             renderplayer(d, getplayermodelinfo(d), team, fade, mainpass);
         }
-        if(isthirdperson() && !followingplayer() && (player1->state!=CS_DEAD || !hidedead)) renderplayer(player1, getplayermodelinfo(player1), (teamskins || m_teammode) && !player1->isInfected() ? 1 : 0, player1->state==CS_DEAD? 1: 0.3, mainpass);
+        // v0.1.11 model fix 5 (Item 5): RPG uses third-person follow cam everywhere;
+        // the stock 0.3 fade made the player ghostly/transparent, reading as
+        // "untextured" or "missing skin". Render fully opaque on RPG maps.
+        float playerfade = (rpg::mapactive(getclientmap()) || player1->state==CS_DEAD) ? 1 : 0.3;
+        if(isthirdperson() && !followingplayer() && (player1->state!=CS_DEAD || !hidedead)) renderplayer(player1, getplayermodelinfo(player1), (teamskins || m_teammode) && !player1->isInfected() ? 1 : 0, playerfade, mainpass);
         // --- RPG: Shattered Shield quest chain v1 (additive) ---
         // NPC quest givers are static data (src/rpg), not entities: idle each
         // one's model at its map position on RPG maps only. NULL light gets
