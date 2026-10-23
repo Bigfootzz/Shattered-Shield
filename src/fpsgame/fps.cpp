@@ -2028,8 +2028,15 @@ namespace game
     }
     static void rpg_hudtextc(const char *str, float cx, float cy, float pxh)
     {
-        float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
-        rpg_hudtext(str, int(cx - wpx/2), int(cy - pxh/2), pxh);
+        // v0.1.12 fix 12: center using the measured text width at draw scale,
+        // not the 0.5*FONTH estimate (the HUD font's actual metrics differ,
+        // which left the globe numerals off-center).
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        int w = text_width(str);
+        draw_text(str, int(cx - w/2), int(cy - pxh/2));
+        settextscale(save);
     }
 
     void drawrpghud(fpsent *d, int w, int h)
@@ -2084,6 +2091,9 @@ namespace game
         // health numerals on top of everything (20% of orb diameter fits "100/100")
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
         rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.20f);
+        // v0.1.12 fix 12: mana globe was missing its text entirely
+        defformatstring(mps)("%d/%d", mana, maxmana);
+        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.20f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
         // User design change Oct 19: center bar is XP (was health); fills toward level-up.
@@ -2206,16 +2216,23 @@ namespace game
     static void rpg_chattext(const char *str, int left, int top, float pxh, float r, float g, float b)
     {
         // v0.1.8: shadow for readability (Ed: quest tracker unreadable)
+        // v0.1.12 fix 13: 1px shadow (was 2px -- at 26px text the 2px offset
+        // read as fuzzy/double). Ed: chat/tabs font not crisp.
         glColor4f(0, 0, 0, 1.0f);
-        rpg_hudtext(str, left+2, top+2, pxh);
+        rpg_hudtext(str, left+1, top+1, pxh);
         glColor4f(r, g, b, 1.0f);
         rpg_hudtext(str, left, top, pxh);
         glColor4f(1, 1, 1, 1.0f);
     }
     static void rpg_chattextc(const char *str, float cx, float cy, float pxh, float r, float g, float b)
     {
-        float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
-        rpg_chattext(str, int(cx - wpx/2), int(cy - pxh/2), pxh, r, g, b);
+        // v0.1.12 fix 13: center on measured width, not the 0.5-ratio estimate
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        int w = text_width(str);
+        settextscale(save);
+        rpg_chattext(str, int(cx - w/2), int(cy - pxh/2), pxh, r, g, b);
     }
     // conservative fit: chop lines that would overflow the message area
     static void rpg_chatfit(string &dst, const char *src, float maxw, float pxh)

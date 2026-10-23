@@ -145,7 +145,10 @@ namespace game
                 attack = clamp<int, int>(ANIM_ATTACK1+d->lastattackgun, ANIM_ATTACK1, ANIM_ATTACK7);
         }
         int showpain = d->lastpain;
-        if(rpgattackwin && attack >= ANIM_ATTACK1 && attack <= ANIM_ATTACK7 &&
+        // v0.1.12 fix 10 (Ed): on RPG maps, never play the pain/flinch anim --
+        // the character just takes the hit and keeps fighting.
+        if(rpg::mapactive(getclientmap())) showpain = 0;
+        else if(rpgattackwin && attack >= ANIM_ATTACK1 && attack <= ANIM_ATTACK7 &&
            showpain >= lastaction && lastmillis-showpain < 300)
             showpain = 0;
 

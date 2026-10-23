@@ -2255,8 +2255,16 @@ namespace game
         // system lines leak to the top-left feed. The matchers below are
         // RPG-specific, so no gate is needed.
         if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
-        if(line && !strncmp(line, "rpg: ", 5)) return true;
-        if((type & CON_INFO) && rpg_serverline(line)) return true;
+        // v0.1.12 fix 6: strip Cube 2 color codes (\fX) before prefix matching --
+        // conoutf lines like "\f2game mode is ..." or colored "rpg: " lines
+        // start with \f, not the text, so a raw strncmp misses them.
+        const char *p = line;
+        if(p) { while(p[0] == '\f' && p[1]) p += 2; }
+        if(p && !strncmp(p, "rpg: ", 5)) return true;
+        if((type & CON_INFO) && rpg_serverline(p)) return true;
+        // v0.1.12 fix 6: the "game mode is ..." banner (CON_GAMEINFO, \f2-prefixed)
+        // also leaks to the top-left feed. It belongs in the System tab.
+        if((type & CON_GAMEINFO) && p && strstr(p, "game mode is ")) return true;
         return false;
     }
 
