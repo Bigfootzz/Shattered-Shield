@@ -4233,7 +4233,11 @@ namespace server
             pr.ability = ability;
             pr.damage = castdmg;
             pr.level = level;
-            pr.pos = cq->state.o; pr.pos.z += 14; // ~chest height at release
+            // v0.1.11 fix 12: spawn the bolt at the staff tip, not the chest,
+            // so it looks like the Magi casts from the staff. Staff is held
+            // forward/up when casting: push out along the facing direction.
+            pr.pos = cq->state.o; pr.pos.z += 18; // ~staff/hand height
+            vec staffdir(push); staffdir.mul(10); pr.pos.add(staffdir);
             pr.born = totalmillis;
             rpg_projectiles.add(pr);
             sendf(-1, 1, "ri8", N_RPG_PROJ, pr.id, pr.castercn, pr.targetcn, ability,
