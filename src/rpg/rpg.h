@@ -165,23 +165,47 @@ namespace rpg
     int questmobmarkers(float *out, int maxout); // 0 today: no quest system yet
     int gathermarkers(float *out, int maxout);    // 0 today: no gathering yet
 
-    // --- quest chain v1: NPC quest givers (static data, shared client+server) ---
-    // NPCs are NOT entities: one static table both sides read. The client
-    // renders each NPC's model idling at its map position, the pick code
-    // tests the same cylinders, the radar reads the same positions, and the
-    // server range-checks talk requests against the same coordinates.
+    // --- quest chain v1: NPC quest givers (data-driven since editor Phase 1) ---
+    // NPCs are NOT entities: one per-map data file (data/rpg/npcs_<map>.cfg)
+    // is loaded at map change on both client and server. The client renders
+    // each NPC's model idling at its map position, the pick code tests the
+    // same cylinders, the radar reads the same positions, and the server
+    // range-checks talk requests against the same coordinates. A hardcoded
+    // fallback table (in rpg.cpp) is used ONLY when the data file is missing.
     struct npcdef
     {
-        const char *id;      // stable id ("maren") used by quest data
-        const char *name;    // display name ("Elder Maren")
-        const char *model;   // model path ("playermodels/warrior_female")
-        float x, y, z;       // feet position on the map
-        float yaw;           // facing (degrees, engine yaw convention)
-        const char *dialogue;// root dialogue graph name ("maren_main")
+        char id[64];       // stable id ("maren") used by quest data
+        char name[96];     // display name ("Elder Maren")
+        char model[128];   // model path ("npcs/female_peasant_static")
+        float x, y, z;     // feet position on the map
+        float yaw;         // facing (degrees, engine yaw convention)
+        char dialogue[64]; // root dialogue graph name ("maren_main"); "vendor_main" = vendor marker
+        char type[32];     // "questgiver", "vendor", "ambient" (editor Phase 1; behaviour in Phase 2/3)
     };
     int npccount();
     const npcdef *npcat(int i); // NULL when out of range
     int npcindexbyid(const char *id); // -1 when unknown
+    // Editor Phase 1: load NPCs for a map from data/rpg/npcs_<map>.cfg.
+    // Falls back to the hardcoded table when the file is missing or invalid.
+    // Returns true when the data file was loaded, false on fallback.
+    // Called by the game layer at map change (client changemapserv, server changemap).
+    bool loadnpcs(const char *mapname);
+    // The map name the NPC table was last loaded for ("" when never loaded).
+    const char *npcs_loaded_map();
+    // True when the current NPC table came from a data file (not fallback).
+    bool npcs_from_file();
+    // Editor Phase 1: write the current NPC table back to data/rpg/npcs_<map>.cfg
+    // in ss_* syntax. Returns false on write failure. Does not touch the fallback.
+    bool savenpcs(const char *mapname);
+    // Editor Phase 1 mutations (in-memory only until savenpcs). Returns the new
+    // index on add, or -1 when the table is full / id already exists.
+    int npc_add(const char *id, const char *name, const char *model, float x, float y, float z, float yaw, const char *dialogue, const char *type);
+    // Move/rotate an NPC in memory. Returns false when idx is out of range.
+    bool npc_move(int idx, float x, float y, float z, float yaw);
+    // Remove an NPC in memory (shifts later entries down). Returns false when idx is out of range.
+    bool npc_remove(int idx);
+    // Maximum NPCs per map (static storage, so npcat pointers stay stable).
+    enum { MAXNPCS = 64 };
 
     // --- ambient monster spawns (world map): static spawn-point table ---
     // Each row is one spawn point. Adding monster types later is a DATA

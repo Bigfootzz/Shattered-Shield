@@ -1069,51 +1069,14 @@ namespace rpg
     int questmobmarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
     int gathermarkers(float *out, int maxout) { (void)out; (void)maxout; return 0; }
 
-    // --- quest chain v1 ---
+    // --- quest chain v1: NPCs (editor Phase 1, Oct 24, 2026) ---
+    // NPC data moved to data/rpg/npcs_<map>.cfg, parsed by src/rpg/npcs.cpp.
+    // npccount()/npcat()/npcindexbyid() are defined there; the hardcoded
+    // table lives in npcs.cpp as a fallback ONLY when the data file is
+    // missing. See npcs.cpp for the parser, saver, and editor mutations.
     // NPC models are the STATIC peasant variants (npcs/*_peasant_static):
     // same mesh/skins as the animated peasants, but their iqm.cfg registers
-    // no anim, so the engine renders the bind pose standing still. The
-    // animated peasants' retargeted ranger idle left NPC heads backwards
-    // in-game; NPCs only stand and talk, so static is the approved fallback.
-    // Elder Maren stands in the spawn building on rpg_01, a few paces from
-    // the player start (2220, 1972), facing it. v1: one static NPC; the
-    // table is the single place a second quest giver slots in later.
-    static const npcdef NPCS[] =
-    {
-        { "maren", "Elder Maren", "npcs/female_peasant_static", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main" },
-        // CLEANUP item 6: Tomas, the errand's delivery target. A few paces
-        // east of Maren in the spawn clearing (10u - the Oct 21 fix for the
-        // two NPCs spawning on top of each other, which also made the F-talk
-        // nearest-NPC resolver grab the wrong one). The errand is still a
-        // conversation, not a trek.
-        // v0.1.8: moved from (2238,1980) — 10u east put him outside the spawn
-        // building (or in its wall); Ed couldn't find him. Now 8u west of
-        // Maren, inside the building near the player spawn.
-        { "tomas", "Tomas", "npcs/male_peasant_static", 2220.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main" },
-        // QUEST BUILD (Oct 21): Corvin, the relay quest's recipient. The
-        // design's "Tomas Reed" collided with the existing Tomas, so the
-        // relay recipient is a distinct NPC: a hunter camped by the east
-        // homesteads. warrior_male per the approved recommendation.
-        { "corvin", "Corvin", "npcs/male_peasant_static", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main" },
-        // v0.1.23 VENDOR: Glimmer, a friendly imp merchant (Quaternius
-        // Bestiary, BaseColor_2 — distinct from hostile BaseColor_1 imps).
-        // NON-HUMAN per Ed's requirement (gnome-like folklore creature).
-        // Location: village area east of spawn, near the east homesteads
-        // but NOT in the starting building and NOT on Corvin (~200u away).
-        // Dialogue "vendor_main" is a marker: talking to Glimmer opens the
-        // vendor GUI instead of a quest dialogue graph (see rpg_talk).
-        { "glimmer", "Glimmer", "npcs/imp_vendor", 2980.0f, 2450.0f, 2116.0f, 180.0f, "vendor_main" },
-    };
-    static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
-    int npcindexbyid(const char *id)
-    {
-        if(!id || !id[0]) return -1;
-        loopi(NPC_COUNT) if(!strcmp(NPCS[i].id, id)) return i;
-        return -1;
-    }
-
-    int npccount() { return NPC_COUNT; }
-    const npcdef *npcat(int i) { return (i >= 0 && i < NPC_COUNT) ? &NPCS[i] : NULL; }
+    // no anim, so the engine renders the bind pose standing still.
 
     // --- ambient monster spawns: static table for rpg_01 ---
     // 12 points around the village outskirts — never on the player spawn at

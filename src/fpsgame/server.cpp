@@ -2437,6 +2437,11 @@ namespace server
         interm = 0;
         nextexceeded = 0;
         copystring(smapname, s);
+        // --- RPG: editor Phase 1 (Oct 24, 2026) ---
+        // Load per-map NPCs so server talk range checks use the same
+        // coordinates as the client's data file. Falls back to the
+        // hardcoded table when npcs_<map>.cfg is missing.
+        if(s && s[0]) rpg::loadnpcs(s);
         // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
         // A listen-server `map` command changes smapname after clients connected,
         // so the connect-time spawn ran before the map was an RPG map; apply the
