@@ -2154,9 +2154,11 @@ namespace game
         // shows info, click still activates. Tooltip appears above the slot.
         // Uses g3d_cursorpos (0-1 range) converted to virtual coords (X, 1800).
         {
-            extern void g3d_cursorpos(float &x, float &y);
+            // NB: g3d_cursorpos lives in global namespace (3dgui.cpp, declared
+            // in iengine.h). A local extern here would resolve to game:: and
+            // fail to link, so qualify explicitly.
             float cx = 0.5f, cy = 0.5f;
-            g3d_cursorpos(cx, cy);
+            ::g3d_cursorpos(cx, cy);
             // Only show tooltip when GUI cursor is visible (not in mouselook)
             // g3d_gui2dopen() is true when a GUI is open; for HUD hover we
             // check if cursor is over the action bar area regardless, but
