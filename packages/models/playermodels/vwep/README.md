@@ -10,6 +10,7 @@ vwep/
     bow/        # Wooden Bow
   warrior/      # Warrior class weapons
     mace/       # Imp Mace
+    sword/      # Warrior Sword (knight-set sword, test 2026-10-24; warrior model default, Imp Mace still via imp_mace item)
   magi/         # Magi class weapons (empty - for future staff/wands)
   stick/        # Generic starter weapon (Puglin Stick)
 ```
