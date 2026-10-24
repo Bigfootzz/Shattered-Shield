@@ -439,19 +439,28 @@ namespace ai
                     else d->move = 1;
                     break;
                 case M_SLEEP:
-                default: // idle at home: slow wander within roam radius (v0.1.17, Ed)
+                default: // idle at home: slow wander within roam radius (v0.1.18, Ed: slower)
                     if(ai->enemy) { ai->transition(d, M_HOME, 1, 100, 100); break; }
                     if(RPGDH(d->o) > rpg::MOB_ROAM_RADIUS) { ai->transition(d, M_SEARCH, 1, 100, 100); break; }
                     if(lastmillis >= ai->rpgwandertimer)
                     {
                         ai->rpgwanderyaw = rnd(360);
                         ai->rpgwandertimer = lastmillis + 6000 + rnd(4000);
+                        // start a fresh move phase with each new direction
+                        ai->rpgmoving = true;
+                        ai->rpgmovetimer = lastmillis + 2000;
+                    }
+                    // v0.1.18: intermittent move/pause cycle - 2s walk, 3s stand (Ed: still too fast)
+                    if(lastmillis >= ai->rpgmovetimer)
+                    {
+                        ai->rpgmoving = !ai->rpgmoving;
+                        ai->rpgmovetimer = lastmillis + (ai->rpgmoving ? 2000 : 3000);
                     }
                     float yawdiff = ai->rpgwanderyaw - d->yaw;
                     while(yawdiff > 180) yawdiff -= 360;
                     while(yawdiff < -180) yawdiff += 360;
                     d->yaw += yawdiff * min(1.0f, curtime*2.0f/1000.0f);
-                    d->move = 1;
+                    d->move = ai->rpgmoving ? 1 : 0;
                     break;
             }
 

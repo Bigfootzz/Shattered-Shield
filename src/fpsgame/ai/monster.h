@@ -30,6 +30,8 @@ namespace ai
             fpsent *rpgfoe;                     // player who last damaged this mob (retaliation)
             int rpgwandertimer = 0;              // millis when wander direction changes
             float rpgwanderyaw = 0;              // current wander direction
+            int rpgmovetimer = 0;                // millis when move/pause phase flips (v0.1.18)
+            bool rpgmoving = false;              // currently in move phase (v0.1.18)
 
             MonsterAiInfo() :   monsterstate(M_SEARCH), tag(-1), enemy(NULL), targetyaw(0), trigger(0), attacktarget(0, 0, 0),
                                 anger(0), lastrouteplan(0), stacked(NULL), stackpos(0, 0, 0), counts(true), lastshot(0),
