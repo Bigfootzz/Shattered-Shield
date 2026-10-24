@@ -2149,6 +2149,97 @@ namespace game
             rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 26*s), 26*s);
         }
 
+        // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
+        // what the ability does. Same pattern as character page tooltip: hover
+        // shows info, click still activates. Tooltip appears above the slot.
+        // Uses g3d_cursorpos (0-1 range) converted to virtual coords (X, 1800).
+        {
+            extern void g3d_cursorpos(float &x, float &y);
+            float cx = 0.5f, cy = 0.5f;
+            g3d_cursorpos(cx, cy);
+            // Only show tooltip when GUI cursor is visible (not in mouselook)
+            // g3d_gui2dopen() is true when a GUI is open; for HUD hover we
+            // check if cursor is over the action bar area regardless, but
+            // only when the player is not in mouselook mode (cursor visible)
+            // The cursor is hidden during mouselook, so cx/cy stay at last
+            // position; we gate on the action bar being hovered AND the
+            // game not being in pure mouselook (checked via g3d cursor state)
+            // For now, show tooltip whenever cursor is over a slot - the
+            // cursor is only visible when GUI is open or in RPG mode
+            float vx = cx * X;
+            float vy = cy * 1800.0f;
+            int hoverSlot = -1;
+            int hoverAid = -1;
+            loopi(10)
+            {
+                if(i >= hudn) break;
+                float qx = sx + (160 + i*70)*s;
+                if(vx >= qx && vx < qx + slotn && vy >= sloty && vy < sloty + slotn)
+                {
+                    hoverSlot = i;
+                    hoverAid = hudids[i];
+                    break;
+                }
+            }
+            if(hoverSlot >= 0 && hoverAid >= 0 && hoverAid < 8 && rpg::validability(hoverAid))
+            {
+                const rpg::abilitydef &ab = rpg::ability(hoverAid);
+                const rpg::dotdef *dot = rpg::abilitydot(hoverAid);
+                // Tooltip dimensions: width based on longest line, height by line count
+                float tpxh = 28*s;  // tooltip text height
+                float tpad = 12*s;  // padding
+                // Build tooltip lines
+                // Line 1: Name
+                // Line 2: Damage / Range / Type
+                // Line 3: Mana / Cooldown
+                // Line 4: DoT if applicable
+                // Line 5: Delivery type
+                int nlines = 3;
+                if(dot) nlines++;
+                // Delivery line always shown for clarity (Instant vs Projectile)
+                nlines++;
+                float tw = 420*s;  // tooltip width
+                float th = nlines * (tpxh + 4*s) + tpad*2;
+                // Position: centered on slot, above it, clamped to screen
+                float slotCx = sx + (160 + hoverSlot*70)*s + slotn/2;
+                float tx = slotCx - tw/2;
+                if(tx < 10) tx = 10;
+                if(tx + tw > X - 10) tx = X - 10 - tw;
+                float ty = sloty - th - 12*s;
+                if(ty < 10) ty = sloty + slotn + 12*s;  // below if no room above
+                // Background: dark with border
+                rpg_fillrect(tx, ty, tw, th, 0.05f, 0.05f, 0.08f, 0.92f);
+                // Border (top edge highlight)
+                rpg_fillrect(tx, ty, tw, 2*s, 0.4f, 0.4f, 0.5f, 1.0f);
+                rpg_fillrect(tx, ty + th - 2*s, tw, 2*s, 0.4f, 0.4f, 0.5f, 1.0f);
+                rpg_fillrect(tx, ty, 2*s, th, 0.4f, 0.4f, 0.5f, 1.0f);
+                rpg_fillrect(tx + tw - 2*s, ty, 2*s, th, 0.4f, 0.4f, 0.5f, 1.0f);
+                // Text lines
+                float ly = ty + tpad;
+                // Name (larger, white)
+                rpg_hudtext(ab.name, int(tx + tpad), int(ly), tpxh*1.15f);
+                ly += tpxh*1.15f + 4*s;
+                // Damage / Range / Type
+                defformatstring(line2)("%d damage  |  Range %.0f  |  %s", ab.damage, ab.range, ab.melee ? "Melee" : "Ranged");
+                rpg_hudtext(line2, int(tx + tpad), int(ly), tpxh);
+                ly += tpxh + 4*s;
+                // Mana / Cooldown
+                defformatstring(line3)("Mana: %d  |  Cooldown: %.1f sec", ab.manacost, ab.cooldownms/1000.0f);
+                rpg_hudtext(line3, int(tx + tpad), int(ly), tpxh);
+                ly += tpxh + 4*s;
+                // DoT if applicable
+                if(dot)
+                {
+                    defformatstring(line4)("%s: %d damage per sec for %d sec", dot->resist, dot->tickdmg, dot->durationms/1000);
+                    rpg_hudtext(line4, int(tx + tpad), int(ly), tpxh);
+                    ly += tpxh + 4*s;
+                }
+                // Delivery type
+                defformatstring(line5)("%s  |  %s", ab.delivery == rpg::DELIVERY_PROJECTILE ? "Projectile" : "Instant", ab.damagetype);
+                rpg_hudtext(line5, int(tx + tpad), int(ly), tpxh);
+            }
+        }
+
         // hint line above the strip, smaller, contained in the gap
         rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
         popfont();
