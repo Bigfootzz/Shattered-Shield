@@ -3309,7 +3309,7 @@ namespace server
             if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
         }
         const rpg::npcdef *nd = rpg::npcat(npcidx);
-        if(!nd || !nd->dialogue || !nd->dialogue[0]) return;
+        if(!nd || !nd->dialogue[0]) return;
         if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
@@ -3331,7 +3331,7 @@ namespace server
             // verified against the NPC table at content validation. Log the
             // miss so the cause is identifiable from the console/System tab.
             conoutf("rpg: talk: no dialogue graph '%s' for npc '%s' (quest content not loaded?)",
-                    nd->dialogue ? nd->dialogue : "?", nd->id ? nd->id : "?");
+                    nd->dialogue[0] ? nd->dialogue : "?", nd->id[0] ? nd->id : "?");
             rpg_qmsg(cq, "They have nothing to say.");
             return;
         }
