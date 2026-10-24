@@ -1,48 +1,53 @@
-char: peasant_male
-usescale: 35.655057
-blend height: 1.8230
+char: ranger_male
+usescale: 35.257600
+blend height: 1.8436
 meshes/textures:
   Eyebrows -> T_Hair_1_BaseColor.png
   Eyes -> T_Eye_Brown.png
-  Hair_Buzzed -> T_Hair_1_BaseColor.png
-  Male_Peasant_Arms -> T_Regular_Male_Dark_BaseColor.png
-  Male_Peasant_Arms__Peasant -> T_Peasant_BaseColor.png
-  Male_Peasant_Body -> T_Peasant_BaseColor.png
-  Male_Peasant_Feet -> T_Peasant_BaseColor.png
-  Male_Peasant_Legs -> T_Peasant_BaseColor.png
+  Hair_SimpleParted -> T_Hair_1_BaseColor.png
+  Male_Ranger_Acc_Pauldron -> T_Ranger_BaseColor.png
+  Male_Ranger_Arms -> T_Regular_Male_Dark_BaseColor.png
+  Male_Ranger_Arms_Bracer -> T_Ranger_BaseColor.png
+  Male_Ranger_Arms__Ranger001 -> T_Ranger_BaseColor.png
+  Male_Ranger_Body -> T_Ranger_BaseColor.png
+  Male_Ranger_Body_Belt_1 -> T_Ranger_BaseColor.png
+  Male_Ranger_Body_Belt_2 -> T_Ranger_BaseColor.png
+  Male_Ranger_Feet_Boots -> T_Ranger_BaseColor.png
+  Male_Ranger_Head_Hood -> T_Ranger_BaseColor.png
+  Male_Ranger_Legs -> T_Ranger_BaseColor.png
   SuperHero_Male -> T_Superhero_Male_Dark.png
 slot -> file:
-  idle -> peasant_male_Idle_No_Loop.iqm
-  forward -> peasant_male_Jog_Fwd_Loop.iqm
-  backward -> peasant_male_Walk_Loop.iqm
-  left -> peasant_male_Walk_Loop.iqm
-  right -> peasant_male_Walk_Loop.iqm
-  edit -> peasant_male_Idle_Lantern_Loop.iqm
-  jump -> peasant_male_NinjaJump_Start.iqm
-  lag -> peasant_male_Walk_Loop.iqm
-  dying -> peasant_male_Hit_Knockback.iqm
-  dead -> peasant_male_LayToIdle.iqm
-  lose -> peasant_male_Idle_Shield_Break.iqm
-  pain -> peasant_male_Hit_Knockback.iqm
-  pain2 -> peasant_male_Hit_Knockback.iqm
-  sink -> peasant_male_Slide_Exit.iqm
-  swim -> peasant_male_Slide_Loop.iqm
-  taunt -> peasant_male_Idle_TalkingPhone_Loop.iqm
-  win -> peasant_male_Yes.iqm
-  hold 1 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 2 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 3 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 4 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 5 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 6 -> peasant_male_Idle_No_Loop.iqm @0
-  hold 7 -> peasant_male_Idle_No_Loop.iqm @0
-  attack1 -> peasant_male_Sword_Regular_A.iqm
-  attack2 -> peasant_male_Sword_Regular_B.iqm
-  attack3 -> peasant_male_Sword_Regular_C.iqm
-  attack4 -> peasant_male_Sword_Regular_Combo.iqm
-  attack5 -> peasant_male_Sword_Heavy_Combo.iqm
-  attack6 -> peasant_male_Sword_Dash.iqm
-  attack7 -> peasant_male_Sword_Regular_Combo.iqm
+  idle -> ranger_male_Idle_No_Loop.iqm
+  forward -> ranger_male_Jog_Fwd_Loop.iqm
+  backward -> ranger_male_Walk_Loop.iqm
+  left -> ranger_male_Walk_Loop.iqm
+  right -> ranger_male_Walk_Loop.iqm
+  edit -> ranger_male_Idle_Lantern_Loop.iqm
+  jump -> ranger_male_NinjaJump_Start.iqm
+  lag -> ranger_male_Walk_Loop.iqm
+  dying -> ranger_male_Hit_Knockback.iqm
+  dead -> ranger_male_LayToIdle.iqm
+  lose -> ranger_male_Idle_Shield_Break.iqm
+  pain -> ranger_male_Hit_Knockback.iqm
+  pain2 -> ranger_male_Hit_Knockback.iqm
+  sink -> ranger_male_Slide_Exit.iqm
+  swim -> ranger_male_Slide_Loop.iqm
+  taunt -> ranger_male_Idle_TalkingPhone_Loop.iqm
+  win -> ranger_male_Yes.iqm
+  hold 1 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 2 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 3 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 4 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 5 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 6 -> ranger_male_Idle_No_Loop.iqm @0
+  hold 7 -> ranger_male_Idle_No_Loop.iqm @0
+  attack1 -> ranger_male_Sword_Regular_A.iqm
+  attack2 -> ranger_male_Sword_Regular_B.iqm
+  attack3 -> ranger_male_Sword_Regular_C.iqm
+  attack4 -> ranger_male_Sword_Regular_Combo.iqm
+  attack5 -> ranger_male_Sword_Heavy_Combo.iqm
+  attack6 -> ranger_male_Sword_Dash.iqm
+  attack7 -> ranger_male_Sword_Regular_Combo.iqm
 
 SKIN-FIT FIX (2026-10-18):
 - Removed redundant outfit Body/Arms/Legs meshes (duplicated base body, caused
