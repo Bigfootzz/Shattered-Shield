@@ -28,6 +28,10 @@ namespace rpg
     };
 
     // Equipment slots (SLOT_NONE = not equippable, e.g. consumables)
+    // Neck/rings are stats-only: no 3D model or vwep is shown for them on
+    // the character (Ed, Oct 24) — they exist to add stats and balance to
+    // the character sheet. Ring slots are distinct: a ring1 item equips
+    // only to ring1, a ring2 item only to ring2 (no first-free-slot logic).
     enum
     {
         SLOT_MAINHAND = 0,
@@ -35,6 +39,9 @@ namespace rpg
         SLOT_TORSO,
         SLOT_LEGS,
         SLOT_FEET,
+        SLOT_NECK,
+        SLOT_RING1,
+        SLOT_RING2,
         SLOT_COUNT,
         SLOT_NONE = -1
     };
@@ -60,7 +67,7 @@ namespace rpg
     const itemdef &item(int id);        // id in [0, itemcount())
     int finditem(const char *id);       // -1 when unknown
     const char *itemname(int id);       // display name, "" when invalid
-    const char *slotname(int slot);     // "mainhand".."feet", "" when invalid
+    const char *slotname(int slot);     // "mainhand".."ring2", "" when invalid
     int slotid(const char *name);       // SLOT_* or SLOT_NONE
 
     // --- content data layer (crafting build step 0) ---

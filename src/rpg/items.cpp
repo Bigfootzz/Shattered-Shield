@@ -47,6 +47,9 @@ namespace rpg
         { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 },
         { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 },
         { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 },
+        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 },
+        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 },
+        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 },
         { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 },
         { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 },
     };
@@ -96,7 +99,7 @@ namespace rpg
         return item(id).name;
     }
 
-    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet" };
+    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2" };
 
     const char *slotname(int slot)
     {
@@ -317,7 +320,7 @@ namespace rpg
             if(type == ITEM_WEAPON && slot != SLOT_MAINHAND)
             { err = "weapon '" + b.id + "' must use slot mainhand"; return false; }
             if(type == ITEM_ARMOR && (slot == SLOT_NONE || slot == SLOT_MAINHAND))
-            { err = "armor '" + b.id + "' must name a body slot (head/torso/legs/feet)"; return false; }
+            { err = "armor '" + b.id + "' must name a body slot (head/torso/legs/feet/neck/ring1/ring2)"; return false; }
             if(type != ITEM_WEAPON && type != ITEM_ARMOR && slot != SLOT_NONE)
             { err = "item '" + b.id + "' is not gear and cannot name a slot"; return false; }
             if(b.damage < 0 || b.armor < 0 || b.heal < 0 || b.mana < 0 || b.value < 0)
