@@ -2831,6 +2831,8 @@ void gl_drawhud(int w, int h)
             int roffset = 0;
             if(showfps)
             {
+                pushfont();
+                setfont("digit_white"); // v0.1.22: FPS uses clean digital font
                 static int lastfps = 0, prevfps[3] = { 0, 0, 0 }, curfps[3] = { 0, 0, 0 };
                 if(totalmillis - lastfps >= statrate)
                 {
@@ -2843,6 +2845,7 @@ void gl_drawhud(int w, int h)
                 if(showfpsrange) draw_textf("fps %d+%d-%d", conw-7*FONTH, conh-FONTH*6/2 - (1340*h/1800), curfps[0], curfps[1], curfps[2]);
                 else draw_textf("fps %d", conw-5*FONTH, conh-FONTH*6/2 - (1340*h/1800), curfps[0]);
                 roffset += FONTH;
+                popfont();
             }
 
             if(wallclock)

@@ -159,7 +159,14 @@ ICOMMAND(clearconsole, "", (), { while(conlines.length()) delete[] conlines.pop(
 // them, and the chat box System tab collects them via rpg_chat_tap.
 static bool rpg_hidefromfeed(int type, const char *line)
 {
-    return !fullconsole && game::rpg_ownline(type, line);
+    if(fullconsole) return false;
+    if(game::rpg_ownline(type, line)) return true;
+    if(!line) return false;
+    // v0.1.22: hide voice/debug lines that leak into top-left feed (Ed screenshots)
+    if(strstr(line, "VOICE/") != NULL) return true;
+    if(strstr(line, "HEALTH_BOOST") != NULL) return true;
+    if(strstr(line, "S_V_") != NULL) return true;
+    return false;
 }
 #else
 static bool rpg_hidefromfeed(int type, const char *line) { (void)type; (void)line; return false; }
