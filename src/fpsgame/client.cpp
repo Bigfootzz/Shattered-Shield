@@ -1094,6 +1094,26 @@ namespace game
         rpg_refreshcl(); int id = rpg::slotid(s);
         intret(id >= 0 && rpg_cleq[id] >= 0 ? rpg::item(rpg_cleq[id]).armor : 0);
     });
+    // --- RPG character screen (C key) WoW-style additions, read-only ---
+    // rpgclass: character archetype ("Ranger"/"Warrior"/"Magi") for the
+    // "Level N Class" header line. Same client-side lookup the hotbar
+    // already uses (rpg_castslot); "" when unknown.
+    ICOMMAND(rpgclass, "", (), {
+        if(!player1) result("");
+        else
+        {
+            char arch[32]; arch[0] = '\0';
+            rpg::chararchetype(player1->name, arch, sizeof(arch));
+            result(arch);
+        }
+    });
+    // rpgeqvalue: base worth of the equipped item in a slot (0 when empty).
+    // Displayed as "Value" only; no vendor/currency system exists, so this
+    // is never presented as a sell price.
+    ICOMMAND(rpgeqvalue, "s", (char *s), {
+        rpg_refreshcl(); int id = rpg::slotid(s);
+        intret(id >= 0 && rpg_cleq[id] >= 0 ? rpg::item(rpg_cleq[id]).value : 0);
+    });
     ICOMMAND(rpgabname, "i", (int *i), { result(rpg::validability(*i) ? rpg::ability(*i).name : ""); });
     ICOMMAND(rpgabdmg, "i", (int *i), { intret(rpg::validability(*i) ? rpg::ability(*i).damage : 0); });
     ICOMMAND(rpgabmana, "i", (int *i), { intret(rpg::validability(*i) ? rpg::ability(*i).manacost : 0); });
