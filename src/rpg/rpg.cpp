@@ -243,6 +243,9 @@ namespace rpg
         sqlite3_finalize(st);
     }
 
+    // v0.1.23 currency: forward declaration (loadcopper defined below, used by onconnect).
+    static bool loadcopper(const char *name, int &copper);
+
     bool onconnect(const char *name)
     {
         if(!db || !name || !name[0]) return false;
