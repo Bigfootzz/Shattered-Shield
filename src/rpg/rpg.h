@@ -41,6 +41,21 @@ namespace rpg
     // Cumulative XP required to REACH the given level (2..MAX_LEVEL); -1 out of range.
     int xpforlevel(int level);
 
+    // --- currency v1 (v0.1.23): copper/silver/gold, stored as total copper ---
+    // 100 copper = 1 silver, 100 silver = 1 gold (1 gold = 10,000 copper).
+    // Item `value` fields are in copper (potion 10c, sword 60c, etc.).
+    // Sell price = value / 2 (rounded down), tunable later.
+    // Starting copper for new characters: 50 (enough for potions, not gear).
+    const int COPPER_PER_SILVER = 100;
+    const int SILVER_PER_GOLD = 100;
+    const int COPPER_PER_GOLD = 10000;
+    const int STARTING_COPPER = 50;
+    const int SELL_DIVISOR = 2; // sell price = value / SELL_DIVISOR
+    int getcopper(const char *name);              // total copper, -1 when unknown
+    int addcopper(const char *name, int amount);  // returns new total, -1 when unknown
+    bool spendcopper(const char *name, int amount); // false when insufficient
+    int sellprice(int itemidx);                   // value / SELL_DIVISOR, 0 when invalid
+
     // --- ability layer v1 (milestone step 3): session state, server-authoritative ---
     // Mana and cooldowns live only for connected characters (cleared on
     // disconnect); they are NOT persisted to the DB. The server enforces all
@@ -128,6 +143,9 @@ namespace rpg
     void setinv(const char *invstr, const char *equipstr, int level, int xp); // "id:count;..." / "slot:id;..."
     bool getclientinv(itemstack *out, int maxout, int &n, int equipped[SLOT_COUNT]);
     bool getclientstats(int &level, int &xp); // level/xp from the last N_RPG_INV
+    // Client copper cache (from N_RPG_GOLD, never authoritative).
+    void setclientcopper(int copper);
+    int getclientcopper(); // total copper, 0 when unset
     void setclientxp(int xp); // TEST-ONLY: set client XP for HUD verification
     void setloot(int idx, int item, float x, float y, float z);
     void removeloot(int idx);

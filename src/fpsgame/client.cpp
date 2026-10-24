@@ -987,6 +987,10 @@ namespace game
     }
     ICOMMAND(rpginventory, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpginv"); });
     ICOMMAND(rpgcharacter, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpgchar"); });
+    // v0.1.23 vendor: buy/sell (server validates gold + ownership).
+    ICOMMAND(rpgbuy, "s", (char *itemid), { addmsg(N_RPG_BUY, "rs", itemid); });
+    ICOMMAND(rpgsell, "s", (char *itemid), { addmsg(N_RPG_SELL, "rs", itemid); });
+    ICOMMAND(rpgvendor, "", (), { addmsg(N_RPG_INVL, "r"); if(identexists("rpgvendoropen")) execute("rpgvendoropen"); else showgui("rpgvendor"); });
     ICOMMAND(rpgequip, "s", (char *s), addmsg(N_RPG_EQUIP, "rs", s));
     ICOMMAND(rpgunequip, "s", (char *s), addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)));
     ICOMMAND(rpguse, "s", (char *s), addmsg(N_RPG_USE, "rs", s));
@@ -1072,6 +1076,16 @@ namespace game
     // Read-only client-cache queries so the K screen can show real stats/tabs.
     ICOMMAND(rpglevel, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(l); });
     ICOMMAND(rpgxp, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(x); });
+    // v0.1.23 currency: total copper (int) and formatted "Xg Ys Zc" string.
+    ICOMMAND(rpgcopper, "", (), { intret(rpg::getclientcopper()); });
+    ICOMMAND(rpgmoney, "", (), {
+        int c = rpg::getclientcopper();
+        int g = c / rpg::COPPER_PER_GOLD;
+        int s = (c % rpg::COPPER_PER_GOLD) / rpg::COPPER_PER_SILVER;
+        int cc = c % rpg::COPPER_PER_SILVER;
+        defformatstring(m)("%dg %ds %dc", g, s, cc);
+        result(m);
+    });
     ICOMMAND(rpgweapondmg, "", (), {
         rpg_refreshcl(); int wd = 0;
         loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
@@ -2957,6 +2971,19 @@ namespace game
                 getstring(invs, p);
                 getstring(eqs, p);
                 rpg::setinv(invs, eqs, level, xp);
+                break;
+            }
+            case N_RPG_GOLD:
+            {
+                rpg::setclientcopper(getint(p));
+                break;
+            }
+            case N_RPG_VENDOR: // v0.1.23: open vendor GUI (fresh inv sync first)
+            {
+                addmsg(N_RPG_INVL, "r");
+                // rpgvendoropen (rpg.cfg) sets rpg_atvendor = 1 then shows GUI.
+                if(identexists("rpgvendoropen")) execute("rpgvendoropen");
+                else showgui("rpgvendor");
                 break;
             }
             case N_RPG_LOOT:

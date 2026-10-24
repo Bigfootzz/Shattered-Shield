@@ -2837,6 +2837,28 @@ namespace server
                         conoutf("rpg: loot drop #%d (%s) at (%.1f, %.1f, %.1f)", idx, rpg::itemname(loot),
                                 target->state.o.x, target->state.o.y, target->state.o.z);
                     }
+                    // v0.1.23: mob coin drops (MMO research: WoW mobs drop coins
+                    // directly, in addition to items). Granted to the killer,
+                    // not a world pickup. Amounts are copper range for early game.
+                    const char *coinkey = NULL;
+                    if(!strcmp(target->name, "imp")) coinkey = "imp";
+                    else if(!strcmp(target->name, "puglin")) coinkey = "puglin";
+                    else if(!strcmp(target->name, "Rotting Champion")) coinkey = "champion";
+                    else if(!strncmp(target->name, "zombie", 6)) coinkey = "zombie";
+                    if(coinkey && actor && actor->name[0])
+                    {
+                        int coins = rpg::rollcoins(coinkey);
+                        if(coins > 0)
+                        {
+                            int newtotal = rpg::addcopper(actor->name, coins);
+                            if(newtotal >= 0)
+                            {
+                                sendf(actor->clientnum, 1, "ri", N_RPG_GOLD, newtotal);
+                                sendservmsgf("\f2You found %d copper from \f2%s\f7!", coins, target->name);
+                                conoutf("rpg: coin drop %dc from %s to %s (total %dc)", coins, target->name, actor->name, newtotal);
+                            }
+                        }
+                    }
                 }
             }
             target->state.deaths++;
@@ -3286,6 +3308,14 @@ namespace server
         if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
+            return;
+        }
+        // v0.1.23 VENDOR: Glimmer's dialogue marker opens the vendor GUI
+        // instead of a quest dialogue graph. Client requests fresh inv sync
+        // (N_RPG_INVL) when the GUI opens, like rpginventory does.
+        if(!strcmp(nd->dialogue, "vendor_main"))
+        {
+            sendf(cq->clientnum, 1, "r", N_RPG_VENDOR);
             return;
         }
         const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
@@ -4302,6 +4332,8 @@ namespace server
             }
         }
         sendf(cq->clientnum, 1, "riiiss", N_RPG_INV, level, xp, invs, eqs);
+        // v0.1.23 currency: copper sync alongside inventory (total copper int)
+        sendf(cq->clientnum, 1, "ri", N_RPG_GOLD, rpg::getcopper(cq->name));
         rpg_syncquest(cq); // quest chain v1: tracker + radar stay in sync
         rpg_syncclan(cq); // clan system v1: membership sync
     }
@@ -4370,6 +4402,61 @@ namespace server
         defformatstring(msg)("\f2%s \f7dropped.", rpg::itemname(id));
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
         conoutf("rpg: '%s' drops %s (drop #%d)", cq->name, rpg::itemname(id), idx);
+        rpg_sendvwep(cq);
+        rpg_syncinv(cq);
+    }
+
+    // v0.1.23 VENDOR: buy/sell (server-authoritative).
+    // Buy: pay item value in copper, item goes to inventory. Vendor stock
+    // is unlimited (no stock tracking in v1) — any known equippable item
+    // can be bought. Sell: only equippable gear (weapons/armor, not
+    // quest items, consumables, or materials) can be sold, for value/2.
+    // Both sync inventory + copper to the client afterwards.
+    void rpg_buy(clientinfo *cq, const char *itemid)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to trade."); return; }
+        int id = rpg::finditem(itemid);
+        if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Unknown item."); return; }
+        const rpg::itemdef &d = rpg::item(id);
+        if(d.slot == rpg::SLOT_NONE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That cannot be bought."); return; }
+        int price = d.value;
+        if(price <= 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That has no price."); return; }
+        if(!rpg::spendcopper(cq->name, price))
+        {
+            defformatstring(msg)("\f2Not enough copper (need %d).", price);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            return;
+        }
+        if(!rpg::additem(cq->name, itemid, 1))
+        {
+            // Refund on failure (should not happen for known items).
+            rpg::addcopper(cq->name, price);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Purchase failed.");
+            return;
+        }
+        defformatstring(msg)("\f2%s \f7bought for %d copper.", rpg::itemname(id), price);
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        conoutf("rpg: '%s' buys %s for %dc", cq->name, rpg::itemname(id), price);
+        rpg_syncinv(cq);
+    }
+    void rpg_sell(clientinfo *cq, const char *itemid)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to trade."); return; }
+        int id = rpg::finditem(itemid);
+        if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Unknown item."); return; }
+        const rpg::itemdef &d = rpg::item(id);
+        if(d.slot == rpg::SLOT_NONE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That cannot be sold."); return; }
+        int price = rpg::sellprice(id);
+        if(price <= 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That has no sell value."); return; }
+        // Unequip first if worn (it moves to the pack, then sells from there).
+        loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id) rpg::unequipslot(cq->name, i);
+        if(!rpg::removeitem(cq->name, itemid, 1)) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
+        rpg::addcopper(cq->name, price);
+        defformatstring(msg)("\f2%s \f7sold for %d copper.", rpg::itemname(id), price);
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        conoutf("rpg: '%s' sells %s for %dc", cq->name, rpg::itemname(id), price);
         rpg_sendvwep(cq);
         rpg_syncinv(cq);
     }
@@ -5660,6 +5747,19 @@ namespace server
             case N_RPG_INVL:
             {
                 if(cq) rpg_syncinv(cq);
+                break;
+            }
+            // v0.1.23 VENDOR: buy/sell (server-authoritative, gold + inventory).
+            case N_RPG_BUY:
+            {
+                string itemid; getstring(itemid, p);
+                if(cq) rpg_buy(cq, itemid);
+                break;
+            }
+            case N_RPG_SELL:
+            {
+                string itemid; getstring(itemid, p);
+                if(cq) rpg_sell(cq, itemid);
                 break;
             }
 

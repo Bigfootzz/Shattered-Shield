@@ -50,6 +50,11 @@ namespace rpg
         { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 },
         { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 },
         { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 },
+        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 15,   0 },
+        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 25,   0 },
+        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  2,   0,   false, 25,   0 },
+        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  4,   0,   false, 45,   0 },
+        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 12,   0 },
         { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 },
         { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 },
     };
@@ -518,5 +523,20 @@ namespace rpg
             roll -= FALLBACK_LOOT[i].weight;
         }
         return -1;
+    }
+
+    // v0.1.23: mob coin drops. Amounts are copper range for early game
+    // (WoW research: lvl1-10 mobs drop copper/small silver, players report
+    // never more than 30 silver leaving the starting zone). Coin drops are
+    // always granted (not a chance roll) in addition to item loot, so every
+    // kill feels rewarding. Champion is a boss, drops more.
+    int rollcoins(const char *typekey)
+    {
+        if(!typekey || !typekey[0]) return 0;
+        if(!strcmp(typekey, "zombie")) return 1 + (std::rand() % 4); // 1-4c
+        if(!strcmp(typekey, "imp")) return 3 + (std::rand() % 6); // 3-8c
+        if(!strcmp(typekey, "puglin")) return 5 + (std::rand() % 8); // 5-12c
+        if(!strcmp(typekey, "champion")) return 25 + (std::rand() % 26); // 25-50c
+        return 0;
     }
 }

@@ -46,6 +46,7 @@ namespace rpg
     {
         int level;
         int xp;
+        int copper; // total copper (100c = 1s, 100s = 1g)
         int mana;
         int lastcast[ABILITY_COUNT]; // millis of last successful cast per ability
         int lastregen;               // millis of last regen tick (<0 = not started)
@@ -131,6 +132,7 @@ namespace rpg
                 "name TEXT PRIMARY KEY,"
                 "level INTEGER NOT NULL DEFAULT 1,"
                 "xp INTEGER NOT NULL DEFAULT 0,"
+                "copper INTEGER NOT NULL DEFAULT 0,"
                 "map TEXT NOT NULL DEFAULT '',"
                 "posx REAL NOT NULL DEFAULT 0, posy REAL NOT NULL DEFAULT 0, posz REAL NOT NULL DEFAULT 0,"
                 "yaw REAL NOT NULL DEFAULT 0,"
@@ -138,6 +140,9 @@ namespace rpg
                 "appearance TEXT NOT NULL DEFAULT '',"
                 "created_at INTEGER NOT NULL DEFAULT 0,"
                 "last_seen INTEGER NOT NULL DEFAULT 0)");
+        // v0.1.23 migration: existing DBs lack the copper column. ALTER fails
+        // harmlessly (logged once) when the column already exists (new DBs).
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN copper INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
         // --- inventory & equipment v1 (milestone step 4) ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_inventory("
                 "name TEXT NOT NULL,"
@@ -265,6 +270,10 @@ namespace rpg
         }
         cachedchar cc;
         cc.level = level; cc.xp = xp;
+        // v0.1.23 currency: copper loads from DB (fresh chars get
+        // STARTING_COPPER via the createchar INSERT; old chars load saved
+        // value, 0 when the column is missing/empty).
+        { int c = 0; cc.copper = loadcopper(name, c) ? c : 0; }
         initcaststate(cc, level, -1); // mana full, abilities ready; regen starts on first tick
         initinv(cc);
         cache[std::string(name)] = cc;
@@ -455,6 +464,71 @@ namespace rpg
         std::map<std::string, cachedchar>::iterator it = cache.find(std::string(name));
         if(it != cache.end()) { level = it->second.level; xp = it->second.xp; return true; }
         return loadrow(name, level, xp);
+    }
+
+    // --- currency v1 (v0.1.23): copper/silver/gold, stored as total copper ---
+    static bool loadcopper(const char *name, int &copper)
+    {
+        if(!db || !name || !name[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT copper FROM characters WHERE name=?1", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+        bool found = sqlite3_step(st) == SQLITE_ROW;
+        if(found) copper = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+        return found;
+    }
+    static void savecopper(const char *name, int copper)
+    {
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE characters SET copper=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(st, 1, copper);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+    int getcopper(const char *name)
+    {
+        if(!db || !name || !name[0]) return -1;
+        cachedchar *cc = findcached(name);
+        if(cc) return cc->copper;
+        int copper = 0;
+        return loadcopper(name, copper) ? copper : -1;
+    }
+    int addcopper(const char *name, int amount)
+    {
+        if(!db || !name || !name[0]) return -1;
+        cachedchar *cc = findcached(name);
+        if(!cc)
+        {
+            int copper = 0;
+            if(!loadcopper(name, copper)) return -1;
+            cachedchar tmp; tmp.level = 1; tmp.xp = 0; tmp.copper = copper;
+            initinv(tmp);
+            cc = &cache.insert(std::make_pair(std::string(name), tmp)).first->second;
+        }
+        cc->copper += amount;
+        if(cc->copper < 0) cc->copper = 0;
+        savecopper(name, cc->copper);
+        return cc->copper;
+    }
+    bool spendcopper(const char *name, int amount)
+    {
+        if(amount < 0) return false;
+        int cur = getcopper(name);
+        if(cur < 0 || cur < amount) return false;
+        addcopper(name, -amount);
+        return true;
+    }
+    int sellprice(int itemidx)
+    {
+        if(itemidx < 0 || itemidx >= itemcount()) return 0;
+        int v = item(itemidx).value;
+        if(v <= 0) return 0;
+        return v / SELL_DIVISOR;
     }
 
     // --- ability layer v1: session state (milestone step 3) ---
@@ -838,9 +912,12 @@ namespace rpg
     }
 
     static int cllevel = 1, clxp = 0;
+    static int clcopper = 0; // client copper cache (from N_RPG_GOLD)
 
     // TEST-ONLY: set client-side XP directly for HUD verification screenshots
     void setclientxp(int xp) { initclient(); clxp = xp; }
+    void setclientcopper(int copper) { initclient(); clcopper = copper; }
+    int getclientcopper() { initclient(); return clcopper; }
     bool getclientstats(int &level, int &xp)
     {
         initclient();
@@ -1015,6 +1092,14 @@ namespace rpg
         // relay recipient is a distinct NPC: a hunter camped by the east
         // homesteads. warrior_male per the approved recommendation.
         { "corvin", "Corvin", "npcs/male_peasant_static", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main" },
+        // v0.1.23 VENDOR: Glimmer, a friendly imp merchant (Quaternius
+        // Bestiary, BaseColor_2 — distinct from hostile BaseColor_1 imps).
+        // NON-HUMAN per Ed's requirement (gnome-like folklore creature).
+        // Location: village area east of spawn, near the east homesteads
+        // but NOT in the starting building and NOT on Corvin (~200u away).
+        // Dialogue "vendor_main" is a marker: talking to Glimmer opens the
+        // vendor GUI instead of a quest dialogue graph (see rpg_talk).
+        { "glimmer", "Glimmer", "npcs/imp_vendor", 2980.0f, 2450.0f, 2116.0f, 180.0f, "vendor_main" },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
     int npcindexbyid(const char *id)
@@ -1600,7 +1685,8 @@ namespace rpg
         }
         if(count >= 3) { sqlite3_close(cdb); return false; }
         bool ok = false;
-        if(sqlite3_prepare_v2(cdb, "INSERT INTO characters(name, level, xp, archetype, appearance, created_at, last_seen) VALUES(?1, 1, 0, ?2, ?3, ?4, ?4)", -1, &st, NULL) == SQLITE_OK)
+        // v0.1.23: new chars start with 50 copper (STARTING_COPPER in rpg.h; literal here because SQL)
+        if(sqlite3_prepare_v2(cdb, "INSERT INTO characters(name, level, xp, copper, archetype, appearance, created_at, last_seen) VALUES(?1, 1, 0, 50, ?2, ?3, ?4, ?4)", -1, &st, NULL) == SQLITE_OK)
         {
             sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(st, 2, archetype ? archetype : "", -1, SQLITE_TRANSIENT);

@@ -686,6 +686,10 @@ enum
     N_RPG_DROP,    // c->s: drop item into the world (item id string)
     N_RPG_INVL,    // c->s: request inventory+equipment sync (no args)
     N_RPG_INV,     // s->c: inventory sync (inv string, equip string)
+    N_RPG_GOLD,    // s->c: copper sync (total copper int) — v0.1.23 currency
+    N_RPG_VENDOR,  // s->c: open vendor GUI (no args) — v0.1.23 vendor
+    N_RPG_BUY,     // c->s: buy item from vendor (item id string) — v0.1.23
+    N_RPG_SELL,    // c->s: sell item to vendor (item id string) — v0.1.23
     N_RPG_LOOT,    // s->c: loot drop spawned (idx, item, x, y, z as DMF ints)
     N_RPG_UNLOOT,  // s->c: loot drop removed (idx)
     N_RPG_VWEP,    // s->c: equipped weapon model for a client (clientnum, path; "" clears)
@@ -743,7 +747,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_DEMOPACKET, 0,
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
-    N_RPG_INV, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
+    N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 1, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     -1

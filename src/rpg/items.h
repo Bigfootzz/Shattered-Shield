@@ -100,4 +100,11 @@ namespace rpg
     // else to the compiled-in global table (pre-content-layer behavior).
     // Returns an item index, or -1 for "no drop".
     int rollloot(const char *typekey);
+    // v0.1.23: mob coin drops (MMO research: WoW mobs drop coins directly,
+    // in addition to items). Returns copper amount for the mob type, 0 for
+    // unknown types. Early-game amounts (copper range, not silver/gold):
+    // zombie (lvl2) 1-4c, imp (lvl4) 3-8c, puglin (lvl6) 5-12c, champion 25-50c.
+    // Coin drops are granted directly to the killer on mob death, separate
+    // from the item loot roll (which may also drop an item).
+    int rollcoins(const char *typekey);
 }
