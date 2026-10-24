@@ -2302,15 +2302,15 @@ namespace game
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
-        float bw = min(640.0f, X - stripr - 48.0f);
-        if(bw < 320.0f) bw = 320.0f;
+        float bw = min(704.0f, X - stripr - 48.0f);
+        if(bw < 352.0f) bw = 352.0f;
         float bx1 = X - 24.0f, bx0 = bx1 - bw;
-        float tabh = 46.0f, lineh = 30.0f, pad = 12.0f;
+        float tabh = 50.6f, lineh = 33.0f, pad = 13.2f;
         int nlines = 8;
         // framed in-panel input field (MMO layout): the panel grows by the
         // field's height while a chat input is open, history above it.
         bool inputopen = consoleinputisbox();
-        float fieldh = inputopen ? 56.0f : 0.0f;
+        float fieldh = inputopen ? 61.6f : 0.0f;
         float bh = tabh + pad + nlines*lineh + pad + fieldh;
         float by1 = 1800.0f - 24.0f, by0 = by1 - bh;
         float msgby1 = by1 - fieldh; // message area bottom (above the field)
@@ -2340,7 +2340,7 @@ namespace game
                 rpg_fillrect(tx0+8, by0+tabh-5, tabw-16, 3, cr, cg, cb, 1.0f);
             }
             else { cr = cg = cb = 0.55f; }
-            rpg_chattextc(rpg_chatnames[i], tx0 + tabw/2, by0 + tabh/2, 26.0f, cr, cg, cb);
+            rpg_chattextc(rpg_chatnames[i], tx0 + tabw/2, by0 + tabh/2, 28.6f, cr, cg, cb);
         }
 
         // messages, bottom-aligned above the input field, most recent first
@@ -2360,7 +2360,7 @@ namespace game
         // Typed text + caret render inside the field while typing.
         if(inputopen)
         {
-            float fx0 = bx0 + 8, fx1 = bx1 - 8, fy1 = by1 - 8, fy0 = fy1 - 40.0f;
+            float fx0 = bx0 + 8, fx1 = bx1 - 8, fy1 = by1 - 8, fy0 = fy1 - 44.0f;
             // field fill + steel frame (v0.1.8: solidquad fill, same as panel)
             rpg_solidquad(fx0, fy0, fx1-fx0, fy1-fy0, 0.0f, 0.0f, 0.0f, 0.85f);
             rpg_fillrect(fx0, fy0, fx1-fx0, 2, 0.45f, 0.47f, 0.52f, 0.9f);
@@ -2371,7 +2371,7 @@ namespace game
             defformatstring(is)("%s %s", consoleinputprompt(), consoleinputbuf());
             int cpos = consoleinputpos();
             int cursor = cpos >= 0 ? cpos + 1 + (int)strlen(consoleinputprompt()) : (int)strlen(is);
-            float pxh = 26.0f;
+            float pxh = 28.6f;
             float save = gtextscale;
             float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
             settextscale(pxh/baseh);
