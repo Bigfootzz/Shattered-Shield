@@ -2106,13 +2106,14 @@ namespace game
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/strip.png")->id);
         rpg_drawtexuv(sx, sy, sw, sh, 0, 0, 1, 1);
 
-        // health numerals on top of everything (20% of orb diameter fits "100/100")
+        // health numerals on top of everything (v0.1.25: 16% of orb diameter,
+        // down from 20% - the 20% numerals overflowed the globe rims in v0.1.24)
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.20f);
+        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.16f);
 
         // v0.1.17: mana numerals on the mana globe (Ed: mana has no text)
         defformatstring(mps)("%d/%d", mana, maxmana);
-        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.20f);
+        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.16f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
         // User design change Oct 19: center bar is XP (was health); fills toward level-up.
@@ -2160,13 +2161,15 @@ namespace game
                 {
                     rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);
                     defformatstring(cds)("%d", (cd+999)/1000); // v0.1.24: whole seconds - digit_white has no "." glyph (it rendered as "0", so 2.5 showed as 205)
-                    // cooldown numeral contained in the slot (40% of slot size)
-                    rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.40f);
+                    // cooldown numeral contained in the slot (v0.1.25: 32% of
+                    // slot size, down from 40% - leaves more of the icon visible)
+                    rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.32f);
                 }
             }
             defformatstring(knum)("%d", (i+1)%10);
             // key number sits fully above the slot, inside the lower recess
-            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 26*s), 26*s);
+            // v0.1.25: 18px (was 26px) - smaller numbers leave more icon space
+            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 18*s), 18*s);
         }
 
         // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
@@ -2213,7 +2216,7 @@ namespace game
                 const rpg::abilitydef &ab = rpg::ability(hoverAid);
                 const rpg::dotdef *dot = rpg::abilitydot(hoverAid);
                 // Tooltip dimensions: width based on longest line, height by line count
-                float tpxh = 28*s;  // tooltip text height
+                float tpxh = 24*s;  // tooltip text height (v0.1.25: was 28*s)
                 float tpad = 12*s;  // padding
                 // Build tooltip lines
                 // Line 1: Name
@@ -2267,9 +2270,9 @@ namespace game
             }
         }
 
-        // hint line above the strip, smaller, contained in the gap
-        rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
-        popfont(); // end digital (tooltip + hint), restores digit_white context
+        // v0.1.25: the "[I] inventory [C] character" hint line is GONE - it is
+        // replaced by the clickable radar icons (item 4, drawrpgradar below).
+        popfont(); // end digital (tooltip), restores digit_white context
         popfont();
     }
 
@@ -3147,11 +3150,36 @@ namespace game
         glColor4f(1, 1, 1, 1.0f);
     }
 
+    // v0.1.25 (item 4): WoW-style radar icons. Hit-rects in virtual coords
+    // (1800-tall space), written by drawrpgradar each frame it draws and
+    // cleared (-1) when it does not, so stale rects never eat clicks.
+    // rpg_radariconclick is called from rpg_doclick (client.cpp) before the
+    // world pick, mirroring the chat-tab click routing.
+    static float rpg_radar_char_rect[4] = {-1, -1, -1, -1};
+    static float rpg_radar_bag_rect[4] = {-1, -1, -1, -1};
+    bool rpg_radariconclick(float vx, float vy)
+    {
+        if(!rpg::mapactive(getclientmap())) return false;
+        if(rpg_radar_char_rect[0] >= 0 && vx >= rpg_radar_char_rect[0] && vx < rpg_radar_char_rect[2] &&
+           vy >= rpg_radar_char_rect[1] && vy < rpg_radar_char_rect[3])
+        {
+            execute("rpgcharacter"); // same as C key: sync + show character sheet
+            return true;
+        }
+        if(rpg_radar_bag_rect[0] >= 0 && vx >= rpg_radar_bag_rect[0] && vx < rpg_radar_bag_rect[2] &&
+           vy >= rpg_radar_bag_rect[1] && vy < rpg_radar_bag_rect[3])
+        {
+            execute("rpginventory"); // same as I key: sync + show inventory
+            return true;
+        }
+        return false;
+    }
+
     void drawrpgradar(fpsent *d, int w, int h)
     {
-        if(!rpg::mapactive(getclientmap())) return;
-        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
-        if(!showradar) return;
+        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
+        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
         glColor4f(1, 1, 1, minimapalpha);
@@ -3223,6 +3251,39 @@ namespace game
             glTexCoord2f(0.98f, 0.98f); glVertex2f(rx, ry);
             glEnd();
             glColor4f(1, 1, 1, 1.0f);
+        }
+
+        // v0.1.25 (item 4): WoW-style radar buttons + clock. Replaces the
+        // "[I] inventory [C] character" hint line above the action bar.
+        // Character (player icon, bottom-left rim) and inventory (satchel,
+        // bottom-right rim) are CLICKABLE: rpg_radariconclick (above) opens
+        // the same windows as the C / I keys. Local time sits just below
+        // the ring, like WoW's minimap clock. Hit-rects are stored for the
+        // click router; the dark backing keeps the icons readable over
+        // bright terrain.
+        {
+            float isz = s*0.16f;
+            float cix = x - isz*0.25f, ciy = y + s - isz*0.75f;
+            float bix = x + s - isz*0.75f, biy = y + s - isz*0.75f;
+            rpg_radar_char_rect[0] = cix; rpg_radar_char_rect[1] = ciy;
+            rpg_radar_char_rect[2] = cix + isz; rpg_radar_char_rect[3] = ciy + isz;
+            rpg_radar_bag_rect[0] = bix; rpg_radar_bag_rect[1] = biy;
+            rpg_radar_bag_rect[2] = bix + isz; rpg_radar_bag_rect[3] = biy + isz;
+            rpg_fillrect(cix, ciy, isz, isz, 0.0f, 0.0f, 0.0f, 0.70f);
+            rpg_fillrect(bix, biy, isz, isz, 0.0f, 0.0f, 0.0f, 0.70f);
+            glColor4f(1, 1, 1, 1.0f);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_char.png")->id);
+            rpg_drawtexuv(cix, ciy, isz, isz, 0, 0, 1, 1);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_bag.png")->id);
+            rpg_drawtexuv(bix, biy, isz, isz, 0, 0, 1, 1);
+            // Local clock below the ring (HH:MM, WoW-style).
+            time_t now = time(NULL);
+            struct tm *lt = localtime(&now);
+            char tbuf[16] = "00:00";
+            if(lt) strftime(tbuf, sizeof(tbuf), "%H:%M", lt);
+            pushfont();
+            rpg_hudtextc(tbuf, x + s*0.5f, y + s + 14.0f, 24.0f);
+            popfont();
         }
     }
 

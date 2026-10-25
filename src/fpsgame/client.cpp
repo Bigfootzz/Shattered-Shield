@@ -318,6 +318,7 @@ namespace game
     // Plain function (not inline in the ICOMMAND): the macro parser splits on bare
     // commas, so multi-declaration bodies live here instead.
     bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
+    bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
 
     static void rpg_doclick(int button)
     {
@@ -331,6 +332,9 @@ namespace game
         rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
         // chat box tabs eat their own clicks (the rest of the box is click-through)
         if(rpg_chattabclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        // v0.1.25: radar buttons eat LEFT clicks only (right-click stays attack;
+        // same tab-click pattern as the chat tabs, but left-gated)
+        if(button == 0 && rpg_radariconclick(cx*1800.0f/h, cy*1800.0f/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
