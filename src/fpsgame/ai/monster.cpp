@@ -395,7 +395,14 @@ namespace ai
             {
                 d->blocked = false;
                 if(!rnd(20000/max(monsterType.classInfo.maxspeed/4, 1))) d->jumping = true;
-                else if(!ai->enemy && !rnd(3)) d->jumping = true;
+                // v0.1.26 (item 5): idle wander hopped "like on drugs".
+                // Was !rnd(3): while blocked on uneven ground, an idle
+                // imp jumped on ~1 in 3 think ticks — machine-gun hopping
+                // against every terrain lip, tree and rock. Now 1 in 30:
+                // still clears a genuine step within about a second of
+                // trying, but no longer bounces constantly. Combat hop
+                // (first branch, chasing a foe) is untouched.
+                else if(!ai->enemy && !rnd(30)) d->jumping = true;
             }
 
             float dist = ai->enemy ? ai->enemy->o.dist(d->o) : 0;
@@ -451,10 +458,13 @@ namespace ai
                         ai->rpgmovetimer = lastmillis + 2000;
                     }
                     // v0.1.18: intermittent move/pause cycle - 2s walk, 3s stand (Ed: still too fast)
+                    // v0.1.26 (item 5): 2s walk, 5s stand — idle imps spend
+                    // more time standing and less time running around,
+                    // calming the patrol without touching combat movement.
                     if(lastmillis >= ai->rpgmovetimer)
                     {
                         ai->rpgmoving = !ai->rpgmoving;
-                        ai->rpgmovetimer = lastmillis + (ai->rpgmoving ? 2000 : 3000);
+                        ai->rpgmovetimer = lastmillis + (ai->rpgmoving ? 2000 : 5000);
                     }
                     float yawdiff = ai->rpgwanderyaw - d->yaw;
                     while(yawdiff > 180) yawdiff -= 360;

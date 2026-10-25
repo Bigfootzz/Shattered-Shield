@@ -1091,12 +1091,15 @@ void renderclient(dynent *d, const char *mdlname, modelattach *attachments, int 
     else if(d->state==CS_LAGGED)                            anim = ANIM_LAG|ANIM_LOOP;
     else
     {
-        if(lastmillis-lastpain < 300)
-        {
-            anim = ANIM_PAIN;
-            basetime = lastpain;
-        }
-        else if(lastpain < lastaction && (attack < 0 || (d->type != ENT_AI && lastmillis-lastaction < attackdelay)))
+        // v0.1.26 (item 6, Ed's test): NO pain animation override.
+        // Was: hurt within 300ms forced ANIM_PAIN, and the attack
+        // branch ALSO required lastaction > lastpain, so a hit
+        // mid-swing cut the attack off and it never resumed
+        // (Ed's female-warrior mid-swing stops). Per Ed's call,
+        // getting hit now plays NO animation: attacks run
+        // uninterrupted, trading hit visuals for smoothness.
+        // If mid-swing stops persist, the cause is elsewhere.
+        if(attack < 0 || (d->type != ENT_AI && lastmillis-lastaction < attackdelay))
         {
             anim = attack < 0 ? -attack : attack;
             basetime = lastaction;

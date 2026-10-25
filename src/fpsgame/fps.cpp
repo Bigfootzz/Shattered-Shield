@@ -2608,7 +2608,16 @@ namespace game
         float X = w*1800.0f/h;
         int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
         float ty = rs + rs/10 + 36.0f;
-        float nmw = float(strlen(qd->name))*0.5f*30.0f;
+        // v0.1.26 (item 2): measure the REAL drawn widths. The old code
+        // estimated width as strlen*0.5*size, but the digital font is
+        // proportional — wide glyphs (caps, M, etc.) run wider than
+        // 0.5x height, so "The Imps Keep Coming" overflowed the plate's
+        // right edge. text_widthf at the same scale rpg_hudtext draws
+        // with gives the true width, so the plate always contains the
+        // text with 16px padding on each side.
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        float saveScale = gtextscale;
+        settextscale(30.0f/baseh); float nmw = text_widthf(qd->name);
         // quest engine v2: the server sends the objective display text
         // (N_RPG_QTEXT); kill quests fall back to kills/need.
         static string progbuf;
@@ -2616,11 +2625,12 @@ namespace game
         const char *prog = NULL;
         if(rpg::getclientquesttext(qid, objtext, sizeof(objtext))) prog = objtext;
         else { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
-        float pgw = float(strlen(prog))*0.5f*26.0f;
+        settextscale(26.0f/baseh); float pgw = text_widthf(prog);
+        settextscale(saveScale);
         // plate behind both lines (right-aligned pair ending at rx+rs),
-        // sized from the wider line's extent plus padding
+        // sized from the wider line's TRUE extent plus padding
         float platew = max(nmw, pgw);
-        rpg_solidquad(rx + rs - platew - 12.0f, ty - 10.0f, platew + 24.0f,
+        rpg_solidquad(rx + rs - platew - 16.0f, ty - 10.0f, platew + 32.0f,
                       38.0f + 26.0f + 20.0f, 0.0f, 0.0f, 0.0f, 0.72f);
         rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
         rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
@@ -3255,22 +3265,39 @@ namespace game
 
         // v0.1.25 (item 4): WoW-style radar buttons + clock. Replaces the
         // "[I] inventory [C] character" hint line above the action bar.
-        // Character (player icon, bottom-left rim) and inventory (satchel,
-        // bottom-right rim) are CLICKABLE: rpg_radariconclick (above) opens
-        // the same windows as the C / I keys. Local time sits just below
-        // the ring, like WoW's minimap clock. Hit-rects are stored for the
-        // click router; the dark backing keeps the icons readable over
-        // bright terrain.
+        // Character (player icon) and inventory (satchel) are CLICKABLE:
+        // rpg_radariconclick (above) opens the same windows as the C / I
+        // keys. Local time sits just below the ring, like WoW's minimap
+        // clock. Hit-rects are stored for the click router; the round
+        // dark backing (circle texture, 1.2x icon size) keeps the icons
+        // readable over bright terrain and echoes the round minimap.
+        // v0.1.26 (item 3): icons sit ON the ring itself, not at the
+        // bounding-box corners. The v0.1.25 positions used the square's
+        // bottom corners, but the ring is circular — the corners lie
+        // outside the circle (0.707s from center vs 0.5s radius), so the
+        // icons floated detached below the ring. Now each icon is
+        // centered on the rim circle (radius s/2 about the ring center)
+        // at the bottom-left / bottom-right diagonals, WoW-style.
         {
             float isz = s*0.16f;
-            float cix = x - isz*0.25f, ciy = y + s - isz*0.75f;
-            float bix = x + s - isz*0.75f, biy = y + s - isz*0.75f;
+            float ccx = x + s*0.5f, ccy = y + s*0.5f, rim = s*0.5f*0.7071f;
+            float cix = ccx - rim - isz*0.5f, ciy = ccy + rim - isz*0.5f;
+            float bix = ccx + rim - isz*0.5f, biy = ccy + rim - isz*0.5f;
             rpg_radar_char_rect[0] = cix; rpg_radar_char_rect[1] = ciy;
             rpg_radar_char_rect[2] = cix + isz; rpg_radar_char_rect[3] = ciy + isz;
             rpg_radar_bag_rect[0] = bix; rpg_radar_bag_rect[1] = biy;
             rpg_radar_bag_rect[2] = bix + isz; rpg_radar_bag_rect[3] = biy + isz;
-            rpg_fillrect(cix, ciy, isz, isz, 0.0f, 0.0f, 0.0f, 0.70f);
-            rpg_fillrect(bix, biy, isz, isz, 0.0f, 0.0f, 0.0f, 0.70f);
+            // v0.1.26 (Ed preview feedback): round button backings, not
+            // square boards — a circle echoes the round minimap and reads
+            // as an intentional button, not an afterthought. Backing is
+            // 1.2x the icon size, centered on the icon, so a dark ring
+            // shows all around the icon art. Hit-rects stay the icon
+            // square (click behavior unchanged).
+            float bisz = isz*1.2f;
+            glColor4f(1, 1, 1, 1.0f);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_backing_circle.png")->id);
+            rpg_drawtexuv(cix - isz*0.1f, ciy - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
+            rpg_drawtexuv(bix - isz*0.1f, biy - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
             glColor4f(1, 1, 1, 1.0f);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_char.png")->id);
             rpg_drawtexuv(cix, ciy, isz, isz, 0, 0, 1, 1);

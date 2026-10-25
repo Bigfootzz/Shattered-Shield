@@ -3305,7 +3305,15 @@ namespace server
         if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players talk
         if(!rpg::mapactive(smapname)) return;
         if(cq->state.state != CS_ALIVE) { rpg_qmsg(cq, "You must be alive to talk."); return; }
-        if(npcidx < 0)
+        // v0.1.26: the client sends the selected NPC index, but if that
+        // index is stale/out of range on the server (client and server
+        // tables ever disagreeing), silently returning made F-talk look
+        // dead with no feedback at all — exactly Ed's v0.1.24/v0.1.25
+        // Glimmer symptom ("press F to talk and that's it"). Fall back
+        // to nearest-NPC resolution instead of a silent return, so a
+        // stale index degrades to talking to the nearest NPC rather
+        // than nothing happening.
+        if(npcidx < 0 || !rpg::npcat(npcidx))
         {
             // The client sent no specific NPC (F pressed with nobody selected
             // or in sights) - resolve the nearest NPC inside talk range here;
@@ -3318,6 +3326,7 @@ namespace server
             // Ed read as "nothing happens"). Talking is about standing next
             // to someone, so height must not count.
             float best = 16.0f;
+            npcidx = -1;
             loopi(rpg::npccount())
             {
                 const rpg::npcdef *cand = rpg::npcat(i);
@@ -3328,7 +3337,10 @@ namespace server
             if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
         }
         const rpg::npcdef *nd = rpg::npcat(npcidx);
-        if(!nd || !nd->dialogue || !nd->dialogue[0]) return;
+        // v0.1.26: never fail silently here. An empty dialogue used to
+        // return with no message at all, which Ed reads as "nothing
+        // happens". Say so visibly instead.
+        if(!nd || !nd->dialogue[0]) { rpg_qmsg(cq, "They have nothing to say."); return; }
         if(vec(cq->state.o.x, cq->state.o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) > 16.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
@@ -3337,8 +3349,17 @@ namespace server
         // v0.1.23 VENDOR: Glimmer's dialogue marker opens the vendor GUI
         // instead of a quest dialogue graph. Client requests fresh inv sync
         // (N_RPG_INVL) when the GUI opens, like rpginventory does.
-        if(!strcmp(nd->dialogue, "vendor_main"))
+        // v0.1.26: accept EITHER signal — the "vendor_main" dialogue
+        // marker OR the npcdef type "vendor" (editor Phase 1). Vendor
+        // talk never worked in-game (v0.1.24/v0.1.25: prompt showed,
+        // F did nothing, no error), and the single-marker check is the
+        // one vendor-only branch in this function; a second, independent
+        // signal makes a marker mismatch unable to silently kill the
+        // shop again. Quest NPCs (type questgiver, *_main dialogue)
+        // match neither signal and flow to dialogue as before.
+        if(!strcmp(nd->dialogue, "vendor_main") || !strcmp(nd->type, "vendor"))
         {
+            conoutf("rpg: talk: opening vendor GUI for npc '%s'", nd->id[0] ? nd->id : "?");
             sendf(cq->clientnum, 1, "r", N_RPG_VENDOR);
             return;
         }

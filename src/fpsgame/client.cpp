@@ -580,6 +580,10 @@ namespace game
         addmsg(N_RPG_TALK, "ri", ni);
     }
     ICOMMAND(rpgtalk, "", (), rpg_dtalk());
+    // v0.1.26: open Glimmer's shop directly, bypassing the F-talk path.
+    // Lets Ed test the vendor GUI itself (and use the shop) even if talk
+    // still fails, isolating GUI problems from talk-path problems.
+    ICOMMAND(rpgopenshop, "", (), { if(identexists("rpgvendoropen")) execute("rpgvendoropen"); else showgui("rpgvendor"); });
     ICOMMAND(rpgcleartarget, "", (), rpg::cleartargeting());
     // --- quest engine v2: dialogue panel state (display only; the server owns the flow) ---
     // The server sends node text + up to 4 response buttons (N_RPG_DIALOG);

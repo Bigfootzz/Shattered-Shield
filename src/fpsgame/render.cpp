@@ -688,7 +688,14 @@ namespace game
     {
         for(int i = S_JUMP; i <= S_SPLASH2; i++) preloadsound(i);
         for(int i = S_JUMPPAD; i <= S_PISTOL; i++) preloadsound(i);
-        for(int i = S_V_BOOST; i <= S_V_QUAD10; i++) preloadsound(i);
+        // v0.1.26 (item 7): was S_V_BOOST..S_V_QUAD10. The two
+        // health_boost voice files do not exist and nothing ever
+        // plays S_V_BOOST/S_V_BOOST10, so preloading them only
+        // produced FAILED TO LOAD SAMPLE errors. Preload only
+        // the quad sounds (files exist, and S_V_QUAD/S_V_QUAD10
+        // ARE played). Enum and sounds.cfg order untouched, so
+        // no sound index shifts.
+        for(int i = S_V_QUAD; i <= S_V_QUAD10; i++) preloadsound(i);
         for(int i = S_BURN; i <= S_HIT; i++) preloadsound(i);
     }
 
