@@ -995,6 +995,97 @@ namespace game
     ICOMMAND(rpgbuy, "s", (char *itemid), { addmsg(N_RPG_BUY, "rs", itemid); });
     ICOMMAND(rpgsell, "s", (char *itemid), { addmsg(N_RPG_SELL, "rs", itemid); });
     ICOMMAND(rpgvendor, "", (), { addmsg(N_RPG_INVL, "r"); if(identexists("rpgvendoropen")) execute("rpgvendoropen"); else showgui("rpgvendor"); });
+    // --- RPG: editor Phase 1 (Oct 24, 2026) - NPC placement tool (F7 in edit mode) ---
+    // Client-only: the editor edits the LOCAL NPC table and saves it to
+    // data/rpg/npcs_<map>.cfg. The server reloads the same file on map change,
+    // so a saved edit takes effect for talk range checks after a map reload.
+    // View-target raycast: from the camera along the view direction, same
+    // raycubepos the pick code uses. Falls back to 100u ahead on no hit.
+    static bool npc_viewtarget(vec &hit)
+    {
+        if(!camera1) return false;
+        vec dir;
+        vecfromyawpitch(camera1->yaw, camera1->pitch, 1, 0, dir);
+        float d = raycubepos(camera1->o, dir, hit, 0, RAY_CLIPMAT|RAY_SKIPFIRST);
+        if(d < 0) hit = vec(dir).mul(100.0f).add(camera1->o);
+        return true;
+    }
+    // Yaw for an NPC at `at` to face the player (uses the engine conversion).
+    static float npc_facetowardplayer(const vec &at)
+    {
+        if(!player1) return 0.0f;
+        vec delta = vec(player1->o).sub(at);
+        float yaw = 0.0f, pitch = 0.0f;
+        vectoyawpitch(delta, yaw, pitch);
+        return yaw;
+    }
+    ICOMMAND(npc_count, "", (), intret(rpg::npccount()));
+    ICOMMAND(npc_id, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); result(nd ? nd->id : ""); });
+    ICOMMAND(npc_name, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); result(nd ? nd->name : ""); });
+    ICOMMAND(npc_model, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); result(nd ? nd->model : ""); });
+    ICOMMAND(npc_dialogue, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); result(nd ? nd->dialogue : ""); });
+    ICOMMAND(npc_type, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); result(nd ? nd->type : ""); });
+    ICOMMAND(npc_x, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); floatret(nd ? nd->x : 0); });
+    ICOMMAND(npc_y, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); floatret(nd ? nd->y : 0); });
+    ICOMMAND(npc_z, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); floatret(nd ? nd->z : 0); });
+    ICOMMAND(npc_yaw, "i", (int *i), { const rpg::npcdef *nd = rpg::npcat(*i); floatret(nd ? nd->yaw : 0); });
+    ICOMMAND(npc_loaded_map, "", (), result(rpg::npcs_loaded_map()));
+    ICOMMAND(npc_from_file, "", (), intret(rpg::npcs_from_file() ? 1 : 0));
+    ICOMMAND(npc_list, "", (),
+    {
+        conoutf("rpg: npcs: %d NPCs (map '%s', %s)", rpg::npccount(), rpg::npcs_loaded_map(), rpg::npcs_from_file() ? "from file" : "fallback");
+        loopi(rpg::npccount())
+        {
+            const rpg::npcdef *nd = rpg::npcat(i);
+            if(nd) conoutf("  [%d] %s \"%s\" %s (%.0f %.0f %.0f) yaw %.0f dlg %s", i, nd->id, nd->name, nd->model, nd->x, nd->y, nd->z, nd->yaw, nd->dialogue);
+        }
+    });
+    ICOMMAND(npc_add_here, "sss", (char *id, char *name, char *model),
+    {
+        if(!player1) { conoutf("rpg: npcs: no player"); return; }
+        int idx = rpg::npc_add(id, name, model, player1->o.x, player1->o.y, player1->o.z, player1->yaw, "", "ambient");
+        if(idx < 0) conoutf("rpg: npcs: add failed (duplicate id or table full)");
+        else conoutf("rpg: npcs: added '%s' at (%.0f %.0f %.0f) - save with npc_save", id, player1->o.x, player1->o.y, player1->o.z);
+    });
+    ICOMMAND(npc_add_view, "sss", (char *id, char *name, char *model),
+    {
+        vec hit;
+        if(!npc_viewtarget(hit)) { conoutf("rpg: npcs: no camera"); return; }
+        float yaw = npc_facetowardplayer(hit);
+        int idx = rpg::npc_add(id, name, model, hit.x, hit.y, hit.z, yaw, "", "ambient");
+        if(idx < 0) conoutf("rpg: npcs: add failed (duplicate id or table full)");
+        else conoutf("rpg: npcs: added '%s' at (%.0f %.0f %.0f) - save with npc_save", id, hit.x, hit.y, hit.z);
+    });
+    ICOMMAND(npc_move_here, "i", (int *i),
+    {
+        if(!player1) { conoutf("rpg: npcs: no player"); return; }
+        if(!rpg::npc_move(*i, player1->o.x, player1->o.y, player1->o.z, player1->yaw)) conoutf("rpg: npcs: move failed (bad index %d)", *i);
+        else conoutf("rpg: npcs: moved [%d] to (%.0f %.0f %.0f) - save with npc_save", *i, player1->o.x, player1->o.y, player1->o.z);
+    });
+    ICOMMAND(npc_move_view, "i", (int *i),
+    {
+        vec hit;
+        if(!npc_viewtarget(hit)) { conoutf("rpg: npcs: no camera"); return; }
+        const rpg::npcdef *nd = rpg::npcat(*i);
+        float yaw = nd ? nd->yaw : 0.0f;
+        if(!rpg::npc_move(*i, hit.x, hit.y, hit.z, yaw)) conoutf("rpg: npcs: move failed (bad index %d)", *i);
+        else conoutf("rpg: npcs: moved [%d] to (%.0f %.0f %.0f) - save with npc_save", *i, hit.x, hit.y, hit.z);
+    });
+    ICOMMAND(npc_move_coord, "iffff", (int *i, float *x, float *y, float *z, float *yaw),
+    {
+        if(!rpg::npc_move(*i, *x, *y, *z, *yaw)) conoutf("rpg: npcs: move failed (bad index %d)", *i);
+    });
+    ICOMMAND(npc_remove, "i", (int *i),
+    {
+        if(!rpg::npc_remove(*i)) conoutf("rpg: npcs: remove failed (bad index %d)", *i);
+        else conoutf("rpg: npcs: removed [%d] - save with npc_save", *i);
+    });
+    ICOMMAND(npc_save, "", (),
+    {
+        const char *map = getclientmap();
+        if(!map || !map[0]) { conoutf("rpg: npcs: npc_save: no map"); return; }
+        if(rpg::savenpcs(map)) conoutf("rpg: npcs: saved to data/rpg/npcs_%s.cfg (reload map for server to pick it up)", map);
+    });
     ICOMMAND(rpgequip, "s", (char *s), addmsg(N_RPG_EQUIP, "rs", s));
     ICOMMAND(rpgunequip, "s", (char *s), addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)));
     ICOMMAND(rpguse, "s", (char *s), addmsg(N_RPG_USE, "rs", s));
@@ -1453,6 +1544,11 @@ namespace game
         if(editmode) toggleedit();
         if(m_demo) { entities::resetspawns(); return; }
         copystring(incomingmapname, name ? name : "");
+        // --- RPG: editor Phase 1 (Oct 24, 2026) ---
+        // Load per-map NPCs BEFORE the preload loop below, so the loop
+        // preloads the models for THIS map's NPC file, not the previous map's.
+        // Falls back to the hardcoded table when npcs_<map>.cfg is missing.
+        if(name && name[0]) rpg::loadnpcs(name);
         // --- RPG: Shattered Shield (load-time fix, Oct 22) ---
         // Warm the quest-giver NPC models BEFORE load_world() queues and
         // flushes. game::preload() runs before startmap() publishes the new

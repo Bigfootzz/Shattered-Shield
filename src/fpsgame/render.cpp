@@ -369,7 +369,7 @@ namespace game
             for(int ni = 0; ni < rpg::npccount(); ni++)
             {
                 const rpg::npcdef *nd = rpg::npcat(ni);
-                if(nd && nd->model && nd->model[0])
+                if(nd && nd->model[0])
                     rendermodel(NULL, nd->model, ANIM_IDLE|ANIM_LOOP, vec(nd->x, nd->y, nd->z), nd->yaw, 0);
             }
         rendermovables();
