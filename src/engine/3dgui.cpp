@@ -985,6 +985,10 @@ struct gui : g3d_gui
         if(w*aspect*basescale>1.0f) fit = 1.0f/(w*aspect*basescale);
         if(h*basescale*fit>maxscale) fit *= maxscale/(h*basescale*fit);
         origin = vec(0.5f-((w-xsize)/2 - (skinx[2]-skinx[1])*SKIN_SCALE)*aspect*scale.x*fit, 0.5f + (0.5f*h-(skiny[9]-skiny[7])*SKIN_SCALE)*scale.y*fit, 0);
+        // v0.1.25: per-menu vertical lift for 2D menus (guilift init command).
+        // Normalized y grows downward (glOrtho 0,1,1,0), so subtracting moves
+        // the menu UP. Only the dialogue uses it today (0.15 = 15% of screen).
+        if(gui2d) origin.y -= guimenuyoff();
         scale = vec(aspect*scale.x*fit, scale.y*fit, 1);
     }
 

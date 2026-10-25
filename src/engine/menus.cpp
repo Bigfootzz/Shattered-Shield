@@ -28,8 +28,13 @@ struct menu : g3d_callback
     // menu's own art shows over the live world. Per-menu: other menus keep
     // their skin.
     bool noskin;
+    // v0.1.25: vertical lift for 2D menus, in fractions of screen height
+    // (0.15 = 15% higher). Set by the guilift init-script command; used by
+    // the dialogue window, which Ed reports has never sat in the right
+    // place (it overlapped the bottom HUD strip). 0 = default centering.
+    float yoff;
 
-    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true), noskin(false) {}
+    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true), noskin(false), yoff(0) {}
 
     void gui(g3d_gui &g, bool firstpass)
     {
@@ -255,6 +260,21 @@ void guinoskin()
 bool guimenuskindisabled()
 {
     return currentMenu && currentMenu->noskin;
+}
+
+// v0.1.25: same pattern as guinoskin, for the per-menu vertical lift.
+// Intended for a menu's init script (e.g. "guilift 0.15" lifts the menu by
+// 15% of screen height). 3dgui's adjustscale() applies it to 2D menus.
+void guilift(float *off)
+{
+    if(guistack.empty()) return;
+    guistack.last()->yoff = *off;
+}
+
+// 3dgui render path asks this per frame: lift of the menu being rendered.
+float guimenuyoff()
+{
+    return currentMenu ? currentMenu->yoff : 0;
 }
 
 void guistayopen(uint *contents)
@@ -635,6 +655,7 @@ COMMAND(hidegui, "s");
 COMMAND(togglegui, "s"); // RR
 COMMAND(guionclear, "s");
 COMMAND(guinoskin, "");
+COMMAND(guilift, "f");
 COMMAND(guistayopen, "e");
 COMMAND(guinopressed, "e");
 COMMAND(guinoautotab, "e");

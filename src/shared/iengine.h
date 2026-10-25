@@ -189,6 +189,7 @@ extern vec menuinfrontofplayer();
 extern void newgui(char *name, char *contents, char *header = NULL, char *init = NULL);
 extern void showgui(const char *name);
 extern bool guimenuskindisabled(); // true while the rendering menu suppressed its engine skin
+extern float guimenuyoff(); // v0.1.25: vertical lift (fraction of screen height) for the rendering 2D menu, 0 when unset
 extern int cleargui(int n = 0);
 extern void settextscale(float scale);
 

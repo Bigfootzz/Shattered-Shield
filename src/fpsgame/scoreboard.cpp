@@ -433,6 +433,15 @@ namespace game
             if(player1->state != CS_DEAD || intermission || !rpg::mapactive(getclientmap())) return;
             // allowinput=true so the cursor appears and the button is clickable
             g.start(player1->lastpain, 0.03f, NULL, true);
+            // v0.1.25 (item 5): game logo above the title (Ed: swap the knife
+            // for the games logo). Note: the death window code never had a
+            // knife texture - the dagger in Ed's screenshot is the killer
+            // Puglin's weapon in the death-camera view overlapping the
+            // window. The logo is therefore added to the window itself,
+            // prominently, where Ed asked for it. Title, countdown, Respawn
+            // button and red vignette are unchanged.
+            Texture *logo = textureload("packages/ui/rpg/menu/logo.png", 3);
+            if(logo) g.image(logo, 2.5f, false);
             g.title("YOU HAVE DIED.", 0xFF2020);
             int remain = 10 - (lastmillis - player1->lastpain)/1000;
             if(remain > 0)
