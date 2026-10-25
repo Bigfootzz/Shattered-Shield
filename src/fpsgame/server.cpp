@@ -2845,6 +2845,12 @@ namespace server
                     else if(!strcmp(target->name, "puglin")) coinkey = "puglin";
                     else if(!strcmp(target->name, "Rotting Champion")) coinkey = "champion";
                     else if(!strncmp(target->name, "zombie", 6)) coinkey = "zombie";
+                    // v0.1.24: fallback - any monster type not in the table above
+                    // (e.g. a renamed or new variant) still drops coins at the
+                    // zombie rate instead of silently dropping nothing. This
+                    // block only runs for AI_TYPE_MONSTER kills, so the fallback
+                    // can never fire on a player or NPC.
+                    if(!coinkey) coinkey = "zombie";
                     if(coinkey && actor && actor->name[0])
                     {
                         int coins = rpg::rollcoins(coinkey);
@@ -2857,6 +2863,7 @@ namespace server
                                 sendservmsgf("\f2You found %d copper from \f2%s\f7!", coins, target->name);
                                 conoutf("rpg: coin drop %dc from %s to %s (total %dc)", coins, target->name, actor->name, newtotal);
                             }
+                            else conoutf("rpg: WARNING coin grant FAILED for %s (%dc from %s) - addcopper returned %d (character row missing?)", actor->name, coins, target->name, newtotal);
                         }
                     }
                 }

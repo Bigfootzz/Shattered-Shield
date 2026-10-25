@@ -1099,10 +1099,15 @@ namespace rpg
         // Bestiary, BaseColor_2 — distinct from hostile BaseColor_1 imps).
         // NON-HUMAN per Ed's requirement (gnome-like folklore creature).
         // Location: village area east of spawn, near the east homesteads
-        // but NOT in the starting building and NOT on Corvin (~200u away).
+        // but NOT in the starting building and NOT on Corvin (~35u away,
+        // in the open so she is easy to find).
+        // v0.1.24: moved from (2980,2450) — Ed could not find her in
+        // v0.1.23; the new spot is open ground next to Corvin, a landmark
+        // Ed already knows, at the same ground height (2116) as the nearby
+        // east-homesteads mob spawn (3050,2600,2116).
         // Dialogue "vendor_main" is a marker: talking to Glimmer opens the
         // vendor GUI instead of a quest dialogue graph (see rpg_talk).
-        { "glimmer", "Glimmer", "npcs/imp_vendor", 2980.0f, 2450.0f, 2116.0f, 180.0f, "vendor_main" },
+        { "glimmer", "Glimmer", "npcs/imp_vendor", 3030.0f, 2590.0f, 2116.0f, 180.0f, "vendor_main" },
     };
     static const int NPC_COUNT = sizeof(NPCS)/sizeof(NPCS[0]);
     int npcindexbyid(const char *id)
@@ -1129,9 +1134,14 @@ namespace rpg
     // name in rpg_resolvespawntype.
     static const spawndef SPAWNS[] =
     {
-        { "imp"   , 2150.0f, 1450.0f, 2344.0f, "south fields" },
-        { "imp"   , 2380.0f, 1600.0f, 2277.0f, "south fields east" },
-        { "imp"   , 1980.0f, 1280.0f, 2373.0f, "south fields west" },
+        // v0.1.24: the five southern spawns were on high ground (z 2277-2383)
+        // that players cannot reach on foot (Ed: "most of the imps are on
+        // top of a mountain"). They are relocated to flat outskirts ground
+        // (z 2116, the village ground level) in the east/north fields, clear
+        // of the player spawn, NPCs, and existing spawn points.
+        { "imp"   , 2800.0f, 2400.0f, 2116.0f, "east field" },
+        { "imp"   , 3200.0f, 2400.0f, 2116.0f, "east field north" },
+        { "imp"   , 2900.0f, 2900.0f, 2116.0f, "northeast field" },
         { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
         { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
         { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
@@ -1139,8 +1149,8 @@ namespace rpg
         { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
         { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
         { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
-        { "imp"   , 2600.0f, 1300.0f, 2383.0f, "southeast field" },
-        { "imp"   , 1500.0f, 1500.0f, 2381.0f, "southwest field" },
+        { "imp"   , 2500.0f, 3100.0f, 2116.0f, "north field" },
+        { "imp"   , 2000.0f, 3000.0f, 2116.0f, "northwest field" },
     };
     static const int SPAWN_COUNT = sizeof(SPAWNS)/sizeof(SPAWNS[0]);
 

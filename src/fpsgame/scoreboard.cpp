@@ -1,5 +1,6 @@
 // creation of scoreboard
 #include "game.h"
+#include "rpg/rpg.h"
 
 extern float gtextscale; //TODO: move to some header file
 
@@ -120,6 +121,9 @@ namespace game
 
     void renderscoreboard(g3d_gui &g, bool firstpass)
     {
+        // v0.1.24: clean digital font instead of the default blackletter face
+        pushfont();
+        setfont("digital");
         const ENetAddress *address = connectedpeer();
         if(showservinfo && address)
         {
@@ -154,7 +158,11 @@ namespace game
         g.poplist();
 
         extern int spawnwait;
-        float spawnms = float(cmode? cmode->respawnmillis(player1): spawnwait-float(lastmillis-player1->lastpain))/1000.f;
+        // v0.1.24: on RPG maps the respawn timer is the 10s death window
+        // countdown, not spawnwait, so the Tab scoreboard shows the same
+        // number the death window counts down from.
+        float spawnms = rpg::mapactive(getclientmap()) ? float(10 - (lastmillis-player1->lastpain)/1000)
+                                                       : float(cmode? cmode->respawnmillis(player1): spawnwait-float(lastmillis-player1->lastpain))/1000.f;
         if(player1->state==CS_DEAD && spawnms>0.f)
         {
             //g.separator();
@@ -374,6 +382,7 @@ namespace game
                 }
             }
         }
+        popfont(); // restore font (scoreboard used digital)
     }
 
     struct scoreboardgui : g3d_callback
@@ -408,9 +417,51 @@ namespace game
 
     } scoreboard;
 
+    // v0.1.24: Diablo-style death window. Replaces the scoreboard-on-death
+    // on RPG maps (deathstate/client no longer call showscores there).
+    // Big "YOU HAVE DIED." title over the red vignette (drawn in
+    // drawrpghud), a 10s countdown during which Respawn is shown greyed
+    // and NOT clickable, then a Respawn button that calls the existing
+    // respawn() (location logic untouched). No "Exit to Menu" by design.
+    // The Tab scoreboard is untouched and still works separately.
+    struct deathgui : g3d_callback
+    {
+        vec menupos;
+
+        void gui(g3d_gui &g, bool firstpass)
+        {
+            if(player1->state != CS_DEAD || intermission || !rpg::mapactive(getclientmap())) return;
+            // allowinput=true so the cursor appears and the button is clickable
+            g.start(player1->lastpain, 0.03f, NULL, true);
+            g.title("YOU HAVE DIED.", 0xFF2020);
+            int remain = 10 - (lastmillis - player1->lastpain)/1000;
+            if(remain > 0)
+            {
+                g.textf("Respawn in %d...", 0xFFFFDD, NULL, remain);
+                g.text("Respawn", 0x808080);
+            }
+            else
+            {
+                g.text("Your journey is not over yet.", 0xFFFFDD);
+                if(g.button("Respawn", 0xFFFFFF, "action")&G3D_UP) respawn();
+            }
+            g.end();
+        }
+
+        void render()
+        {
+            if(player1->state == CS_DEAD && !intermission && rpg::mapactive(getclientmap()))
+            {
+                menupos = menuinfrontofplayer();
+                g3d_addgui(this, menupos, GUI_FORCE_2D);
+            }
+        }
+    } deathwindow;
+
     void g3d_gamemenus()
     {
         scoreboard.render();
+        deathwindow.render();
     }
 
     VARFN(scoreboard, showscoreboard, 0, 0, 1, scoreboard.show(showscoreboard!=0));

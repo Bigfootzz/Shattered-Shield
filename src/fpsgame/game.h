@@ -1372,6 +1372,7 @@ namespace game
 
     extern int groupplayers();
     extern void showscores(bool on);
+    extern bool respawn(); // v0.1.24: death window Respawn button (defined in fps.cpp)
     extern void getbestplayers(vector<fpsent *> &best);
     extern void getbestteams(vector<const char *> &best);
 

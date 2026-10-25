@@ -867,6 +867,12 @@ namespace game
                 return false;
             }
             if(lastmillis < player1->lastpain + spawnwait) return false;
+            // v0.1.24: RPG death window timer - on RPG maps respawn is only
+            // allowed 10s after death, matching the death window countdown.
+            // Fire/jump respawn respects the same timer as the Respawn button,
+            // so the countdown cannot be skipped. Respawn location logic is
+            // untouched (respawnself/findplayerspawn below).
+            if(rpg::mapactive(getclientmap()) && lastmillis < player1->lastpain + 10000) return false;
             resetfade();
             respawnself();
             if(m_classicsp)
@@ -975,7 +981,9 @@ namespace game
         if(!restore) gibeffect(max(-d->health, 0), d->vel, d);
         if(d==player1)
         {
-            if(deathscore) showscores(true);
+            // v0.1.24: on RPG maps death shows the death window, not the
+            // scoreboard (the Tab scoreboard still works separately).
+            if(deathscore && !rpg::mapactive(getclientmap())) showscores(true);
             disablezoom();
             if(!restore) loopi(NUMWEAPS) savedammo[i] = player1->ammo[i];
             d->attacking = false;
@@ -2035,7 +2043,19 @@ namespace game
     void drawrpghud(fpsent *d, int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
-        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR)
+        {
+            // v0.1.24: Diablo-style death vignette - fullscreen red tint,
+            // darker at the edges, behind the death window (drawn by the
+            // g3d deathgui on top of the HUD pass).
+            if(d->state == CS_DEAD)
+            {
+                float X = w*1800.0f/h;
+                Texture *vig = textureload("data/hud/death_vignette.png", 3);
+                if(vig) { glBindTexture(GL_TEXTURE_2D, vig->id); rpg_drawtexuv(0, 0, X, 1800, 0, 0, 1, 1); }
+            }
+            return;
+        }
         // v0.1.16: use the readable digital font for all HUD text
         // (health/mana globe numerals, cooldowns, hints) - Ed: make sure
         // the globe text is legible.
@@ -2139,7 +2159,7 @@ namespace game
                 if(cd > 0)
                 {
                     rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);
-                    defformatstring(cds)("%.1f", cd/1000.0f);
+                    defformatstring(cds)("%d", (cd+999)/1000); // v0.1.24: whole seconds - digit_white has no "." glyph (it rendered as "0", so 2.5 showed as 205)
                     // cooldown numeral contained in the slot (40% of slot size)
                     rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.40f);
                 }
@@ -2183,6 +2203,11 @@ namespace game
                     break;
                 }
             }
+            // v0.1.24: tooltip + hint line use digital (full charset).
+            // digit_white is digits/punctuation only, so ability names and
+            // the hint line were invisible in v0.1.23.
+            pushfont();
+            setfont("digital");
             if(hoverSlot >= 0 && hoverAid >= 0 && hoverAid < 8 && rpg::validability(hoverAid))
             {
                 const rpg::abilitydef &ab = rpg::ability(hoverAid);
@@ -2244,6 +2269,7 @@ namespace game
 
         // hint line above the strip, smaller, contained in the gap
         rpg_hudtext("[I] inventory  [C] character", int(X/2 - 260), int(sy - 44), 30*s);
+        popfont(); // end digital (tooltip + hint), restores digit_white context
         popfont();
     }
 
@@ -2391,7 +2417,7 @@ namespace game
         // digital.png is the clean readable sans. Scoped to the chat box only -
         // the HUD strip keeps the GUI font.
         pushfont();
-        setfont("digit_white"); // v0.1.22: use clean digital font (was default/blocky)
+        setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made chat text invisible in v0.1.23
         float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
@@ -2571,7 +2597,7 @@ namespace game
         const rpg::questdef *qd = rpg::questdefbyid(qid);
         if(!qd || !qd->name[0]) return;
         pushfont();
-        setfont("digit_white"); // v0.1.22: use clean digital font (was default/blocky)
+        setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*1800.0f/h;
         int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
         float ty = rs + rs/10 + 36.0f;

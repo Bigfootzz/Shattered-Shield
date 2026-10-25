@@ -2424,7 +2424,9 @@ namespace game
                 {
                     if(editmode) toggleedit();
                     stopfollowing();
-                    if(deathscore) showscores(true);
+                    // v0.1.24: on RPG maps death shows the death window, not
+                    // the scoreboard (same gate as deathstate in fps.cpp).
+                    if(deathscore && !rpg::mapactive(getclientmap())) showscores(true);
                 }
                 else d->resetinterp();
                 d->state = CS_DEAD;
