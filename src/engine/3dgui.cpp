@@ -320,6 +320,27 @@ struct gui : g3d_gui
         if(visible()) icon_(t, overlaid, curx, cury, size, ishit(size+SHADOW, size+SHADOW), colour);
         return layout(size+SHADOW, size+SHADOW);
     }
+    // v0.1.27 (item 8): horizontally-centered variants. Same layout
+    // bookkeeping as the left-aligned versions, but drawn centered in
+    // the box: during the draw pass xsize is the full box width (the
+    // layout pass computed it first), exactly how button_ centers
+    // titles. During the layout pass nothing draws, so the centering
+    // offset only applies when visible.
+    int imagecenter(Texture *t, float scale, bool overlaid, int colour)
+    {
+        autotab();
+        if(scale==0) scale = 1;
+        int size = (int)(scale*2*FONTH)-SHADOW;
+        if(visible())
+        {
+            int x = curx;
+            if(isvertical()) x += (xsize-(size+SHADOW))/2;
+            icon_(t, overlaid, x, cury, size, ishit(size+SHADOW, size+SHADOW), colour);
+        }
+        return layout(size+SHADOW, size+SHADOW);
+    }
+    int textcenter(const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, true, minwidth); }
+    int buttoncenter(const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, true, true, minwidth); }
     ///RR
 
     int texture(VSlot &vslot, float scale, bool overlaid)

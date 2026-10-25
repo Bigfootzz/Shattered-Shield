@@ -184,7 +184,13 @@ void restoregui(int pos)
 void showgui(const char *name)
 {
     menu *m = guis.access(name);
-    if(!m) return;
+    // v0.1.27 (item 5): the old silent return made a missing GUI
+    // indistinguishable from a working key - F7 in edit mode produced
+    // nothing at all, with no clue whether the bind fired, the GUI was
+    // unregistered, or something else. Log the miss so the console
+    // names it. (showgui is event-driven, not per-frame, so this cannot
+    // spam.)
+    if(!m) { conoutf("showgui: unknown menu '%s' (not registered)", name ? name : "?"); return; }
     int pos = guistack.find(m);
     if(pos<0) pushgui(m);
     else restoregui(pos);

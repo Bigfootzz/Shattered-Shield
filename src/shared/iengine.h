@@ -584,6 +584,20 @@ struct g3d_gui
     virtual bool shouldtab() { return false; }
     virtual void tab(const char *name = NULL, int color = 0) = 0;
     virtual int image(Texture *t, float scale, bool overlaid = false, int colour = 0xFFFFFF) = 0;
+    // v0.1.27 (item 8): horizontally-centered variants. title() already
+    // centers, but image/text/button left-align at the box edge, which
+    // left the death window's logo and countdown lines sitting right of
+    // center. Defaults fall back to the left-aligned versions so any
+    // other g3d_gui implementer keeps working unchanged; the real gui
+    // class in 3dgui.cpp overrides all three with true centering.
+    virtual int imagecenter(Texture *t, float scale, bool overlaid = false, int colour = 0xFFFFFF) { return image(t, scale, overlaid, colour); }
+    virtual int textcenter(const char *str, int color, const char *icon = NULL, int minwidth = 0) { return text(str, color, icon, minwidth); }
+    int textfcenter(const char *fmt, int color, const char *icon = NULL, ...) PRINTFARGS(2, 5)
+    {
+        defvformatstring(str, icon, fmt);
+        return textcenter(str, color, icon);
+    }
+    virtual int buttoncenter(const char *text, int color, const char *icon = NULL, int minwidth = 0) { return button(text, color, icon, minwidth); }
     virtual int texture(VSlot &vslot, float scale, bool overlaid = true) = 0;
     virtual int playerpreview(int model, int team, int weap, float scale, bool overlaid = false) { return 0; }
     virtual int modelpreview(const char *name, int anim, float scale, bool overlaid = false) { return 0; }

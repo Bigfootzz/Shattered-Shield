@@ -2106,14 +2106,18 @@ namespace game
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/strip.png")->id);
         rpg_drawtexuv(sx, sy, sw, sh, 0, 0, 1, 1);
 
-        // health numerals on top of everything (v0.1.25: 16% of orb diameter,
-        // down from 20% - the 20% numerals overflowed the globe rims in v0.1.24)
+        // health numerals on top of everything (v0.1.27: 12% of orb diameter,
+        // down from v0.1.25's 16% - Ed: "mana and health font is too big
+        // still". The v0.1.26 editor merge did NOT revert the v0.1.25 sizes
+        // (no font lines in the v0.1.25->v0.1.26 diff); 16% was simply
+        // still too big, so this goes visibly smaller, not sideways.)
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.16f);
+        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.12f);
 
         // v0.1.17: mana numerals on the mana globe (Ed: mana has no text)
+        // v0.1.27: same 16% -> 12% reduction as health, above.
         defformatstring(mps)("%d/%d", mana, maxmana);
-        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.16f);
+        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.12f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
         // User design change Oct 19: center bar is XP (was health); fills toward level-up.
@@ -2161,15 +2165,18 @@ namespace game
                 {
                     rpg_fillrect(qx, sloty, slotn, slotn, 0.0f, 0.0f, 0.0f, 0.65f);
                     defformatstring(cds)("%d", (cd+999)/1000); // v0.1.24: whole seconds - digit_white has no "." glyph (it rendered as "0", so 2.5 showed as 205)
-                    // cooldown numeral contained in the slot (v0.1.25: 32% of
-                    // slot size, down from 40% - leaves more of the icon visible)
-                    rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.32f);
+                    // cooldown numeral contained in the slot (v0.1.27: 26% of
+                    // slot size, down from v0.1.25's 32% - same "still too big"
+                    // call as the globe numerals, above)
+                    rpg_hudtextc(cds, qx + slotn/2, sloty + slotn/2, slotn*0.26f);
                 }
             }
             defformatstring(knum)("%d", (i+1)%10);
             // key number sits fully above the slot, inside the lower recess
-            // v0.1.25: 18px (was 26px) - smaller numbers leave more icon space
-            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 18*s), 18*s);
+            // v0.1.27: 14px (was v0.1.25's 18px) - smaller numbers leave more
+            // icon space; the vertical offset tracks the size so the number
+            // stays parked in the same recess
+            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 14*s), 14*s);
         }
 
         // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
@@ -3279,7 +3286,12 @@ namespace game
         // centered on the rim circle (radius s/2 about the ring center)
         // at the bottom-left / bottom-right diagonals, WoW-style.
         {
-            float isz = s*0.16f;
+            // v0.1.27 (item 3, Ed-specified): icons 10% smaller than v0.1.26
+            // (0.16 -> 0.144 of ring size). The round backing is 1.2x the
+            // icon size, so it scales with the icon and the ring stays
+            // proportional; hit-rects use isz, so clicks follow the icon.
+            // Rim positions, C/I keys and clock unchanged.
+            float isz = s*0.144f;
             float ccx = x + s*0.5f, ccy = y + s*0.5f, rim = s*0.5f*0.7071f;
             float cix = ccx - rim - isz*0.5f, ciy = ccy + rim - isz*0.5f;
             float bix = ccx + rim - isz*0.5f, biy = ccy + rim - isz*0.5f;

@@ -568,7 +568,10 @@ namespace game
     // (plain function: the ICOMMAND macro parser splits on bare commas)
     static void rpg_dtalk()
     {
-        if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE) return;
+        // v0.1.27 (item 1): the old early return was silent, so a failed
+        // F press left no trace at all. Log why, and log every send, so
+        // the console shows whether F reached the server or died here.
+        if(!rpg::mapactive(getclientmap()) || !player1 || player1->state != CS_ALIVE) { conoutf("rpg: talk: F ignored (not on an RPG map, or not alive)"); return; }
         int ni = rpg::selectednpc();
         if(ni < 0)
         {
@@ -577,9 +580,22 @@ namespace game
             rpgpickresult pk = rpg_pick(cx, cy, w, h);
             if(pk.kind == 3 && pk.npci >= 0) ni = pk.npci;
         }
+        conoutf("rpg: talk: sending N_RPG_TALK npc %d", ni);
         addmsg(N_RPG_TALK, "ri", ni);
     }
     ICOMMAND(rpgtalk, "", (), rpg_dtalk());
+    // v0.1.27 (item 1): talk to the NEAREST NPC in range, bypassing
+    // selection and the in-sights pick entirely. If F-talk fails but
+    // standing next to an NPC and typing rpgtalknear works, the bind
+    // or selection is at fault; if it fails too, the server's reply
+    // names the cause. Diagnostic + workaround in one command.
+    ICOMMAND(rpgtalknear, "", (), { conoutf("rpg: talk: sending N_RPG_TALK nearest (-1)"); addmsg(N_RPG_TALK, "ri", -1); });
+    // v0.1.27 (item 5): open the NPC editor from the console, bypassing
+    // the F7 editbind entirely. If F7 in edit mode still flashes (the
+    // screenshot bind firing means editing is not actually toggled on,
+    // or the editbind did not register), this command opens the editor
+    // regardless. Also confirms in the console that it ran.
+    ICOMMAND(shownpceditor, "", (), { conoutf("rpg: editor: opening npceditor"); showgui("npceditor"); });
     // v0.1.26: open Glimmer's shop directly, bypassing the F-talk path.
     // Lets Ed test the vendor GUI itself (and use the shop) even if talk
     // still fails, isolating GUI problems from talk-path problems.

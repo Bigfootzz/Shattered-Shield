@@ -441,19 +441,26 @@ namespace game
             // window. The logo is therefore added to the window itself,
             // prominently, where Ed asked for it. Title, countdown, Respawn
             // button and red vignette are unchanged.
+            // v0.1.27 (item 8): the whole column is centered as a group.
+            // title() already centers, but image/text/button left-align
+            // at the box edge, which put the logo and the countdown
+            // lines right of center in Ed's screenshot. Centered
+            // variants (g3d_gui imagecenter/textcenter/buttoncenter)
+            // fix the logo, the countdown lines and the Respawn button;
+            // the title was already centered and is unchanged.
             Texture *logo = textureload("packages/ui/rpg/menu/logo.png", 3);
-            if(logo) g.image(logo, 2.5f, false);
+            if(logo) g.imagecenter(logo, 2.5f, false);
             g.title("YOU HAVE DIED.", 0xFF2020);
             int remain = 10 - (lastmillis - player1->lastpain)/1000;
             if(remain > 0)
             {
-                g.textf("Respawn in %d...", 0xFFFFDD, NULL, remain);
-                g.text("Respawn", 0x808080);
+                g.textfcenter("Respawn in %d...", 0xFFFFDD, NULL, remain);
+                g.textcenter("Respawn", 0x808080);
             }
             else
             {
-                g.text("Your journey is not over yet.", 0xFFFFDD);
-                if(g.button("Respawn", 0xFFFFFF, "action")&G3D_UP) respawn();
+                g.textcenter("Your journey is not over yet.", 0xFFFFDD);
+                if(g.buttoncenter("Respawn", 0xFFFFFF, "action")&G3D_UP) respawn();
             }
             g.end();
         }

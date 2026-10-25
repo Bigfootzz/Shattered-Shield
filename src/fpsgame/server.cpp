@@ -3301,9 +3301,18 @@ namespace server
 
     void rpg_talk(clientinfo *cq, int npcidx)
     {
-        if(!rpg::connected() || !cq) return;
-        if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players talk
-        if(!rpg::mapactive(smapname)) return;
+        // v0.1.27 (item 1): NO silent failure here anymore. v0.1.26 F-talk
+        // failed for every NPC with no message at all, and these three
+        // early returns were the only paths that could produce exactly
+        // that symptom once F reached the server (every later failure
+        // already sends a visible message). Each now says why, in the
+        // System tab, and logs the same to the console, so the next
+        // playtest names the cause instead of going silent.
+        if(!cq) return;
+        if(!rpg::connected()) { rpg_qmsg(cq, "Talk is not available right now (character data is not ready)."); conoutf("rpg: talk: refused, character database not open"); return; }
+        if(cq->state.ai.type != ai::AI_TYPE_NONE) { conoutf("rpg: talk: refused, talker is not a real player"); return; } // only real players talk; AI has no screen, so no player message
+        if(!rpg::mapactive(smapname)) { rpg_qmsg(cq, "Talk is not available on this map."); conoutf("rpg: talk: refused, server map '%s' is not an RPG map", smapname); return; }
+        conoutf("rpg: talk: request npcidx %d on map '%s'", npcidx, smapname);
         if(cq->state.state != CS_ALIVE) { rpg_qmsg(cq, "You must be alive to talk."); return; }
         // v0.1.26: the client sends the selected NPC index, but if that
         // index is stale/out of range on the server (client and server
@@ -3341,6 +3350,9 @@ namespace server
         // return with no message at all, which Ed reads as "nothing
         // happens". Say so visibly instead.
         if(!nd || !nd->dialogue[0]) { rpg_qmsg(cq, "They have nothing to say."); return; }
+        // v0.1.27 (item 1): trace the resolved NPC so the console shows
+        // exactly which entry talk reached and how it routes.
+        conoutf("rpg: talk: npc %d id '%s' dialogue '%s' type '%s' at %.0f %.0f", npcidx, nd->id, nd->dialogue, nd->type, nd->x, nd->y);
         if(vec(cq->state.o.x, cq->state.o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) > 16.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
