@@ -2558,7 +2558,11 @@ namespace game
             rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
             rpg_solidquad(bx, by, bw, bh, 0.95f, 0.75f, 0.25f, 1.0f); // NPC gold, full
             rpg_hudtextc(nd->name, cx, 76, 40.0f);
-            rpg_hudtextc("Press F to talk", cx, 148, 26.0f);
+            // v0.1.25: prompt is distance-aware (same 16u horizontal range
+            // as the server talk check) so it never promises F-talk that
+            // will fail with a System-tab-only message.
+            float hdist = player1 ? vec(player1->o.x, player1->o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) : 0.0f;
+            rpg_hudtextc(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
             return;
         }
         int cn = rpg::selectedtarget();

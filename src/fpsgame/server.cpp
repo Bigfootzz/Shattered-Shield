@@ -2859,7 +2859,10 @@ namespace server
                             int newtotal = rpg::addcopper(actor->name, coins);
                             if(newtotal >= 0)
                             {
-                                sendf(actor->clientnum, 1, "ri", N_RPG_GOLD, newtotal);
+                                // v0.1.25: "ri2" (type + payload int). The old "ri" only wrote
+                                // the type token, so the client read an empty buffer as 0
+                                // and inventory always showed 0c despite the server log.
+                                sendf(actor->clientnum, 1, "ri2", N_RPG_GOLD, newtotal);
                                 sendservmsgf("\f2You found %d copper from \f2%s\f7!", coins, target->name);
                                 conoutf("rpg: coin drop %dc from %s to %s (total %dc)", coins, target->name, actor->name, newtotal);
                             }
@@ -3249,7 +3252,9 @@ namespace server
         if(!t) return;
         if(cq->state.state != CS_ALIVE) { rpg_closetalk(cq); return; }
         const rpg::npcdef *nd = rpg::npcat(t->npcid);
-        if(!nd || cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 14.0f)
+        // v0.1.25: horizontal distance, same 16u range as rpg_talk, so a
+        // dialogue started in range cannot close on the first response.
+        if(!nd || vec(cq->state.o.x, cq->state.o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) > 16.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
             rpg_closetalk(cq);
@@ -3300,19 +3305,26 @@ namespace server
             // The client sent no specific NPC (F pressed with nobody selected
             // or in sights) - resolve the nearest NPC inside talk range here;
             // the distance check below re-validates it.
-            float best = 12.0f;
+            // v0.1.25: HORIZONTAL distance (XY only) with a 16u range. The old
+            // 3D check measured to the NPC's base (z = ground) while the
+            // player's origin sits eyeheight above ground, so standing next
+            // to an NPC in open ground could still read >12u and F-talk
+            // silently failed ("Too far away" only in the System tab, which
+            // Ed read as "nothing happens"). Talking is about standing next
+            // to someone, so height must not count.
+            float best = 16.0f;
             loopi(rpg::npccount())
             {
                 const rpg::npcdef *cand = rpg::npcat(i);
                 if(!cand) continue;
-                float d = cq->state.o.dist(vec(cand->x, cand->y, cand->z));
+                float d = vec(cq->state.o.x, cq->state.o.y, 0.0f).dist(vec(cand->x, cand->y, 0.0f));
                 if(d <= best) { best = d; npcidx = i; }
             }
             if(npcidx < 0) { rpg_qmsg(cq, "No one nearby to talk to."); return; }
         }
         const rpg::npcdef *nd = rpg::npcat(npcidx);
         if(!nd || !nd->dialogue || !nd->dialogue[0]) return;
-        if(cq->state.o.dist(vec(nd->x, nd->y, nd->z)) > 12.0f)
+        if(vec(cq->state.o.x, cq->state.o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) > 16.0f)
         {
             rpg_qmsg(cq, "Too far away to talk.");
             return;
@@ -4340,7 +4352,9 @@ namespace server
         }
         sendf(cq->clientnum, 1, "riiiss", N_RPG_INV, level, xp, invs, eqs);
         // v0.1.23 currency: copper sync alongside inventory (total copper int)
-        sendf(cq->clientnum, 1, "ri", N_RPG_GOLD, rpg::getcopper(cq->name));
+        // v0.1.25: "ri2" (type + payload int) - the old "ri" dropped the payload,
+        // so the client always read 0 and inventory showed 0c (v0.1.24 item 2).
+        sendf(cq->clientnum, 1, "ri2", N_RPG_GOLD, rpg::getcopper(cq->name));
         rpg_syncquest(cq); // quest chain v1: tracker + radar stay in sync
         rpg_syncclan(cq); // clan system v1: membership sync
     }
