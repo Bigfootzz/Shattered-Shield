@@ -1,5 +1,6 @@
 // creation of scoreboard
 #include "game.h"
+#include "engine.h" // v0.1.25: textureload for the death-window logo
 #include "rpg/rpg.h"
 
 extern float gtextscale; //TODO: move to some header file
