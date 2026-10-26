@@ -1537,6 +1537,12 @@ namespace game
     VARP(lobbymode, MIN_GAMEMODE, DEFAULT_MODE, MAX_GAMEMODE);
     SVARP(lobbymap, DEFAULT_MAP);
 
+    // Stronger gate (Oct 26, Ed): developer-only edit flag. Persistent (VARP),
+    // default 0 (players cannot edit). Ed sets `dev_edit 1` in console once;
+    // it saves to config, so it persists. Checked by allowedittoggle (CFG)
+    // and by the `mode` command (setmode below).
+    VARP(dev_edit, 0, 0, 1);
+
     int gamemode = INT_MAX, nextmode = INT_MAX;
     string clientmap = "";
     // Incoming map for preload-time gating (load-time fix, Oct 22): set in
@@ -1597,6 +1603,15 @@ namespace game
         if(multiplayer(false) && !m_mp(mode))
         {
             conoutf(CON_ERROR, "mode %s (%d) not supported in multiplayer",  server::modename(mode), mode);
+            intret(0);
+            return;
+        }
+        // Stronger gate (Oct 26, Ed): players cannot switch modes on their own.
+        // Game-triggered changes (server forcemap, changemapserv, battleground
+        // queue) do not call setmode, so they bypass this gate by design.
+        if(!dev_edit)
+        {
+            conoutf(CON_ERROR, "mode switching is restricted to developers");
             intret(0);
             return;
         }

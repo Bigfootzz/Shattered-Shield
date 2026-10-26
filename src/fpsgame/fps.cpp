@@ -1995,7 +1995,13 @@ namespace game
         // field was removed from the select screen. For testing it's always
         // local; when it's not, hardcode the server address here.
         if(!isconnected()) localconnect();
-        changemap("rpg_01");
+        // Stronger gate (Oct 26, Ed): ENTER WORLD always loads RPG play.
+        // Turn edit off if on, and never enter the world in an edit mode:
+        // fall back to the existing default (7) if the requested mode has M_EDIT.
+        if(editmode) toggleedit();
+        int m = m_valid(nextmode) ? nextmode : localmode;
+        if(m_check(m, M_EDIT)) m = DEFAULT_MODE;
+        changemap("rpg_01", m);
         cleargui();
     });
 

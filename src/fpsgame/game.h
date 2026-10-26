@@ -1214,6 +1214,7 @@ namespace game
 
     // fps
     extern int gamemode, nextmode;
+    extern int localmode;
     extern string clientmap;
     extern bool intermission;
     extern int maptime, maprealtime, maplimit;
