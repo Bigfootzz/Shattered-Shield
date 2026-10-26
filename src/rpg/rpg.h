@@ -298,8 +298,9 @@ namespace rpg
         char name[64];
         int nnodes; dlgnode nodes[48];
     };
-    // Content API (both sides). loadquests() runs at init; defs are read-only
-    // afterwards. Returns false when data/rpg/quests.cfg failed validation
+    // Content API (both sides). loadquests() runs after NPCs load at map
+    // change, retried until success; defs are read-only afterwards.
+    // Returns false when data/rpg/quests.cfg failed validation
     // (the server logs the reason and keeps running with no quest content).
     bool loadquests();
     int questdefcount();

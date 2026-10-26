@@ -3,9 +3,12 @@
 // data/rpg/quests.cfg holds the quest definitions, staged objectives and NPC
 // dialogue node graphs in the flat ss_* setter syntax (same parser as the
 // item content files: quoted strings, // comments, strict, never executed).
-// Parsed once at init on BOTH client and server; the tables are read-only
-// afterwards. Dialogue itself is server-authoritative (see the talk engine in
-// the game module); this file only loads, validates and answers queries.
+// Parsed after NPCs load at map change on BOTH client and server, retried
+// on each map change until success, then read-only afterwards. Dialogue
+// itself is server-authoritative (see the talk engine in the game module);
+// this file only loads, validates and answers queries. (Quest load fix,
+// Oct 26, 2026: parsing at init always failed because the NPC table is
+// empty until map load, and the old done guard then blocked every retry.)
 #include "rpg.h"
 #include "items.h"
 #include "cube.h"
@@ -456,15 +459,19 @@ namespace rpg
 
     bool loadquests()
     {
-        static bool done = false;
-        if(done) return nqdefs > 0;
-        done = true;
+        // Already loaded: do not re-parse (giver indices must keep matching
+        // the NPC table quests were resolved against; later non-quest maps
+        // must not zero the tables). Not yet loaded: start clean and parse,
+        // so a failed attempt retries on the next map change instead of
+        // disabling quests for the whole session.
+        if(nqdefs > 0 && nqgraphs > 0) return true;
         if(!contentfileexists("data/rpg/quests.cfg"))
         {
             conoutf("rpg: quests: data/rpg/quests.cfg missing - quest content disabled");
             return false;
         }
         std::string err;
+        nqdefs = 0; nqgraphs = 0;
         QP = qparse();
         if(!parsecontentfile("data/rpg/quests.cfg", qline, err))
         {

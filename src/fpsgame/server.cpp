@@ -1187,7 +1187,10 @@ namespace server
         rpg::init();
         // --- RPG: content data layer (crafting build step 0): items + loot from data/rpg ---
         rpg::loadcontent();
-        rpg::loadquests(); // quest engine v2: quest + dialogue defs
+        // Quest load fix (Oct 26, 2026): quests are NOT loaded here. At init
+        // the NPC table is still empty, so ss_quest_giver lookups always
+        // failed and the old done guard then blocked every retry. Quests
+        // load at map change instead, after loadnpcs (see changemap below).
     }
 
     int numclients(int exclude = -1, bool nospec = true, bool noai = true, bool priv = false)
@@ -2442,6 +2445,14 @@ namespace server
         // coordinates as the client's data file. Falls back to the
         // hardcoded table when npcs_<map>.cfg is missing.
         if(s && s[0]) rpg::loadnpcs(s);
+        // --- RPG: quest load fix (Oct 26, 2026) ---
+        // Load quests AFTER NPCs, so ss_quest_giver ids resolve against the
+        // full NPC table. loadquests() is a no-op once loaded and retries
+        // on later map changes until it succeeds, so a broken quest file
+        // still logs its failure instead of silently disabling quests.
+        // Only on a real map load: an empty map has no NPC table to resolve
+        // against, and quests are not needed there.
+        if(s && s[0]) rpg::loadquests();
         // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
         // A listen-server `map` command changes smapname after clients connected,
         // so the connect-time spawn ran before the map was an RPG map; apply the

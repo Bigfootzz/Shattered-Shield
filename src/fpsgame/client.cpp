@@ -1575,6 +1575,13 @@ namespace game
         // preloads the models for THIS map's NPC file, not the previous map's.
         // Falls back to the hardcoded table when npcs_<map>.cfg is missing.
         if(name && name[0]) rpg::loadnpcs(name);
+        // --- RPG: quest load fix (Oct 26, 2026) ---
+        // Load quests AFTER NPCs, so ss_quest_giver ids resolve against the
+        // full NPC table. loadquests() is a no-op once loaded and retries
+        // on later map changes until it succeeds.
+        // Only on a real map load: an empty map has no NPC table to resolve
+        // against, and quests are not needed there.
+        if(name && name[0]) rpg::loadquests();
         // --- RPG: Shattered Shield (load-time fix, Oct 22) ---
         // Warm the quest-giver NPC models BEFORE load_world() queues and
         // flushes. game::preload() runs before startmap() publishes the new
@@ -2054,7 +2061,10 @@ namespace game
         // RPG: content data layer (crafting build step 0) - the client loads
         // the same data/rpg defs for display; the server's copy rules.
         rpg::loadcontent();
-        rpg::loadquests(); // quest engine v2: quest + dialogue defs
+        // Quest load fix (Oct 26, 2026): quests are NOT loaded here. At
+        // connect time the NPC table is still empty, so ss_quest_giver
+        // lookups always failed. Quests load at map change instead, after
+        // loadnpcs (see changemapserv below).
     }
 
     void gamedisconnect(bool cleanup)
