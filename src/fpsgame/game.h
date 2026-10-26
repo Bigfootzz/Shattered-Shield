@@ -181,6 +181,7 @@ enum
     M_SURVIVAL   = 1<<22,
     M_ONETEAM    = 1<<23,
     M_JUGGERNAUT = 1<<24,
+    M_RPG        = 1<<25,
 };
 
 struct Mutator
@@ -234,7 +235,7 @@ struct GameMode
 enum
 {
     MIN_GAMEMODE = -3,
-    MAX_GAMEMODE = 15
+    MAX_GAMEMODE = 16
 };
 
 const static GameMode gameModes[] =
@@ -258,6 +259,7 @@ const static GameMode gameModes[] =
     {13,    M_TEAM | M_INFECTION | M_JUGGERNAUT,                    "juggernaut",           "juggernaut",   NULL },
     {14,    M_SURVIVAL | M_ONETEAM | M_OVERTIME,                    "survival",             "survival",     NULL },
     {15,    M_NOITEMS | M_EFFICIENCY | M_CTF | M_HOLD | M_TEAM,     "efficiency hold",      "effichold",    NULL },
+    {16,    M_RPG,                                                "RPG",                  "rpg",          NULL },
 };
 
 #define RR_NUM_GAMEMODE (sizeof(gameModes)/sizeof(GameMode))
@@ -306,7 +308,7 @@ inline const GameMode *getGameModeS(const char *shortName)
 #ifdef CLIENT
 
 #define DEFAULT_MAP "rpg_01"
-#define DEFAULT_MODE 7
+#define DEFAULT_MODE 16
 
 /**
  * Paths to the models
@@ -351,7 +353,7 @@ inline const GameMode *getGameModeS(const char *shortName)
 #define m_demo         (m_check(gamemode, M_DEMO))
 #define m_edit         (m_check(gamemode, M_EDIT))
 #define m_lobby        (m_check(gamemode, M_LOBBY))
-#define m_timed        (m_checknot(gamemode, M_DEMO|M_DMSP|M_EDIT|M_LOCAL))
+#define m_timed        (m_checknot(gamemode, M_DEMO|M_DMSP|M_EDIT|M_LOCAL|M_RPG))
 #define m_botmode      (m_checknot(gamemode, M_DEMO|M_LOCAL))
 #define m_mp(mode)     (m_checknot(mode, M_LOCAL))
 
