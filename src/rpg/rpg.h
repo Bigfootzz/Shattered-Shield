@@ -339,7 +339,15 @@ namespace rpg
     // qids to `counted` (up to maxcounted) and returns how many counted.
     int questonkill(const char *name, const char *victimclass, int targetclientnum,
                     bool ismonster, int *counted, int maxcounted);
-    // --- repeatables (fetch template): additive table rpg_repeatables ---
+    // --- crafting recipes (Phase 1, Oct 27): per-character discovered
+    // recipes, additive table rpg_recipes. One row per (character, recipe
+    // key); the key is the canonical ingredient key from crafting.h, so a
+    // recipe discovered in either slot order is one row. Server-side only;
+    // the client displays the server's formatted lines, never its own rows.
+    bool recipediscovered(const char *name, const char *key);
+    void discoverrecipe(const char *name, const char *key);
+    // Discovered keys in discovery order (rowid order). Returns count filled.
+    int recipelist(const char *name, char keys[][256], int maxkeys);
     // One row per (character, quest): the rolled item/amount and the earliest
     // re-accept time. Server-side only.
     bool repeatableready(const char *name, int qid); // cooldown elapsed (or never rolled)

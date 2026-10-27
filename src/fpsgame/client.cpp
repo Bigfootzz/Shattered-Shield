@@ -1139,6 +1139,54 @@ namespace game
         }
         else result("packages/ui/rpg/slots/slot.png");
     });
+    // --- RPG: crafting Phase 1 (additive, Oct 27) ---
+    // The client only HOLDS the two craft slots and DISPLAYS the server's
+    // recipe lines; it never resolves a craft. Slots hold item ids ("" =
+    // empty). rpgcraftadd fills the first empty slot from an inventory
+    // index; rpgcraftsend asks the server, which validates everything.
+    static string rpg_craftslot[2];
+    static string rpg_craftrecipes[64];
+    static int rpg_craftrecipen = 0;
+    ICOMMAND(rpgcraftopen, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
+    ICOMMAND(rpgcraft, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
+    ICOMMAND(rpgcraftadd, "i", (int *i), {
+        rpg_refreshcl();
+        if(*i < 0 || *i >= rpg_cln) return;
+        const char *id = rpg::item(rpg_clinv[*i].item).id;
+        if(!strcmp(rpg_craftslot[0], id) || !strcmp(rpg_craftslot[1], id)) return; // already slotted
+        if(!rpg_craftslot[0][0]) copystring(rpg_craftslot[0], id, sizeof(string));
+        else if(!rpg_craftslot[1][0]) copystring(rpg_craftslot[1], id, sizeof(string));
+        else conoutf("rpg: craft: both slots full - clear one first");
+    });
+    // By-id variant (same effect as rpgcraftadd, for console/macros; the
+    // server still validates ownership and the recipe on rpgcraftsend).
+    ICOMMAND(rpgcraftset, "is", (int *slot, char *id), {
+        if(*slot < 0 || *slot >= 2) return;
+        rpg_refreshcl();
+        int idn = rpg::finditem(id);
+        if(idn < 0) { conoutf("rpg: craft: unknown item %s", id); return; }
+        bool owned = false;
+        loopi(rpg_cln) if(rpg_clinv[i].item == idn) owned = true;
+        if(!owned) { conoutf("rpg: craft: %s not in inventory", id); return; }
+        copystring(rpg_craftslot[*slot], id, sizeof(string));
+    });
+    ICOMMAND(rpgcraftslot, "i", (int *i), { result(*i >= 0 && *i < 2 ? rpg_craftslot[*i] : ""); });
+    ICOMMAND(rpgcraftslotname, "i", (int *i), {
+        if(*i < 0 || *i >= 2 || !rpg_craftslot[*i][0]) result("(empty)");
+        else result(rpg::itemname(rpg::finditem(rpg_craftslot[*i])));
+    });
+    ICOMMAND(rpgcraftsloticon, "i", (int *i), {
+        if(*i < 0 || *i >= 2 || !rpg_craftslot[*i][0]) result("packages/ui/rpg/slots/slot.png");
+        else
+        {
+            int id = rpg::finditem(rpg_craftslot[*i]);
+            result(id >= 0 ? rpg::item(id).icon : "packages/ui/rpg/slots/slot.png");
+        }
+    });
+    ICOMMAND(rpgcraftclear, "i", (int *i), { if(*i >= 0 && *i < 2) rpg_craftslot[*i][0] = '\0'; });
+    ICOMMAND(rpgcraftsend, "", (), { addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]); });
+    ICOMMAND(rpg_recipe_lines, "", (), intret(rpg_craftrecipen));
+    ICOMMAND(rpg_recipe_line, "i", (int *i), { result(*i >= 0 && *i < rpg_craftrecipen ? rpg_craftrecipes[*i] : ""); });
     ICOMMAND(rpgeqcell, "s", (char *s), {
         rpg_refreshcl();
         int id = rpg::slotid(s);
@@ -3326,6 +3374,21 @@ namespace game
                 int qid = getint(p);
                 string text; getstring(text, p);
                 rpg::setclientquesttext(qid, text);
+                break;
+            }
+            case N_RPG_RECIPES: // crafting Phase 1: discovered recipes, \n-separated lines
+            {
+                string lines; getstring(lines, p);
+                rpg_craftrecipen = 0;
+                char *cur = lines;
+                while(cur && *cur && rpg_craftrecipen < 64)
+                {
+                    char *nl = strchr(cur, '\n');
+                    if(nl) *nl = '\0';
+                    copystring(rpg_craftrecipes[rpg_craftrecipen], cur, sizeof(string));
+                    rpg_craftrecipen++;
+                    cur = nl ? nl + 1 : NULL;
+                }
                 break;
             }
             case N_RPG_DIALOG: // quest engine v2: dialogue node (display only)

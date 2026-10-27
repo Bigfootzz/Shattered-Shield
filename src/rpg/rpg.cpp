@@ -169,6 +169,11 @@ namespace rpg
                 "amount INTEGER NOT NULL DEFAULT 0,"
                 "readyat INTEGER NOT NULL DEFAULT 0,"
                 "PRIMARY KEY(name, quest))");
+        // --- crafting recipes (Phase 1, Oct 27): discovered-recipe rows ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_recipes("
+                "name TEXT NOT NULL,"
+                "recipe TEXT NOT NULL,"
+                "PRIMARY KEY(name, recipe))");
         // --- party + safety v1 (Oct 19): mute/block lists, additive ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_mutes("
                 "owner TEXT NOT NULL,"
@@ -1233,6 +1238,57 @@ namespace rpg
                 need = amount;
             }
         }
+    }
+
+    // --- crafting recipes (Phase 1): discovered-recipe rows, direct SQL
+    // (no cache: a character discovers a handful of recipes per session,
+    // so a cache would buy nothing and add a lifecycle to get wrong).
+    bool recipediscovered(const char *name, const char *key)
+    {
+        if(!db || !name || !name[0] || !key || !key[0]) return false;
+        sqlite3_stmt *st = NULL;
+        bool found = false;
+        if(sqlite3_prepare_v2(db, "SELECT 1 FROM rpg_recipes WHERE name=?1 AND recipe=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, key, -1, SQLITE_TRANSIENT);
+            found = sqlite3_step(st) == SQLITE_ROW;
+            sqlite3_finalize(st);
+        }
+        return found;
+    }
+
+    void discoverrecipe(const char *name, const char *key)
+    {
+        if(!db || !name || !name[0] || !key || !key[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO rpg_recipes(name, recipe) VALUES(?1, ?2)", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, key, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+
+    int recipelist(const char *name, char keys[][256], int maxkeys)
+    {
+        if(!db || !name || !name[0] || !keys || maxkeys <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        int n = 0;
+        if(sqlite3_prepare_v2(db, "SELECT recipe FROM rpg_recipes WHERE name=?1 ORDER BY rowid", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            while(n < maxkeys && sqlite3_step(st) == SQLITE_ROW)
+            {
+                const unsigned char *t = sqlite3_column_text(st, 0);
+                if(t) copystring(keys[n], (const char *)t, 256);
+                else keys[n][0] = '\0';
+                n++;
+            }
+            sqlite3_finalize(st);
+        }
+        return n;
     }
 
     // Champion tracking (server session state).

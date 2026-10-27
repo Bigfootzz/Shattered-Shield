@@ -715,6 +715,10 @@ enum
     N_RPG_PROJ,     // s->c: projectile spawned (projid, castercn, targetcn, ability, x, y, z)
     N_RPG_PROJHIT,  // s->c: projectile landed (projid, targetcn, damage)
     N_RPG_PROJFIZZLE, // s->c: projectile fizzled, target gone (projid)
+    // Shattered Shield crafting Phase 1 (additive, Oct 27)
+    N_RPG_CRAFT,    // c->s: craft request (item id string, item id string)
+    N_RPG_CRAFTL,   // c->s: request discovered-recipe list (no args)
+    N_RPG_RECIPES,  // s->c: discovered recipes, one formatted line per recipe, \n-separated
     NUMSV
 };
 
@@ -752,6 +756,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 1, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
+    N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0,
     -1
 };
 

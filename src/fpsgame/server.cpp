@@ -5,6 +5,7 @@
 #include "rpg/rpg.h"
 #include "rpg/abilities.h"
 #include "rpg/stats.h"
+#include "rpg/crafting.h"
 
 #ifdef SERVER
 #include "server/lua.h"
@@ -4517,6 +4518,132 @@ namespace server
         conoutf("rpg: '%s' buys %s for %dc", cq->name, rpg::itemname(id), price);
         rpg_syncinv(cq);
     }
+    // Crafting Phase 1 (Oct 27, Ed's settled design): server-validated.
+    // craft_fail_lose is the future toggle for failed-combo item loss:
+    // 0 (default, settled) = a failed combo does NOTHING and items are
+    // NOT lost; 1 = a failed combo consumes the ingredients. The toggle
+    // exists now so flipping it later is a variable change, not a rewrite.
+    VAR(craft_fail_lose, 0, 0, 1);
+
+    // Push the player's discovered-recipe lines to one client. Lines are
+    // pre-formatted server-side ("1 Grave Moss + 1 Old Bone = Herbal
+    // Tonic"); the client displays them verbatim and never resolves
+    // anything. Unknown keys (data changed since discovery) are skipped.
+    static void rpg_sendrecipes(clientinfo *cq)
+    {
+        if(!rpg::connected() || !cq) return;
+        char keys[64][256];
+        int n = rpg::recipelist(cq->name, keys, 64);
+        string out;
+        out[0] = '\0';
+        loopi(n)
+        {
+            const rpg::craftrecipe *r = rpg::craftrecipebykey(keys[i]);
+            if(!r) continue;
+            defformatstring(line)("%d %s + %d %s = %s",
+                r->ingcount[0], rpg::itemname(rpg::finditem(r->ing[0])),
+                r->ingcount[1], rpg::itemname(rpg::finditem(r->ing[1])),
+                rpg::itemname(rpg::finditem(r->out)));
+            if(out[0]) concatstring(out, "\n");
+            concatstring(out, line);
+        }
+        sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, out);
+    }
+
+    void rpg_craft(clientinfo *cq, const char *itema, const char *itemb)
+    {
+        if(!rpg_checkinv(cq)) return;
+        if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to craft."); return; }
+        if(!itema || !itema[0] || !itemb || !itemb[0]) { rpg_qmsg(cq, "Choose two ingredients first."); return; }
+        int ida = rpg::finditem(itema), idb = rpg::finditem(itemb);
+        if(ida < 0 || idb < 0) { rpg_qmsg(cq, "Unknown ingredient."); return; }
+        char key[256];
+        if(!rpg::craftkey(itema, itemb, key, sizeof(key))) { rpg_qmsg(cq, "Unknown ingredient."); return; }
+        const rpg::craftrecipe *r = rpg::craftrecipebykey(key);
+        // Count check FIRST: never lose (or consume) what you don't have,
+        // in either the success or the failure branch. Same-id slots need
+        // the folded count (2 of one item); a recipe's own counts govern
+        // when one matches.
+        if(r)
+        {
+            if(!strcmp(r->ing[0], r->ing[1]))
+            {
+                if(rpg::itemcount(cq->name, r->ing[0]) < r->ingcount[0] + r->ingcount[1])
+                { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+            }
+            else if(rpg::itemcount(cq->name, r->ing[0]) < r->ingcount[0] ||
+                    rpg::itemcount(cq->name, r->ing[1]) < r->ingcount[1])
+            { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+        }
+        else if(ida == idb)
+        {
+            if(rpg::itemcount(cq->name, itema) < 2) { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+        }
+        else if(rpg::itemcount(cq->name, itema) < 1 || rpg::itemcount(cq->name, itemb) < 1)
+        { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+
+        if(!r)
+        {
+            // Failed combo: settled behavior is NOTHING happens, items
+            // stay. The toggle branch consumes them instead (future).
+            if(craft_fail_lose)
+            {
+                rpg::removeitem(cq->name, itema, ida == idb ? 2 : 1);
+                if(ida != idb) rpg::removeitem(cq->name, itemb, 1);
+                rpg_syncinv(cq);
+                rpg_qmsg(cq, "That combination doesn't craft anything. Your materials were lost.");
+            }
+            else rpg_qmsg(cq, "That combination doesn't craft anything. Your materials are safe.");
+            conoutf("rpg: '%s' failed craft %s + %s (fail_lose %d)", cq->name, itema, itemb, craft_fail_lose);
+            return;
+        }
+
+        // Success: tier from ingredient tiers (Phase 1 materials are all
+        // common, so this is tier 0 today; the math is the real one, and
+        // rarer variants will flow through it when they exist).
+        int tiers[2] = { rpg::item(rpg::finditem(r->ing[0])).tier, rpg::item(rpg::finditem(r->ing[1])).tier };
+        unsigned int seed = (unsigned int)(totalmillis ^ (gamemillis << 1) ^ (cq->clientnum * 2654435761u));
+        int tier = rpg::craft_tier(tiers, 2, seed);
+        const char *outid = rpg::craftoutfortier(r, tier);
+        if(!strcmp(r->ing[0], r->ing[1])) rpg::removeitem(cq->name, r->ing[0], r->ingcount[0] + r->ingcount[1]);
+        else
+        {
+            rpg::removeitem(cq->name, r->ing[0], r->ingcount[0]);
+            rpg::removeitem(cq->name, r->ing[1], r->ingcount[1]);
+        }
+        if(!rpg::additem(cq->name, outid, r->outcount))
+        {
+            // Refund on failure (should not happen for known items).
+            if(!strcmp(r->ing[0], r->ing[1])) rpg::additem(cq->name, r->ing[0], r->ingcount[0] + r->ingcount[1]);
+            else { rpg::additem(cq->name, r->ing[0], r->ingcount[0]); rpg::additem(cq->name, r->ing[1], r->ingcount[1]); }
+            rpg_qmsg(cq, "Crafting failed.");
+            rpg_syncinv(cq);
+            return;
+        }
+        bool isnew = !rpg::recipediscovered(cq->name, key);
+        if(isnew) rpg::discoverrecipe(cq->name, key);
+        defformatstring(msg)("You craft %s.", rpg::itemname(rpg::finditem(outid)));
+        rpg_qmsg(cq, msg);
+        conoutf("rpg: '%s' crafts %s (tier %s) from %s + %s%s", cq->name,
+                rpg::itemname(rpg::finditem(outid)), rpg::crafttiername(tier),
+                r->ing[0], r->ing[1], isnew ? " [recipe discovered]" : "");
+        // Quest 7 (Necessity Is the Mother of Invention) completes on the
+        // first craft AFTER Tomas's walkthrough (stage 2). Crafts before
+        // the walkthrough still succeed and still record the recipe, but
+        // do not complete the quest: the lesson is the point.
+        if(rpg::queststate(cq->name, 7) == 2)
+        {
+            rpg::questsetstage(cq->name, 7, 3);
+            bool leveled = false;
+            int newlevel = rpg::awardxp(cq->name, 100, &leveled);
+            if(newlevel > 0 && leveled) rpg_levelupfx(cq, newlevel);
+            rpg_qmsg(cq, "Quest complete: Necessity Is the Mother of Invention (+100 XP)");
+        }
+        rpg_syncinv(cq);
+        rpg_syncquest(cq);
+        rpg_sendrecipes(cq);
+    }
+
     void rpg_sell(clientinfo *cq, const char *itemid)
     {
         if(!rpg_checkinv(cq)) return;
@@ -5854,6 +5981,18 @@ namespace server
             {
                 string itemid; getstring(itemid, p);
                 if(cq) rpg_sell(cq, itemid);
+                break;
+            }
+            // Crafting Phase 1 (server-authoritative, Oct 27).
+            case N_RPG_CRAFT:
+            {
+                string itema, itemb; getstring(itema, p); getstring(itemb, p);
+                if(cq) rpg_craft(cq, itema, itemb);
+                break;
+            }
+            case N_RPG_CRAFTL:
+            {
+                if(cq) rpg_sendrecipes(cq);
                 break;
             }
 

@@ -61,6 +61,10 @@ namespace rpg
         int value;         // base worth: fetch-quest rewards read it now in data;
                            // no gameplay consumer until merchants (crafting design §5.4)
         int mana;          // consumables: mana restored on use (0 = none)
+        int tier;          // rarity tier (crafting Phase 1): 0 common, 1 uncommon,
+                           // 2 rare, 3 epic, 4 legendary. Default 0; data files
+                           // set it with ss_item_tier. Crafting output tier is
+                           // computed from ingredient tiers, never stored here.
     };
 
     int itemcount();                    // number of defs in the ACTIVE table

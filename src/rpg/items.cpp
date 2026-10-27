@@ -12,6 +12,7 @@
 // The server loads its own copy and is the only side whose numbers mean
 // anything; the client loads the same files for display.
 #include "items.h"
+#include "crafting.h"
 #include "cube.h"
 
 #include <cstdlib>
@@ -41,22 +42,22 @@ namespace rpg
     static const itemdef FALLBACK_ITEMS[] =
     {
         // id              name            type            slot           icon                                        vwep                         dmg  arm  heal  stack  value mana
-        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     15,  0,   0,   false, 60,   0 },
-        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/warrior/sword",    15,  0,   0,   false, 60,   0 },
-        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 },
-        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 },
-        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 },
-        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 },
-        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 },
-        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 },
-        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 },
-        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 15,   0 },
-        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 25,   0 },
-        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  2,   0,   false, 25,   0 },
-        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  4,   0,   false, 45,   0 },
-        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 12,   0 },
-        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 },
-        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 },
+        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     15,  0,   0,   false, 60,   0 , 0 },
+        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/warrior/sword",    15,  0,   0,   false, 60,   0 , 0 },
+        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 , 0 },
+        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 , 0 },
+        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 , 0 },
+        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 , 0 },
+        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 , 0 },
+        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 , 0 },
+        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 , 0 },
+        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 15,   0 , 0 },
+        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 25,   0 , 0 },
+        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  2,   0,   false, 25,   0 , 0 },
+        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  4,   0,   false, 45,   0 , 0 },
+        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 12,   0 , 0 },
+        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 , 0 },
+        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 , 0 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
@@ -85,7 +86,7 @@ namespace rpg
 
     const itemdef &item(int id)
     {
-        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, 0, 0, 0, false, 0, 0 };
+        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, 0, 0, 0, false, 0, 0, 0 };
         if(id < 0 || id >= itemcount()) return invalid;
         return usingdata ? dataitems[id] : FALLBACK_ITEMS[id];
     }
@@ -124,7 +125,7 @@ namespace rpg
     {
         bool active = false;
         std::string id, name, type, slot, icon, vwep;
-        int damage = 0, armor = 0, heal = 0, mana = 0, value = 0;
+        int damage = 0, armor = 0, heal = 0, mana = 0, value = 0, tier = 0;
         bool stack = false;
     };
     static itembuild curitem;
@@ -196,6 +197,12 @@ namespace rpg
         if(c == "ss_item_heal") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.heal, err)) return false; return true; }
         if(c == "ss_item_mana") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.mana, err)) return false; return true; }
         if(c == "ss_item_value") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.value, err)) return false; return true; }
+        if(c == "ss_item_tier")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.tier, err)) return false;
+            if(curitem.tier < 0 || curitem.tier > 4) { err = "ss_item_tier out of range 0..4"; return false; }
+            return true;
+        }
         if(c == "ss_item_stack")
         {
             int v = 0;
@@ -360,6 +367,7 @@ namespace rpg
             d.stackable = b.stack;
             d.value = b.value;
             d.mana = b.mana;
+            d.tier = b.tier;
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             if(!findfile(d.icon, "e"))
@@ -485,6 +493,11 @@ namespace rpg
             commitloot();
         }
         else conoutf("rpg: content: warning: data/rpg/loot.cfg missing - no per-type loot tables (global fallback applies)");
+
+        // Crafting recipes (Phase 1): additive - a missing or rejected
+        // crafting.cfg leaves the game running with no recipes, and the
+        // reason is logged loudly above. It never rolls back items/loot.
+        loadcrafting();
 
         conoutf("rpg: content: %d items, %d loot tables loaded from data/rpg (checksum %08x)",
                 itemcount(), (int)dataloot.size(), contentchecksum());
