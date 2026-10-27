@@ -506,7 +506,7 @@ namespace game
     ICOMMAND(rpgtestrmbrelease, "", (), rpg_rmbrelease(1));
     ICOMMAND(rpgtestyaw, "", (),
     {
-        conoutf("rpgtest: yaw player=%.1f camera=%.1f", player1 ? player1->yaw : -1, camera1 ? camera1->yaw : -1);
+        conoutf("rpg: rpgtest: yaw player=%.1f camera=%.1f", player1 ? player1->yaw : -1, camera1 ? camera1->yaw : -1);
     });
     // TEST-ONLY (harness): write yaw/state to a file (console output is not
     // captured in the headless harness). Also rpg_testforce bypasses the
@@ -1058,7 +1058,7 @@ namespace game
         loopi(rpg::npccount())
         {
             const rpg::npcdef *nd = rpg::npcat(i);
-            if(nd) conoutf("  [%d] %s \"%s\" %s (%.0f %.0f %.0f) yaw %.0f dlg %s", i, nd->id, nd->name, nd->model, nd->x, nd->y, nd->z, nd->yaw, nd->dialogue);
+            if(nd) conoutf("rpg: [%d] %s \"%s\" %s (%.0f %.0f %.0f) yaw %.0f dlg %s", i, nd->id, nd->name, nd->model, nd->x, nd->y, nd->z, nd->yaw, nd->dialogue);
         }
     });
     ICOMMAND(npc_add_here, "sss", (char *id, char *name, char *model),
@@ -2512,6 +2512,7 @@ namespace game
         // system lines leak to the top-left feed. The matchers below are
         // RPG-specific, so no gate is needed.
         if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
+        if(line && strstr(line, "LEVEL UP")) return false; // Ed: level notification stays in the top-left feed
         if(line && !strncmp(line, "rpg: ", 5)) return true;
         if((type & CON_INFO) && rpg_serverline(line)) return true;
         return false;
