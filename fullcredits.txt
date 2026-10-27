@@ -4,6 +4,8 @@ Models:
     Pyccna
     CDmir (Cestmir Dammer) and TinyWorlds: monk model and textures
     (packages/models/npcs/monk; Tomas; CC0, OpenGameArt)
+    CDmir (Cestmir Dammer) and TinyWorlds: bartender model and textures
+    (packages/models/npcs/bartender; Maren; CC0, OpenGameArt)
 	
 Textures:
    Snipergoth
