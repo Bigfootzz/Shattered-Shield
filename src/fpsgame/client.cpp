@@ -2095,10 +2095,39 @@ namespace game
         }
     }
 
-    void toserver(char *text) { conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
+    // v0.1.31 /GPS (Ed, Oct 27): in-game coordinates readout, client-side.
+    // Yaw lives only on the client: the server gamestate carries position
+    // but no yaw (see the savepos "yaw: not on gamestate" comments in
+    // server.cpp), so a server-side /gps could never give the facing
+    // Ed needs for NPC placement. Intercept here instead: print the
+    // player's exact X Y Z + yaw, plus the NPC yaw that faces the player
+    // (player yaw + 180, per Ed's confirmed placement rule: he stands
+    // where a player would talk to the NPC, facing the NPC's spot).
+    // The "rpg: " prefix routes the line to the chat box System tab
+    // via rpg_chat_tap, and nothing is sent to the server, so /gps is
+    // never broadcast to other players. Works from World and Clan tabs.
+    static bool rpg_gps(char *text)
+    {
+        if(!text || strncmp(text, "/gps", 4) || (text[4] && text[4] != ' ')) return false;
+        if(!player1) { conoutf("rpg: GPS: no player yet."); return true; }
+        float pyaw = player1->yaw;
+        float npcyaw = pyaw + 180.0f;
+        while(npcyaw >= 360.0f) npcyaw -= 360.0f;
+        while(npcyaw < 0.0f) npcyaw += 360.0f;
+        // v0.1.31 fix: two short lines, not one long one. The chat
+        // box truncates long lines at its right edge, so the single
+        // line version cut off the yaw in game (headless proof v31).
+        defformatstring(gps1)("rpg: GPS map %s pos (%.0f, %.0f, %.0f)",
+            getclientmap(), player1->o.x, player1->o.y, player1->o.z);
+        defformatstring(gps2)("rpg: GPS yaw %.0f -- NPC yaw %.0f", pyaw, npcyaw);
+        conoutf("%s", gps1);
+        conoutf("%s", gps2);
+        return true;
+    }
+    void toserver(char *text) { if(rpg_gps(text)) return; conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
     COMMANDN(say, toserver, "C");
 
-    void sayteam(char *text) { conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
+    void sayteam(char *text) { if(rpg_gps(text)) return; conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
     COMMAND(sayteam, "C");
 
     void sendposition(fpsent *d, packetbuf &q)

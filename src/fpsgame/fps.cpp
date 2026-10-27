@@ -2163,7 +2163,13 @@ namespace game
         // v0.1.30: larger slot boxes, still inside the HUD frame.
         // 64*s boxes moved up to 84*s keep the bottom at sy+148*s,
         // inside the strip (strip height is ~156*s, bottom margin kept).
-        float slotn = 64*s, sloty = sy + 84*s;
+        // v0.1.31 (Ed, Oct 27): slots still sat below the strip's
+        // black area in game. The strip art is black only from
+        // y 48 to 144 (native 1024x156), transparent below 144, so
+        // 84-148 boxes hung 4px into transparency. At 64*s the
+        // boxes sit 64-128, fully over black with margin both sides,
+        // clear of the XP bar (28-48).
+        float slotn = 64*s, sloty = sy + 64*s;
         loopi(10)
         {
             float qx = sx + (160 + i*70)*s;
@@ -2637,8 +2643,10 @@ namespace game
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*1800.0f/h;
-        int rs = 1800/4, rx = int(X - rs - rs/10); // same geometry as drawrpgradar
-        float ty = rs + rs/10 + 36.0f;
+        // v0.1.31: same geometry as drawrpgradar (5% smaller, s/20
+        // margin), plus 8px more below the ring for the larger clock.
+        int rs = int(1800/4*0.95f), rx = int(X - rs - rs/20);
+        float ty = rs + rs/20 + 44.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -3222,7 +3230,10 @@ namespace game
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
         if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        // v0.1.31 (Ed, Oct 27): minimap 5% smaller and a little closer
+        // to the corner. 450 -> 427 (450 x 0.95), margin s/10 -> s/20.
+        // drawrpgquest uses the same geometry, so it moves with it.
+        int s = int(1800/4*0.95f), x = 1800*w/h - s - s/20, y = s/20;
         glColor4f(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
@@ -3340,12 +3351,14 @@ namespace game
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_bag.png")->id);
             rpg_drawtexuv(bix, biy, isz, isz, 0, 0, 1, 1);
             // Local clock below the ring (HH:MM, WoW-style).
+            // v0.1.31 (Ed, Oct 27): a little larger, 24 -> 30, and
+            // 2px higher so its bottom still clears the quest plate.
             time_t now = time(NULL);
             struct tm *lt = localtime(&now);
             char tbuf[16] = "00:00";
             if(lt) strftime(tbuf, sizeof(tbuf), "%H:%M", lt);
             pushfont();
-            rpg_hudtextc(tbuf, x + s*0.5f, y + s + 14.0f, 24.0f);
+            rpg_hudtextc(tbuf, x + s*0.5f, y + s + 12.0f, 30.0f);
             popfont();
         }
     }

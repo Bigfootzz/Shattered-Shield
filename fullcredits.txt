@@ -7,3 +7,7 @@ Textures:
    Snipergoth
    Chasester
    
+Skyboxes:
+   Remus - skyboxes/remus/sky01 (used as the rpg_01 sky since v0.1.31;
+   free to use for personal and commercial purposes with credit, per
+   packages/skyboxes/remus/readme.txt)

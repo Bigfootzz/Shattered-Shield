@@ -4524,11 +4524,28 @@ namespace server
         int id = rpg::finditem(itemid);
         if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Unknown item."); return; }
         const rpg::itemdef &d = rpg::item(id);
-        if(d.slot == rpg::SLOT_NONE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That cannot be sold."); return; }
+        // v0.1.31 (Ed, Oct 27): equipped items must NOT sell. The old
+        // code silently unequipped then sold, so Ed sold worn gear
+        // without meaning to. Reject with a visible unequip-first
+        // message instead (rpg_qmsg -> System tab; SERVMSG only
+        // reaches the console, which is why the old rejections
+        // looked like nothing happened).
+        loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id)
+        {
+            rpg_qmsg(cq, "That is equipped. Unequip it first, then sell it.");
+            return;
+        }
+        // v0.1.31 (Ed, Oct 27): non-gear is sellable too, not just
+        // equippable weapons/armor. Consumables and materials all
+        // carry a value (potion 10, moss 3, bone 2, horn 6, hide 4),
+        // so they sell at half value like gear. Quest items are the
+        // only exception: they have value 0, so price 0 still blocks
+        // them, protecting quest progress. Crafting does not exist
+        // yet (items.cfg is only the content data layer), so selling
+        // is the route Ed approved, not crafting use.
+        if(d.type == rpg::ITEM_QUEST) { rpg_qmsg(cq, "That cannot be sold."); return; }
         int price = rpg::sellprice(id);
         if(price <= 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That has no sell value."); return; }
-        // Unequip first if worn (it moves to the pack, then sells from there).
-        loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id) rpg::unequipslot(cq->name, i);
         if(!rpg::removeitem(cq->name, itemid, 1)) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
         rpg::addcopper(cq->name, price);
         defformatstring(msg)("\f2%s \f7sold for %d copper.", rpg::itemname(id), price);
