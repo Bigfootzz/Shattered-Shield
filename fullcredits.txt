@@ -2,6 +2,8 @@ Models:
     A.W.O.L
     geartrooper a.k.a. John Siar: ironantknight@gmail.com
     Pyccna
+    CDmir (Cestmir Dammer) and TinyWorlds: monk model and textures
+    (packages/models/npcs/monk; Tomas; CC0, OpenGameArt)
 	
 Textures:
    Snipergoth
