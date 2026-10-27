@@ -623,20 +623,21 @@ namespace game
             size_t plen = nl ? (size_t)(nl - p) : strlen(p);
             if(plen >= sizeof(para)) plen = sizeof(para) - 1;
             memcpy(para, p, plen); para[plen] = '\0';
-            // then wrap the paragraph on word boundaries. v0.1.8: 50 chars, not
-            // 64 - the dialogue column is 36 FONTW wide and the text renders
-            // at 0.7 scale, so 50*0.7 = 35 < 36. The old 64-char wrap drew
-            // 44.8-FONTW lines that stretched the column past the frame and
-            // pushed text off the left edge (Ed's photo).
+            // then wrap the paragraph on word boundaries. v0.1.30: 40 chars,
+            // not 50 - the dialogue window is now the Inventory frame
+            // (24 FONTW column, Ed Oct 27), and the text renders at
+            // 0.6 scale, so 40*0.6 = 24 fits the column exactly. The
+            // old 50-char wrap drew 30-FONTW lines that would stretch
+            // the 24 column past the frame.
             const char *w = para;
             while(*w)
             {
                 size_t len = strlen(w);
-                if(len > 50)
+                if(len > 40)
                 {
-                    len = 50;
+                    len = 40;
                     while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
-                    if(len == 0) len = 50;
+                    if(len == 0) len = 40;
                 }
                 char line[72];
                 memcpy(line, w, len); line[len] = '\0';

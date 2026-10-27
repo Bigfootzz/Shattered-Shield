@@ -3383,7 +3383,14 @@ namespace server
         if(!strcmp(nd->dialogue, "vendor_main") || !strcmp(nd->type, "vendor"))
         {
             conoutf("rpg: talk: opening vendor GUI for npc '%s'", nd->id[0] ? nd->id : "?");
-            sendf(cq->clientnum, 1, "r", N_RPG_VENDOR);
+            // v0.1.30 ROOT CAUSE: this was sendf(..., "r", N_RPG_VENDOR).
+            // In sendf, 'r' is the reliable flag, not a format code, so
+            // "r" alone consumed NO vararg and sent an EMPTY packet:
+            // the client never received N_RPG_VENDOR, the handler never
+            // ran, and F looked dead with no error anywhere. Every
+            // other server send uses "ri..." so the message type is
+            // the first int in the packet. Vendor now does the same.
+            sendf(cq->clientnum, 1, "ri", N_RPG_VENDOR);
             return;
         }
         const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);

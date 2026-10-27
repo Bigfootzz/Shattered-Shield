@@ -2042,7 +2042,16 @@ namespace game
     }
     static void rpg_hudtextc(const char *str, float cx, float cy, float pxh)
     {
-        float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
+        // v0.1.30: true centering by measured width. The old strlen*0.5
+        // estimate assumes a fixed-width font, but digit_white/digital
+        // are proportional, so "120/120" sat off center and clipped at
+        // the orb rims in Ed's Oct 27 photo. text_widthf at the same
+        // scale rpg_hudtext draws with gives the true extent.
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        float wpx = text_widthf(str);
+        settextscale(save);
         rpg_hudtext(str, int(cx - wpx/2), int(cy - pxh/2), pxh);
     }
 
@@ -2151,7 +2160,10 @@ namespace game
         char hudarch[32]; hudarch[0] = '\0';
         if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
         int hudids[6]; int hudn = rpg::classabilities(hudarch, hudids, 6);
-        float slotn = 56*s, sloty = sy + 92*s;
+        // v0.1.30: larger slot boxes, still inside the HUD frame.
+        // 64*s boxes moved up to 84*s keep the bottom at sy+148*s,
+        // inside the strip (strip height is ~156*s, bottom margin kept).
+        float slotn = 64*s, sloty = sy + 84*s;
         loopi(10)
         {
             float qx = sx + (160 + i*70)*s;
@@ -2164,7 +2176,10 @@ namespace game
                 {
                     Texture *abtex = rpg_loadtex(abiconfiles[aid]);
                     glBindTexture(GL_TEXTURE_2D, abtex->id);
-                    rpg_drawtexuv(qx + 4*s, sloty + 4*s, slotn - 8*s, slotn - 8*s, 0, 0, 1, 1);
+                    // v0.1.30: icon drops below the top strip reserved
+                    // for the key number inside the box, so number and
+                    // icon never overlap.
+                    rpg_drawtexuv(qx + 9*s, sloty + 18*s, slotn - 18*s, slotn - 18*s, 0, 0, 1, 1);
                 }
                 int cd = rpg::cooldownleft(aid, totalmillis);
                 if(cd > 0)
@@ -2178,11 +2193,10 @@ namespace game
                 }
             }
             defformatstring(knum)("%d", (i+1)%10);
-            // key number sits fully above the slot, inside the lower recess
-            // v0.1.27: 14px (was v0.1.25's 18px) - smaller numbers leave more
-            // icon space; the vertical offset tracks the size so the number
-            // stays parked in the same recess
-            rpg_hudtext(knum, int(qx + 5*s), int(sloty - 8*s - 14*s), 14*s);
+            // v0.1.30: key number inside the slot box, horizontally
+            // centered, in the top strip above the icon. Agreed design
+            // Oct 26: numbers inside, boxes larger, all inside the frame.
+            rpg_hudtextc(knum, qx + slotn/2, sloty + 9*s, 14*s);
         }
 
         // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
@@ -2351,8 +2365,12 @@ namespace game
     static void rpg_chattext(const char *str, int left, int top, float pxh, float r, float g, float b)
     {
         // v0.1.8: shadow for readability (Ed: quest tracker unreadable)
+        // v0.1.30: shadow offset cut from 2px to 1px. Ed, Oct 27: the
+        // 2px black copy read as a double line on chat and the quest
+        // tracker, hard to read. Both use this helper, so one change
+        // covers both; the black plates behind both already give contrast.
         glColor4f(0, 0, 0, 1.0f);
-        rpg_hudtext(str, left+2, top+2, pxh);
+        rpg_hudtext(str, left+1, top+1, pxh);
         glColor4f(r, g, b, 1.0f);
         rpg_hudtext(str, left, top, pxh);
         glColor4f(1, 1, 1, 1.0f);
