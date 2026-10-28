@@ -3196,7 +3196,11 @@ namespace server
                 orc.verb = rpg::CND_OBJREADY; orc.qid = a.qid;
                 if(!rpg::dlgcondmet(name, orc)) return false;
                 rpg::questsetstage(name, a.qid, qd->finalstage);
-                defformatstring(done)("Quest complete: %s (+%d XP)", qd->name, xp_granted);
+                // Money-only quests grant 0 XP: omit the XP tail rather
+                // than printing a misleading "(+0 XP)". All existing
+                // turn-ins grant XP, so their messages are unchanged.
+                defformatstring(done)("Quest complete: %s", qd->name);
+                if(xp_granted > 0) formatstring(done)("Quest complete: %s (+%d XP)", qd->name, xp_granted);
                 rpg_qmsg(cq, done);
                 return true;
             }
@@ -3230,6 +3234,29 @@ namespace server
                 if(newlevel < 0) return false;
                 xp_granted += a.n;
                 if(leveled) rpg_levelupfx(cq, newlevel);
+                return true;
+            }
+            case rpg::ACT_GIVEMONEY:
+            {
+                // v0.1.35: money quest rewards (Corvin's necklace quest:
+                // givemoney 100 = 1 silver; money is stored as total
+                // copper, 100c = 1s, 100s = 1g). The turn-in response
+                // path syncs inventory + copper afterwards, so the
+                // client coin display updates without a special sync.
+                if(a.n <= 0) return false;
+                int newtotal = rpg::addcopper(name, a.n);
+                if(newtotal < 0) return false;
+                int g = a.n / 10000, rem = a.n % 10000;
+                int s = rem / 100, c = rem % 100;
+                defformatstring(amt)("%d copper", c);
+                if(g > 0 && s > 0 && c > 0) formatstring(amt)("%d gold %d silver %d copper", g, s, c);
+                else if(g > 0 && s > 0) formatstring(amt)("%d gold %d silver", g, s);
+                else if(g > 0 && c > 0) formatstring(amt)("%d gold %d copper", g, c);
+                else if(s > 0 && c > 0) formatstring(amt)("%d silver %d copper", s, c);
+                else if(g > 0) formatstring(amt)("%d gold", g);
+                else if(s > 0) formatstring(amt)("%d silver", s);
+                defformatstring(msg)("Received: %s", amt);
+                rpg_qmsg(cq, msg);
                 return true;
             }
             case rpg::ACT_GIVEFETCHXP:

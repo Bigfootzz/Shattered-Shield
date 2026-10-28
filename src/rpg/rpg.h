@@ -268,12 +268,13 @@ namespace rpg
         char item[64];        // hasitem
     };
     enum { ACT_SETSTAGE = 0, ACT_COMPLETEQUEST, ACT_GIVEITEM, ACT_TAKEITEM,
-           ACT_GIVEXP, ACT_GIVEFETCHXP, ACT_SPAWNCHAMPION, ACT_ROLLFETCH };
+           ACT_GIVEXP, ACT_GIVEFETCHXP, ACT_SPAWNCHAMPION, ACT_ROLLFETCH,
+           ACT_GIVEMONEY };
     struct dlgaction
     {
         int verb;             // ACT_*
         int qid;
-        int n;                // setstage stage / givexp amount
+        int n;                // setstage stage / givexp amount / givemoney copper
         char item[64];        // giveitem/takeitem ("rolled" = the fetch roll)
         int count;
     };
