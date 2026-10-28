@@ -18,6 +18,7 @@
 #include "items.h"
 #include "cube.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -61,9 +62,13 @@ namespace rpg
     {
         if(!a || !a[0] || !b || !b[0] || !out || outlen < 8) return false;
         if(finditem(a) < 0 || finditem(b) < 0) return false;
-        if(!strcmp(a, b)) { formatstring(out)("%s:2", a); return true; }
-        if(strcmp(a, b) < 0) formatstring(out)("%s:1+%s:1", a, b);
-        else formatstring(out)("%s:1+%s:1", b, a);
+        // Bounded write honoring outlen: the old formatstring(out) defaulted
+        // to MAXSTRLEN (260) and wrote d[259] = 0 unconditionally, which
+        // overflowed every 256-byte caller buffer by 1 byte (stack overwrite
+        // that faulted on Windows MinGW x64, harmless padding on Linux).
+        if(!strcmp(a, b)) { snprintf(out, outlen, "%s:2", a); return true; }
+        if(strcmp(a, b) < 0) snprintf(out, outlen, "%s:1+%s:1", a, b);
+        else snprintf(out, outlen, "%s:1+%s:1", b, a);
         return true;
     }
 
@@ -190,7 +195,7 @@ namespace rpg
                 if(vid < 0) { err = "recipe '" + r.label + "' names unknown tier output '" + r.outtier[t] + "'"; return false; }
                 if(item(vid).type != ITEM_CONSUMABLE) { err = "recipe '" + r.label + "' tier output '" + r.outtier[t] + "' is not a consumable (Phase 1)"; return false; }
             }
-            char key[256];
+            char key[MAXSTRLEN];
             if(!craftkey(r.ings[0].first.c_str(), r.ings[1].first.c_str(), key, sizeof(key)))
             { err = "recipe '" + r.label + "' has an unbuildable ingredient key"; return false; }
             // The canonical key assumes 1 unit per slot; a recipe whose
@@ -219,8 +224,8 @@ namespace rpg
             // sort ingredients by id for the canonical key + display order
             std::pair<std::string, int> a = b.ings[0], c = b.ings[1];
             if(c.first < a.first) { std::pair<std::string, int> t = a; a = c; c = t; }
-            char key[256];
-            craftkey(a.first.c_str(), c.first.c_str(), key, sizeof(key));
+            char key[MAXSTRLEN];
+            if(!craftkey(a.first.c_str(), c.first.c_str(), key, sizeof(key))) continue; // validated above; never pool an unbuilt key
             r.key = craftpoolstr(key);
             r.ing[0] = craftpoolstr(a.first);
             r.ing[1] = craftpoolstr(c.first);
