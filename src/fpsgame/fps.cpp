@@ -2644,9 +2644,13 @@ namespace game
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*1800.0f/h;
         // v0.1.31: same geometry as drawrpgradar (5% smaller, s/20
-        // margin), plus 8px more below the ring for the larger clock.
+        // margin).
+        // v0.1.35: radar shifted down 42 for the clock above the ring,
+        // and the plate sits 64 below the ring bottom so it clears the
+        // new crafting icon (icon bottom at ring bottom + 48.9, plate
+        // top at ring bottom + 64, ~15px clearance).
         int rs = int(1800/4*0.95f), rx = int(X - rs - rs/20);
-        float ty = rs + rs/20 + 44.0f;
+        float ty = rs + rs/20 + 42.0f + 64.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -3206,6 +3210,7 @@ namespace game
     // world pick, mirroring the chat-tab click routing.
     static float rpg_radar_char_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_bag_rect[4] = {-1, -1, -1, -1};
+    static float rpg_radar_craft_rect[4] = {-1, -1, -1, -1};
     bool rpg_radariconclick(float vx, float vy)
     {
         if(!rpg::mapactive(getclientmap())) return false;
@@ -3221,19 +3226,27 @@ namespace game
             execute("rpginventory"); // same as I key: sync + show inventory
             return true;
         }
+        if(rpg_radar_craft_rect[0] >= 0 && vx >= rpg_radar_craft_rect[0] && vx < rpg_radar_craft_rect[2] &&
+           vy >= rpg_radar_craft_rect[1] && vy < rpg_radar_craft_rect[3])
+        {
+            execute("rpgcraft"); // v0.1.35: minimap crafting icon, syncs + shows craft window
+            return true;
+        }
         return false;
     }
 
     void drawrpgradar(fpsent *d, int w, int h)
     {
-        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
-        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
-        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = -1; return; }
+        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
+        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         // v0.1.31 (Ed, Oct 27): minimap 5% smaller and a little closer
         // to the corner. 450 -> 427 (450 x 0.95), margin s/10 -> s/20.
         // drawrpgquest uses the same geometry, so it moves with it.
-        int s = int(1800/4*0.95f), x = 1800*w/h - s - s/20, y = s/20;
+        // v0.1.35 (Ed, Oct 28): ring shifted down 42px so the clock fits
+        // ABOVE it (30px clock + 12px gap, top at the old s/20 margin).
+        int s = int(1800/4*0.95f), x = 1800*w/h - s - s/20, y = s/20 + 42;
         glColor4f(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
@@ -3309,10 +3322,11 @@ namespace game
         // "[I] inventory [C] character" hint line above the action bar.
         // Character (player icon) and inventory (satchel) are CLICKABLE:
         // rpg_radariconclick (above) opens the same windows as the C / I
-        // keys. Local time sits just below the ring, like WoW's minimap
-        // clock. Hit-rects are stored for the click router; the round
-        // dark backing (circle texture, 1.2x icon size) keeps the icons
-        // readable over bright terrain and echoes the round minimap.
+        // keys. v0.1.35: the clock moved ABOVE the ring and a crafting
+        // icon takes its old spot below the ring. Hit-rects are stored
+        // for the click router; the round dark backing (circle texture,
+        // 1.2x icon size) keeps the icons readable over bright terrain
+        // and echoes the round minimap.
         // v0.1.26 (item 3): icons sit ON the ring itself, not at the
         // bounding-box corners. The v0.1.25 positions used the square's
         // bottom corners, but the ring is circular — the corners lie
@@ -3350,16 +3364,31 @@ namespace game
             rpg_drawtexuv(cix, ciy, isz, isz, 0, 0, 1, 1);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_bag.png")->id);
             rpg_drawtexuv(bix, biy, isz, isz, 0, 0, 1, 1);
-            // Local clock below the ring (HH:MM, WoW-style).
-            // v0.1.31 (Ed, Oct 27): a little larger, 24 -> 30, and
-            // 2px higher so its bottom still clears the quest plate.
+            // v0.1.35 (Ed, Oct 28): clock moves ABOVE the ring, and a
+            // crafting icon takes the clock's old spot below the ring
+            // (centered, same size/backing as the char/bag icons; click
+            // opens the Craft window via rpg_radariconclick). No dedicated
+            // crafting texture exists, so the potion (the signature
+            // crafted product) stands in; Ed can ask for different art.
+            // Clock above: center y-27, so the 30px text spans y-42..y-12
+            // (top at the old s/20 margin, 12px gap to the ring).
             time_t now = time(NULL);
             struct tm *lt = localtime(&now);
             char tbuf[16] = "00:00";
             if(lt) strftime(tbuf, sizeof(tbuf), "%H:%M", lt);
             pushfont();
-            rpg_hudtextc(tbuf, x + s*0.5f, y + s + 12.0f, 30.0f);
+            rpg_hudtextc(tbuf, x + s*0.5f, y - 27.0f, 30.0f);
             popfont();
+            // Crafting icon below the ring, at the old clock center.
+            float crx = x + s*0.5f - isz*0.5f, cry = y + s + 12.0f - isz*0.5f;
+            rpg_radar_craft_rect[0] = crx; rpg_radar_craft_rect[1] = cry;
+            rpg_radar_craft_rect[2] = crx + isz; rpg_radar_craft_rect[3] = cry + isz;
+            glColor4f(1, 1, 1, 1.0f);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_backing_circle.png")->id);
+            rpg_drawtexuv(crx - isz*0.1f, cry - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
+            glColor4f(1, 1, 1, 1.0f);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/icons/icon_potion.png")->id);
+            rpg_drawtexuv(crx, cry, isz, isz, 0, 0, 1, 1);
         }
     }
 
