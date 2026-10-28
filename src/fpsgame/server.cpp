@@ -4550,15 +4550,27 @@ namespace server
         sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, out);
     }
 
+    // v0.1.34: craft result notice — the server sends the outcome BOTH as
+    // a dedicated result message (shown as a persistent line inside the
+    // craft window, so it cannot be missed when the window stays open)
+    // AND as the usual System-tab line. Relying on the System tab alone
+    // is why the user never saw whether a craft worked.
+    static void rpg_craftresult(clientinfo *cq, int ok, const char *line)
+    {
+        if(!cq || !line) return;
+        sendf(cq->clientnum, 1, "riis", N_RPG_CRAFTRESULT, ok, line);
+        rpg_qmsg(cq, line);
+    }
+
     void rpg_craft(clientinfo *cq, const char *itema, const char *itemb)
     {
         if(!rpg_checkinv(cq)) return;
         if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to craft."); return; }
-        if(!itema || !itema[0] || !itemb || !itemb[0]) { rpg_qmsg(cq, "Choose two ingredients first."); return; }
+        if(!itema || !itema[0] || !itemb || !itemb[0]) { rpg_craftresult(cq, 0, "Choose two ingredients first."); return; }
         int ida = rpg::finditem(itema), idb = rpg::finditem(itemb);
-        if(ida < 0 || idb < 0) { rpg_qmsg(cq, "Unknown ingredient."); return; }
+        if(ida < 0 || idb < 0) { rpg_craftresult(cq, 0, "Unknown ingredient."); return; }
         char key[256];
-        if(!rpg::craftkey(itema, itemb, key, sizeof(key))) { rpg_qmsg(cq, "Unknown ingredient."); return; }
+        if(!rpg::craftkey(itema, itemb, key, sizeof(key))) { rpg_craftresult(cq, 0, "Unknown ingredient."); return; }
         const rpg::craftrecipe *r = rpg::craftrecipebykey(key);
         // Count check FIRST: never lose (or consume) what you don't have,
         // in either the success or the failure branch. Same-id slots need
@@ -4569,18 +4581,18 @@ namespace server
             if(!strcmp(r->ing[0], r->ing[1]))
             {
                 if(rpg::itemcount(cq->name, r->ing[0]) < r->ingcount[0] + r->ingcount[1])
-                { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+                { rpg_craftresult(cq, 0, "You don't have those ingredients."); return; }
             }
             else if(rpg::itemcount(cq->name, r->ing[0]) < r->ingcount[0] ||
                     rpg::itemcount(cq->name, r->ing[1]) < r->ingcount[1])
-            { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+            { rpg_craftresult(cq, 0, "You don't have those ingredients."); return; }
         }
         else if(ida == idb)
         {
-            if(rpg::itemcount(cq->name, itema) < 2) { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+            if(rpg::itemcount(cq->name, itema) < 2) { rpg_craftresult(cq, 0, "You don't have those ingredients."); return; }
         }
         else if(rpg::itemcount(cq->name, itema) < 1 || rpg::itemcount(cq->name, itemb) < 1)
-        { rpg_qmsg(cq, "You don't have those ingredients."); return; }
+        { rpg_craftresult(cq, 0, "You don't have those ingredients."); return; }
 
         if(!r)
         {
@@ -4591,9 +4603,9 @@ namespace server
                 rpg::removeitem(cq->name, itema, ida == idb ? 2 : 1);
                 if(ida != idb) rpg::removeitem(cq->name, itemb, 1);
                 rpg_syncinv(cq);
-                rpg_qmsg(cq, "That combination doesn't craft anything. Your materials were lost.");
+                rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials were lost.");
             }
-            else rpg_qmsg(cq, "That combination doesn't craft anything. Your materials are safe.");
+            else rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials are safe.");
             conoutf("rpg: '%s' failed craft %s + %s (fail_lose %d)", cq->name, itema, itemb, craft_fail_lose);
             return;
         }
@@ -4616,14 +4628,14 @@ namespace server
             // Refund on failure (should not happen for known items).
             if(!strcmp(r->ing[0], r->ing[1])) rpg::additem(cq->name, r->ing[0], r->ingcount[0] + r->ingcount[1]);
             else { rpg::additem(cq->name, r->ing[0], r->ingcount[0]); rpg::additem(cq->name, r->ing[1], r->ingcount[1]); }
-            rpg_qmsg(cq, "Crafting failed.");
+            rpg_craftresult(cq, 0, "Crafting failed.");
             rpg_syncinv(cq);
             return;
         }
         bool isnew = !rpg::recipediscovered(cq->name, key);
         if(isnew) rpg::discoverrecipe(cq->name, key);
         defformatstring(msg)("You craft %s.", rpg::itemname(rpg::finditem(outid)));
-        rpg_qmsg(cq, msg);
+        rpg_craftresult(cq, 1, msg);
         conoutf("rpg: '%s' crafts %s (tier %s) from %s + %s%s", cq->name,
                 rpg::itemname(rpg::finditem(outid)), rpg::crafttiername(tier),
                 r->ing[0], r->ing[1], isnew ? " [recipe discovered]" : "");
@@ -4672,11 +4684,30 @@ namespace server
         // is the route Ed approved, not crafting use.
         if(d.type == rpg::ITEM_QUEST) { rpg_qmsg(cq, "That cannot be sold."); return; }
         int price = rpg::sellprice(id);
-        if(price <= 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That has no sell value."); return; }
-        if(!rpg::removeitem(cq->name, itemid, 1)) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
+        if(price <= 0) { rpg_qmsg(cq, "That has no sell value."); return; }
+        // v0.1.34 (Ed, Oct 28): sell-count bug — the user sold items and
+        // the stack count never went down, and reopening inventory did
+        // not fix it, so this was not a display refresh glitch. The old
+        // failure messages went to N_SERVMSG (console only, invisible in
+        // game), so a silent sale failure looked like nothing happened.
+        // All sell messages now go through rpg_qmsg (System tab, visible),
+        // and copper is granted ONLY when the server-side count is
+        // verified to have dropped by exactly one — if removal does not
+        // stick, no copper is granted and the player is told, instead of
+        // money appearing while the item stays.
+        int beforecount = rpg::itemcount(cq->name, itemid);
+        if(!rpg::removeitem(cq->name, itemid, 1)) { rpg_qmsg(cq, "You don't have that."); return; }
+        int aftercount = rpg::itemcount(cq->name, itemid);
+        if(aftercount != beforecount - 1)
+        {
+            rpg_qmsg(cq, "Sale did not go through. Your items are unchanged.");
+            conoutf("rpg: sell verification failed for '%s' item %s (before %d, after %d)", cq->name, itemid, beforecount, aftercount);
+            rpg_syncinv(cq);
+            return;
+        }
         rpg::addcopper(cq->name, price);
-        defformatstring(msg)("\f2%s \f7sold for %d copper.", rpg::itemname(id), price);
-        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        defformatstring(msg)("%s sold for %d copper.", rpg::itemname(id), price);
+        rpg_qmsg(cq, msg);
         conoutf("rpg: '%s' sells %s for %dc", cq->name, rpg::itemname(id), price);
         rpg_sendvwep(cq);
         rpg_syncinv(cq);

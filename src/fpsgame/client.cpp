@@ -1147,6 +1147,12 @@ namespace game
     static string rpg_craftslot[2];
     static string rpg_craftrecipes[64];
     static int rpg_craftrecipen = 0;
+    // v0.1.34: last craft result, for the persistent in-window result line.
+    // Set only by the N_RPG_CRAFTRESULT handler; cleared on every send so
+    // a stale result never poses as the outcome of the next craft.
+    static string rpg_craftresult;
+    static int rpg_craftresultok = 0;
+    static bool rpg_craftresultset = false;
     ICOMMAND(rpgcraftopen, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
     ICOMMAND(rpgcraft, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
     ICOMMAND(rpgcraftadd, "i", (int *i), {
@@ -1184,7 +1190,20 @@ namespace game
         }
     });
     ICOMMAND(rpgcraftclear, "i", (int *i), { if(*i >= 0 && *i < 2) rpg_craftslot[*i][0] = '\0'; });
-    ICOMMAND(rpgcraftsend, "", (), { addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]); });
+    ICOMMAND(rpgcraftsend, "", (), {
+        // v0.1.34: window must STAY OPEN on Craft. rpgcraft is guistayopen
+        // (menus.cpp only auto-closes when shouldclearmenu), so the drop
+        // the user saw is guarded against here as well: after sending, the
+        // window is explicitly re-shown (showgui restores an already-open
+        // menu to the top, no duplicate push), and the stale result is
+        // cleared so the new result line cannot show the old outcome.
+        rpg_craftresult[0] = '\0'; rpg_craftresultok = 0; rpg_craftresultset = false;
+        addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]);
+        showgui("rpgcraft");
+    });
+    ICOMMAND(rpg_craft_result, "", (), { result(rpg_craftresultset ? rpg_craftresult : ""); });
+    ICOMMAND(rpg_craft_result_ok, "", (), intret(rpg_craftresultset ? rpg_craftresultok : 0));
+    ICOMMAND(rpg_craft_result_has, "", (), intret(rpg_craftresultset ? 1 : 0));
     ICOMMAND(rpg_recipe_lines, "", (), intret(rpg_craftrecipen));
     ICOMMAND(rpg_recipe_line, "i", (int *i), { result(*i >= 0 && *i < rpg_craftrecipen ? rpg_craftrecipes[*i] : ""); });
     ICOMMAND(rpgeqcell, "s", (char *s), {
@@ -3375,6 +3394,18 @@ namespace game
                 int qid = getint(p);
                 string text; getstring(text, p);
                 rpg::setclientquesttext(qid, text);
+                break;
+            }
+            case N_RPG_CRAFTRESULT: // v0.1.34: craft outcome for the in-window result line
+            {
+                int ok = getint(p);
+                string msg; getstring(msg, p);
+                rpg_craftresultok = ok;
+                copystring(rpg_craftresult, msg, sizeof(string));
+                rpg_craftresultset = true;
+                // Re-show the window: the result line lives in rpgcraft, and
+                // the window must still be open when the result arrives.
+                showgui("rpgcraft");
                 break;
             }
             case N_RPG_RECIPES: // crafting Phase 1: discovered recipes, \n-separated lines
