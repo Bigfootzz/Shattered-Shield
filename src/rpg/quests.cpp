@@ -11,6 +11,7 @@
 // empty until map load, and the old done guard then blocked every retry.)
 #include "rpg.h"
 #include "items.h"
+#include "crafting.h"
 #include "cube.h"
 #include <vector>
 #include <string>
@@ -87,6 +88,12 @@ namespace rpg
         }
         if(!strcmp(v, "questdone") && e - t == 2)   { c.verb = CND_QUESTDONE; c.qid = atoi(a[t+1]); return 2; }
         if(!strcmp(v, "objready") && e - t == 2)    { c.verb = CND_OBJREADY;  c.qid = atoi(a[t+1]); return 2; }
+        if(!strcmp(v, "recipes") && e - t == 3)
+        {
+            c.verb = CND_RECIPES; c.op = opfromname(a[t+1]); c.n = atoi(a[t+2]);
+            if(c.op != CMP_GE && c.op != CMP_LT) { err = "recipes takes >= or <"; return -1; }
+            return 3;
+        }
         if(!strcmp(v, "cooldownready") && e - t == 2){ c.verb = CND_COOLDOWNREADY; c.qid = atoi(a[t+1]); return 2; }
         err = "unknown condition";
         return -1;
@@ -547,6 +554,7 @@ namespace rpg
                 return cmpapply(c.op, level, c.n);
             }
             case CND_QUESTDONE:  return questiscomplete(name, c.qid);
+            case CND_RECIPES:    return cmpapply(c.op, craftrecipecount(), c.n);
             case CND_OBJREADY:
             {
                 int have = 0, need = 0;

@@ -257,7 +257,7 @@ namespace rpg
     };
     // Dialogue condition/action vocabularies (closed - add to the enum AND
     // the server executor; never arbitrary script).
-    enum { CND_STAGE = 0, CND_HASITEM, CND_LEVEL, CND_QUESTDONE, CND_OBJREADY, CND_COOLDOWNREADY };
+    enum { CND_STAGE = 0, CND_HASITEM, CND_LEVEL, CND_QUESTDONE, CND_OBJREADY, CND_COOLDOWNREADY, CND_RECIPES };
     enum { CMP_EQ = 0, CMP_GE, CMP_LE, CMP_LT, CMP_GT };
     struct dlgcond
     {
