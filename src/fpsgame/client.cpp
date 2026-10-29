@@ -1133,8 +1133,15 @@ namespace game
         if(*i >= 0 && *i < rpg_cln)
         {
             const char *id = rpg::item(rpg_clinv[*i].item).id;
-            const char *base = strchr(id, '_');
-            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base ? base + 1 : id);
+            // Prefer a full-id cell (cell_<full id>.png) when it exists,
+            // so items sharing a suffix (every potion) can have distinct
+            // art; otherwise fall back to the suffix cell as before.
+            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", id);
+            if(!findfile(p, "e") && !fileexists(p, "r"))
+            {
+                const char *base = strchr(id, '_');
+                formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base ? base + 1 : id);
+            }
             result(p);
         }
         else result("packages/ui/rpg/slots/slot.png");
