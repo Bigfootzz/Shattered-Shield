@@ -576,6 +576,9 @@ struct g3d_gui
         return title(str, color, icon);
     }
     virtual void background(int color, int parentw = 0, int parenth = 0) = 0;
+    // v0.1.36 (WoW-style tight windows): textured background stretched
+    // over the current list's box; contributes no layout size.
+    virtual void backgroundtex(Texture *t) = 0;
 
     virtual void pushlist() {}
     virtual void poplist() {}

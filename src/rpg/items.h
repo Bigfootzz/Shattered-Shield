@@ -65,6 +65,11 @@ namespace rpg
                            // 2 rare, 3 epic, 4 legendary. Default 0; data files
                            // set it with ss_item_tier. Crafting output tier is
                            // computed from ingredient tiers, never stored here.
+        int buffattr;      // buff consumables (crafting Phase 2): ATTR_* from stats.h
+                           // that this item raises while active, or -1 for non-buff
+                           // items. Magnitude comes from the item's tier via
+                           // rpg::buffmagnitude(), never stored here. Data files
+                           // set it with ss_item_buff; buff items must not heal.
     };
 
     int itemcount();                    // number of defs in the ACTIVE table

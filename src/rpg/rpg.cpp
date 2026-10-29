@@ -69,6 +69,10 @@ namespace rpg
     // quest engine v2: repeatable fetch state, session view of rpg_repeatables
     struct rprow { char item[64]; int amount; int readyat; };
     static std::map<std::string, std::map<int, rprow> > rpcache;
+    // Crafting Phase 2: buff cache (declared up top so shutdown() can clear it;
+    // functions live with the other inventory code below).
+    struct buffrow { int magnitude; int expires; };
+    static std::map<std::string, std::map<int, buffrow> > buffcache;
 
     static cachedchar *findcached(const char *name)
     {
@@ -174,6 +178,13 @@ namespace rpg
                 "name TEXT NOT NULL,"
                 "recipe TEXT NOT NULL,"
                 "PRIMARY KEY(name, recipe))");
+        // --- crafting Phase 2: timed stat buffs (additive) ---
+        execsql("CREATE TABLE IF NOT EXISTS rpg_buffs("
+                "name TEXT NOT NULL,"
+                "attr INTEGER NOT NULL,"
+                "magnitude INTEGER NOT NULL DEFAULT 0,"
+                "expires INTEGER NOT NULL DEFAULT 0,"
+                "PRIMARY KEY(name, attr))");
         // --- party + safety v1 (Oct 19): mute/block lists, additive ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_mutes("
                 "owner TEXT NOT NULL,"
@@ -203,6 +214,7 @@ namespace rpg
         sqlite3_close(db);
         db = NULL;
         cache.clear();
+        buffcache.clear();
         conoutf("rpg: character database closed");
     }
 
@@ -285,6 +297,10 @@ namespace rpg
         initcaststate(cc, level, -1); // mana full, abilities ready; regen starts on first tick
         initinv(cc);
         cache[std::string(name)] = cc;
+        // Phase 2 buffs are session-bound: a fresh login never inherits
+        // prior-session rows (logout deletes them; this purge covers an
+        // unclean disconnect where ondisconnect never ran).
+        clearbuffs(name);
         // --- inventory & equipment v1 (milestone step 4) ---
         loadinv(name); // rows into the session cache (no-op when none)
         // --- quest engine v2: quest rows + repeatable rows into the session caches ---
@@ -424,6 +440,8 @@ namespace rpg
         if(!db || !name || !name[0]) return;
         savepos(name, map, x, y, z, yaw);
         saveinv(name); // milestone step 4: inventory + equipment persist with the character
+        // Phase 2 buffs: cleared on logout/disconnect by design (death never calls this).
+        clearbuffs(name);
         // quest engine v2: quest + repeatable rows are already write-through; drop the session views
         questcache.erase(std::string(name));
         rpcache.erase(std::string(name));
@@ -795,6 +813,132 @@ namespace rpg
         if(def.type != ITEM_CONSUMABLE || def.heal <= 0) return -1;
         if(!removeitem(name, itemid, 1)) return -1;
         return def.heal;
+    }
+
+    // --- crafting Phase 2: timed stat buffs ---
+    // Session-bound by design: rows are written through on apply, never
+    // touched by death, and deleted on logout (ondisconnect) plus purged
+    // on fresh login (onconnect) so an unclean disconnect can never
+    // resurrect a prior session's buffs. Expiry is Unix server time, so
+    // map changes (including battleground mode changes, which only call
+    // savepos + loadnpcs/loadquests) never disturb an active buff.
+    int buffmagnitude(int tier)
+    {
+        static const int mags[5] = { 2, 3, 5, 7, 10 };
+        if(tier < 0) tier = 0;
+        if(tier > 4) tier = 4;
+        return mags[tier];
+    }
+
+    static void buffsaverow(const char *name, int attr, int magnitude, int expires)
+    {
+        if(!db) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO rpg_buffs(name, attr, magnitude, expires) VALUES(?1, ?2, ?3, ?4)", -1, &st, NULL) != SQLITE_OK) return;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 2, attr);
+        sqlite3_bind_int(st, 3, magnitude);
+        sqlite3_bind_int(st, 4, expires);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+
+    bool applybuff(const char *name, int attr, int magnitude, int durationsec)
+    {
+        if(!db || !name || !name[0] || attr < 0 || attr >= ATTR_COUNT || magnitude <= 0) return false;
+        if(!findcached(name)) return false;
+        if(durationsec <= 0) durationsec = BUFF_DURATION_SEC;
+        int expires = (int)time(NULL) + durationsec;
+        buffrow r; r.magnitude = magnitude; r.expires = expires;
+        buffcache[std::string(name)][attr] = r;
+        buffsaverow(name, attr, magnitude, expires); // write-through (death-safe)
+        return true;
+    }
+
+    int buffbonus(const char *name, int attr)
+    {
+        if(!name || !name[0] || attr < 0 || attr >= ATTR_COUNT) return 0;
+        std::map<std::string, std::map<int, buffrow> >::iterator it = buffcache.find(std::string(name));
+        if(it == buffcache.end()) return 0;
+        std::map<int, buffrow>::iterator jt = it->second.find(attr);
+        if(jt == it->second.end()) return 0;
+        if((int)time(NULL) >= jt->second.expires) return 0; // expired: prune reports it, this only reads
+        return jt->second.magnitude;
+    }
+
+    bool buffactive(const char *name, int attr, int &magnitude, int &secondsleft)
+    {
+        magnitude = 0; secondsleft = 0;
+        if(!name || !name[0] || attr < 0 || attr >= ATTR_COUNT) return false;
+        std::map<std::string, std::map<int, buffrow> >::iterator it = buffcache.find(std::string(name));
+        if(it == buffcache.end()) return false;
+        std::map<int, buffrow>::iterator jt = it->second.find(attr);
+        if(jt == it->second.end()) return false;
+        int left = jt->second.expires - (int)time(NULL);
+        if(left <= 0) return false;
+        magnitude = jt->second.magnitude; secondsleft = left;
+        return true;
+    }
+
+    int buffprune(const char *name, int *expired, int maxexpired)
+    {
+        if(!name || !name[0]) return 0;
+        std::map<std::string, std::map<int, buffrow> >::iterator it = buffcache.find(std::string(name));
+        if(it == buffcache.end()) return 0;
+        int now = (int)time(NULL), n = 0;
+        for(std::map<int, buffrow>::iterator jt = it->second.begin(); jt != it->second.end();)
+        {
+            if(now >= jt->second.expires)
+            {
+                if(expired && n < maxexpired) expired[n] = jt->first;
+                n++;
+                if(db)
+                {
+                    sqlite3_stmt *st = NULL;
+                    if(sqlite3_prepare_v2(db, "DELETE FROM rpg_buffs WHERE name=?1 AND attr=?2", -1, &st, NULL) == SQLITE_OK)
+                    {
+                        sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_int(st, 2, jt->first);
+                        sqlite3_step(st);
+                        sqlite3_finalize(st);
+                    }
+                }
+                it->second.erase(jt++);
+            }
+            else ++jt;
+        }
+        return n;
+    }
+
+    void clearbuffs(const char *name)
+    {
+        if(!name || !name[0]) return;
+        if(db)
+        {
+            sqlite3_stmt *st = NULL;
+            if(sqlite3_prepare_v2(db, "DELETE FROM rpg_buffs WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+            {
+                sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+        }
+        buffcache.erase(std::string(name));
+    }
+
+    int bufflist(const char *name, int *attrs, int *mags, int *secsleft, int max)
+    {
+        if(!name || !name[0] || !attrs || !mags || !secsleft || max <= 0) return 0;
+        std::map<std::string, std::map<int, buffrow> >::iterator it = buffcache.find(std::string(name));
+        if(it == buffcache.end()) return 0;
+        int now = (int)time(NULL), n = 0;
+        for(std::map<int, buffrow>::iterator jt = it->second.begin(); jt != it->second.end() && n < max; ++jt)
+        {
+            int left = jt->second.expires - now;
+            if(left <= 0) continue;
+            attrs[n] = jt->first; mags[n] = jt->second.magnitude; secsleft[n] = left; n++;
+        }
+        return n;
     }
 
     const char *equippedvwep(const char *name)
@@ -1322,6 +1466,14 @@ namespace rpg
             sqlite3_finalize(st);
         }
     }
+    // Quest-save load-drop fix: re-read quest + repeatable rows after quest
+    // definitions become available (see reloadquestcaches in rpg.h). Both
+    // loaders clear first, so a stale empty cache is replaced, not merged.
+    void reloadquestcaches(const char *name)
+    {
+        questcacheload(name);
+        rpcacheload(name);
+    }
     static void rpsave(const char *name, int qid)
     {
         if(!db || !name || !name[0]) return;
@@ -1731,7 +1883,7 @@ namespace rpg
         sqlite3 *cdb = chardb_open();
         if(!cdb) return false;
         // wipe character and all their rows
-        const char *tables[] = { "characters", "rpg_inventory", "rpg_equipment", "rpg_quests", "rpg_clan_members", "rpg_mutes", "rpg_blocks" };
+        const char *tables[] = { "characters", "rpg_inventory", "rpg_equipment", "rpg_quests", "rpg_buffs", "rpg_clan_members", "rpg_mutes", "rpg_blocks" };
         sqlite3_stmt *st = NULL;
         for(size_t i = 0; i < sizeof(tables)/sizeof(tables[0]); i++)
         {
@@ -1771,6 +1923,27 @@ namespace rpg
     {
         if(!text) return;
         copystring(clquests[qid].objtext, text, sizeof(clquests[qid].objtext));
+    }
+    // --- bundle (Oct 28): HUD buff display, client presentation cache ---
+    // One entry per active buff type the server has told us about (attr ->
+    // server-clock expiry). Never authoritative; the server syncs on use,
+    // expiry, and every map change, and clears server-side on logout (so
+    // a reconnect + map load re-syncs empty and the row clears).
+    static std::map<int, int> clbuffs;
+    void setclientbuff(int attr, int expires) { if(attr >= 0) clbuffs[attr] = expires; }
+    void clearclientbuffs() { clbuffs.clear(); }
+    int clientbufflist(int *attrs, int *exps, int max)
+    {
+        if(!attrs || !exps || max <= 0) return 0;
+        int now = (int)time(NULL), n = 0;
+        for(std::map<int, int>::iterator it = clbuffs.begin(); it != clbuffs.end();)
+        {
+            if(now >= it->second) { clbuffs.erase(it++); continue; } // expired: drop locally, server sync follows
+            if(n >= max) break;
+            attrs[n] = it->first; exps[n] = it->second; n++;
+            ++it;
+        }
+        return n;
     }
     bool getclientquest(int &qid, int &state, int &kills, int &need)
     {

@@ -30,6 +30,13 @@ namespace rpg
     // (row loaded), false when it was created fresh with defaults.
     bool onconnect(const char *name);
     void ondisconnect(const char *name, const char *map, float x, float y, float z, float yaw);
+    // Reload quest + repeatable caches from the DB for an already-connected
+    // client. Needed because onconnect runs before the first map change, so
+    // the connect-time cache load ran with zero quest definitions and the
+    // validquest filter dropped every stored row. Called after loadquests()
+    // in changemap, once definitions exist; safe to repeat on later map
+    // changes because quest/repeatable writes are write-through.
+    void reloadquestcaches(const char *name);
     void savepos(const char *name, const char *map, float x, float y, float z, float yaw);
 
     // Award XP. Returns the new level, or -1 when the character is unknown
@@ -118,6 +125,22 @@ namespace rpg
     int weapondamage(const char *name);                    // equipped mainhand bonus (0 when none)
     int armorvalue(const char *name);                      // sum of equipped armor values
     int usestack(const char *name, const char *itemid);     // consumable: heal amount, -1 when unusable
+    // --- crafting Phase 2: timed stat buffs (buff consumables) ---
+    // Buffs are session-bound: they persist through death (death never
+    // touches this table) but are cleared on logout/disconnect, and a
+    // fresh login never inherits prior-session rows. Expiry is server
+    // clock (Unix time), so map changes and battleground mode changes
+    // never reset the timer. Different buff types stack; the same type
+    // never stacks (re-use refreshes the remaining time).
+    const int BUFF_DURATION_SEC = 3600; // approved default (1 hour); the server
+                                        // passes its rpg_buff_duration_sec VAR per use
+    int buffmagnitude(int tier); // tier 0..4 -> 2/3/5/7/10, clamped
+    bool applybuff(const char *name, int attr, int magnitude, int durationsec); // set/refresh one buff type
+    int buffbonus(const char *name, int attr); // active magnitude, 0 when none/expired
+    bool buffactive(const char *name, int attr, int &magnitude, int &secondsleft);
+    int buffprune(const char *name, int *expired, int maxexpired); // drop expired rows, return count + attrs
+    void clearbuffs(const char *name); // logout: drop all rows + cache
+    int bufflist(const char *name, int *attrs, int *mags, int *secsleft, int max); // active buffs (debug/display)
     const char *equippedvwep(const char *name);             // equipped weapon model path, or NULL
     void saveinv(const char *name);                        // write-through persistence of inv+equipment
 
@@ -414,6 +437,13 @@ namespace rpg
     // quest log (a derived view - no new table).
     void setclientquest(int qid, int state, int kills, int need);
     void setclientquesttext(int qid, const char *text); // objective display text
+    // Bundle (Oct 28): HUD buff display, client presentation cache (never
+    // authoritative). One entry per active buff type the server has told
+    // us about (attr -> server-clock expiry). The server syncs on use,
+    // expiry, and every map change; buffs clear server-side on logout.
+    void setclientbuff(int attr, int expires);
+    void clearclientbuffs();
+    int clientbufflist(int *attrs, int *exps, int max); // active, expiry-pruned, attr order
     bool getclientquest(int &qid, int &state, int &kills, int &need); // tracked quest
     bool getclientquesttext(int qid, char *buf, int buflen);
     int clientqueststate(int qid); // -1 when the client has no row for qid

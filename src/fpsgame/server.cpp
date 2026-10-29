@@ -910,6 +910,7 @@ namespace server
     }
 
     static void rpg_syncquest(clientinfo *cq); // quest engine v2, defined below
+    static void rpg_syncbuffs(clientinfo *cq); // bundle: active buff sync, defined below
     static void rpg_spawnchampion(clientinfo *cq); // defined with the mob spawns below
     void rpg_respond(clientinfo *cq, int idx); // quest engine v2, defined below
     void rpg_talk(clientinfo *cq, int npcidx); // quest engine v2, defined below
@@ -930,7 +931,7 @@ namespace server
                 rpg_syncinv(lc); // refresh level/xp on the client sheet
                 if(rpg::mapactive(smapname)) // max HP follows the formula; keep current HP
                 {
-                    int maxhp = rpg::stat_maxhp(newlevel);
+                    int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(lc->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
                     if(lc->state.health > maxhp) lc->state.health = maxhp;
                     lc->state.maxhealth = maxhp;
                     sendf(lc->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -1011,6 +1012,18 @@ namespace server
         conoutf("rpgtestgod: %s", rpg_testgod ? "ON" : "OFF");
     }
     ICOMMAND(rpgtestforcerangesrv, "i", (int *v), { rpg_testforcerange_srv = *v ? 1 : 0; conoutf("rpgtestforcerangesrv: %s", rpg_testforcerange_srv ? "ON" : "OFF"); });
+    // Crafting Phase 2 (test-only): dump every connected character's active buffs to the
+    // server log, so headless harnesses can verify apply/refresh/stack/death/logout/expiry
+    // without a HUD buff display (which is out of Phase 2 scope).
+    ICOMMAND(rpgbuffinfo, "", (), {
+        loopv(clients) if(clients[i]->connectionState == CONNECTION_STATE_CONNECTED && clients[i]->state.ai.type == ai::AI_TYPE_NONE)
+        {
+            int attrs[8]; int mags[8]; int secs[8];
+            int n = rpg::bufflist(clients[i]->name, attrs, mags, secs, 8);
+            if(n <= 0) { conoutf("rpgbuffinfo: '%s' has no active buffs", clients[i]->name); continue; }
+            loopj(n) conoutf("rpgbuffinfo: '%s' %s +%d (%ds left)", clients[i]->name, rpg::attrname(attrs[j]), mags[j], secs[j]);
+        }
+    });
     COMMANDN(rpgtestgod, rpgtestgod_cmd, "iV");
     // TEST-ONLY LoS diagnostic (Oct 21): reports the old single-ray vs new
     // multi-ray LoS check against the nearest live monster. Proves the
@@ -2175,7 +2188,7 @@ namespace server
         int rpg_lvl = 1, rpg_xp = 0;
         if(!rpg::getstats(ci->name, rpg_lvl, rpg_xp)) return;
         gamestate &gs = ci->state;
-        int maxhp = rpg::stat_maxhp(rpg_lvl);
+        int maxhp = rpg::stat_maxhp(rpg_lvl, rpg::buffbonus(ci->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
         if(gs.health >= gs.maxhealth) gs.health = maxhp;
         else if(gs.health > maxhp) gs.health = maxhp;
         gs.maxhealth = maxhp;
@@ -2454,6 +2467,34 @@ namespace server
         // Only on a real map load: an empty map has no NPC table to resolve
         // against, and quests are not needed there.
         if(s && s[0]) rpg::loadquests();
+        // --- RPG: quest cache reload (quest-save load-drop fix) ---
+        // ENTER WORLD connects before the first map change, so the
+        // connect-time questcacheload ran with zero quest definitions and
+        // the validquest filter dropped every stored row. Definitions load
+        // just above, so reload the caches for already-connected clients
+        // now that defs exist, and push the restored state to each client.
+        // Safe on later map changes: quest/repeatable writes are
+        // write-through, so a reload just re-reads current rows.
+        // Gate is the map load itself (s && s[0]), NOT the numeric mode:
+        // quest definitions load on every non-empty map change, and the
+        // RPG maps can load in a non-RPG numeric mode (headless: plain
+        // `map rpg_01` runs in mode 1, not 16), while quest UI gates on
+        // the map name, not the mode — so a mode gate would silently
+        // skip the reload exactly when quests are visible. The reload
+        // is read-only and clients ignore quest state on non-RPG maps.
+        if(s && s[0])
+        {
+            loopv(clients)
+            {
+                clientinfo *ci = clients[i];
+                if(ci->connectionState == CONNECTION_STATE_CONNECTED && ci->state.ai.type == ai::AI_TYPE_NONE)
+                {
+                    rpg::reloadquestcaches(ci->name);
+                    rpg_syncquest(ci);
+                    rpg_syncbuffs(ci); // bundle: fresh buff list on every map load (covers reconnect)
+                }
+            }
+        }
         // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
         // A listen-server `map` command changes smapname after clients connected,
         // so the connect-time spawn ran before the map was an RPG map; apply the
@@ -2769,7 +2810,7 @@ namespace server
                     // N_RPG_HPMAX and refreshes its stat cache via rpg_syncinv.
                     if(rpg::mapactive(smapname))
                     {
-                        int maxhp = rpg::stat_maxhp(rpg_newlevel);
+                        int maxhp = rpg::stat_maxhp(rpg_newlevel, rpg::buffbonus(actor->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
                         if(actor->state.health > maxhp) actor->state.health = maxhp;
                         actor->state.maxhealth = maxhp;
                         sendf(actor->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -3037,7 +3078,7 @@ namespace server
         sendservmsgf("\f2%s \f7reached RPG level \f2%d!", cq->name, newlevel);
         if(rpg::mapactive(smapname))
         {
-            int maxhp = rpg::stat_maxhp(newlevel);
+            int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
             if(cq->state.health > maxhp) cq->state.health = maxhp;
             cq->state.maxhealth = maxhp;
             sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -3092,6 +3133,25 @@ namespace server
             char objtext[160];
             rpg_questobjtext(cq->name, qd->qid, objtext, sizeof(objtext));
             sendf(cq->clientnum, 1, "riis", N_RPG_QTEXT, qd->qid, objtext);
+        }
+    }
+
+    // Bundle (Oct 28): HUD buff display sync. Clear marker first, then one
+    // message per active buff — the client replaces incrementally, so a
+    // re-sync never leaves a stale icon. Called on buff use, on expiry,
+    // and on every map change (the changemap reload block), which covers
+    // connect/reconnect freshness: buffs are cleared server-side on
+    // logout, so a reconnect + map load re-syncs empty.
+    static void rpg_syncbuffs(clientinfo *cq)
+    {
+        if(!rpg::connected() || !cq) return;
+        sendf(cq->clientnum, 1, "ri3", N_RPG_BUFFS, -1, 0); // clear all
+        int attrs[8], mags[8], secs[8];
+        int n = rpg::bufflist(cq->name, attrs, mags, secs, 8);
+        loopi(n)
+        {
+            int expires = (int)time(NULL) + secs[i];
+            sendf(cq->clientnum, 1, "ri3", N_RPG_BUFFS, attrs[i], expires);
         }
     }
 
@@ -4338,7 +4398,7 @@ namespace server
         bool crit = false;
         if(rpg::mapactive(smapname))
         {
-            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::attrscore(level, rpg::ATTR_STRENGTH);
+            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::attrscore(level, rpg::ATTR_STRENGTH) + rpg::buffbonus(cq->name, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
             // Spell damage: ability base + 2xKnowledge. (stat_sparkbolt() is
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
@@ -4476,11 +4536,51 @@ namespace server
         else sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Nothing equipped there.");
     }
 
+    // Crafting Phase 2: buff duration in seconds on the server clock. Default 3600 = 1 hour
+    // (approved). Tunable for headless expiry tests (set to a few seconds); the shipped
+    // default never changes. rpg_use passes this to rpg::applybuff per use.
+    // Declared here (before rpg_use) because VARs are only visible after their declaration point.
+    VAR(rpg_buff_duration_sec, 1, 3600, 86400);
+
     void rpg_use(clientinfo *cq, const char *itemid)
     {
         if(!rpg_checkinv(cq)) return;
         if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to use that."); return; }
         int id = rpg::finditem(itemid);
+        // Crafting Phase 2: buff consumables branch BEFORE the heal path (buff items have
+        // heal 0, so usestack would reject them). Same-type re-use refreshes the timer via
+        // applybuff; it never stacks. Vitality raises the HP cap only (no silent heal).
+        if(id >= 0 && rpg::item(id).buffattr >= 0)
+        {
+            const rpg::itemdef &bd = rpg::item(id);
+            if(!rpg::removeitem(cq->name, itemid, 1)) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You don't have that."); return; }
+            int mag = rpg::buffmagnitude(bd.tier);
+            if(!rpg::applybuff(cq->name, bd.buffattr, mag, rpg_buff_duration_sec))
+            {
+                rpg::additem(cq->name, itemid, 1); // refund: apply failed (character not cached)
+                sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Cannot use that.");
+                return;
+            }
+            char durbuf[32];
+            if(rpg_buff_duration_sec >= 3600) snprintf(durbuf, sizeof(durbuf), "%d hour", rpg_buff_duration_sec/3600);
+            else snprintf(durbuf, sizeof(durbuf), "%d seconds", rpg_buff_duration_sec);
+            defformatstring(bmsg)("%s used: +%d %s for %s.", bd.name, mag, rpg::attrname(bd.buffattr), durbuf);
+            rpg_qmsg(cq, bmsg);
+            conoutf("rpg: '%s' gains +%d %s from %s (tier %s, %ds)", cq->name, mag, rpg::attrname(bd.buffattr), bd.name, rpg::crafttiername(bd.tier), rpg_buff_duration_sec);
+            if(bd.buffattr == rpg::ATTR_VITALITY && rpg::mapactive(smapname))
+            {
+                int lvl = 1, xp = 0;
+                if(rpg::getstats(cq->name, lvl, xp))
+                {
+                    int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY));
+                    cq->state.maxhealth = maxhp; // cap rises; current HP unchanged (no silent heal)
+                    sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
+                }
+            }
+            rpg_syncinv(cq);
+            rpg_syncbuffs(cq); // bundle: HUD buff row gains the new icon
+            return;
+        }
         int heal = rpg::usestack(cq->name, itemid);
         if(heal < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Cannot use that."); return; }
         gamestate &gs = cq->state;
@@ -4996,6 +5096,29 @@ namespace server
                     int mana = 0, maxmana = 0;
                     if(rpg::getmana(cq->name, mana, maxmana))
                         sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
+                    // --- Crafting Phase 2: buff expiry (server clock, 1s cadence) ---
+                    // Prune runs on any map (expiry is wall-clock); the HP-cap clamp
+                    // below is RPG-map only so FPS maxhealth is never touched.
+                    {
+                        int expired[8]; int nexp = rpg::buffprune(cq->name, expired, 8);
+                        loopi(nexp)
+                        {
+                            defformatstring(emsg)("%s buff has worn off.", rpg::attrname(expired[i]));
+                            rpg_qmsg(cq, emsg);
+                            conoutf("rpg: '%s' buff %s expired", cq->name, rpg::attrname(expired[i]));
+                        }
+                        if(nexp > 0 && rpg::mapactive(smapname))
+                        {
+                            int lvl = 1, xp = 0;
+                            if(rpg::getstats(cq->name, lvl, xp))
+                            {
+                                int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY));
+                                if(cq->state.health > maxhp) { cq->state.health = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HP, cq->state.health); conoutf("rpg: '%s' vitality expiry clamped HP to %d", cq->name, maxhp); }
+                                if(cq->state.maxhealth != maxhp) { cq->state.maxhealth = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp); }
+                            }
+                        }
+                        if(nexp > 0) rpg_syncbuffs(cq); // bundle: expiry must clear the client's HUD icon promptly
+                    }
                     // --- RPG: out-of-combat health regen (Oct 20 rule) ---
                     // After REGEN_DELAY_MS with no damage dealt or taken,
                     // health climbs at the slow regen rate back to full.

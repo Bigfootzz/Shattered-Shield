@@ -1,5 +1,6 @@
 #include "game.h"
 #include "rpg/rpg.h"
+#include "rpg/stats.h"
 #include "rpg/abilities.h"
 #include "rpg/items.h"
 #include "engine.h"
@@ -2633,6 +2634,40 @@ namespace game
     // v0.1.9: readable digital face (Ed: the Cinzel GUI font is unreadable at
     // tracker sizes) + a transparent black plate behind the two text lines,
     // sized from the text extents (same idiom as the chat box plate).
+    // Ed's frame art (Oct 28): shared minimap-cluster geometry. The
+    // frame texture is his own 1254x1254 design (converted to RGBA,
+    // packages/ui/rpg/hud/radar_frame.png) — a ring with a clock box
+    // on top and four button circles below, NOT a plain square ring.
+    // Fractions were measured off that art (1254-square fractions):
+    //   ring center (0.4976, 0.4825), window inner radius 0.2935
+    //   clock inset center (0.4992, 0.0762), inset height 0.1116
+    //   circles (center frac, dark-diameter frac):
+    //     char  lower-left          (0.1903, 0.7449) 0.1046
+    //     bag   lower-right         (0.8079, 0.7447) 0.1060
+    //     craft bottom-center-right (0.6311, 0.8716) 0.1140
+    //     social bottom-center-left (0.3659, 0.8720) 0.1141 (EMPTY)
+    //   bottom circles' outer rim bottom: 0.9565
+    // The composite is scaled so the window's inner edge coincides
+    // with the terrain fan's edge (fan radius 0.39 of the map rect
+    // s): comp = s*0.39/0.2935. The map rect stays s x s centered
+    // on the ring center; markers already clamp at 0.78 (the fan
+    // edge), so they stay inside the window with no change. Anchors:
+    // composite right edge = old ring-box right edge (X - s/20),
+    // composite top = old top margin (s/20), so the cluster never
+    // clips off the top of the screen.
+    static void rpg_mmgeom(int w, int h, float &s, float &compx, float &compy, float &comp, float &ringcx, float &ringcy, float &mapx, float &mapy)
+    {
+        float X = w*1800.0f/h;
+        s = 427.0f; // int(1800/4*0.95f) since v0.1.31, unchanged
+        comp = s*0.39f/0.2935f;
+        compx = X - s/20 - comp;
+        compy = s/20;
+        ringcx = compx + 0.4976f*comp;
+        ringcy = compy + 0.4825f*comp;
+        mapx = ringcx - s*0.5f;
+        mapy = ringcy - s*0.5f;
+    }
+
     void drawrpgquest(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -2643,14 +2678,16 @@ namespace game
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*1800.0f/h;
-        // v0.1.31: same geometry as drawrpgradar (5% smaller, s/20
-        // margin).
-        // v0.1.35: radar shifted down 42 for the clock above the ring,
-        // and the plate sits 64 below the ring bottom so it clears the
-        // new crafting icon (icon bottom at ring bottom + 48.9, plate
-        // top at ring bottom + 64, ~15px clearance).
-        int rs = int(1800/4*0.95f), rx = int(X - rs - rs/20);
-        float ty = rs + rs/20 + 42.0f + 64.0f;
+        // Ed's frame art (Oct 28): shared composite geometry from
+        // rpg_mmgeom (above). The plate's right edge stays at the
+        // composite's right edge (rx+rs = X - s/20, unchanged), and
+        // its top drops below the bottom button circles (rim bottom
+        // 0.9565 of the composite) plus one 24-unit gap — the old
+        // position would sit on top of the circles.
+        float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
+        int rs = int(s), rx = int(X - rs - rs/20);
+        float ty = compy + 0.9565f*comp + 24.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -3093,11 +3130,13 @@ namespace game
         settexture("data/hud/radarping.png", 3);
         glColor4f(1, 1, 1, fade > 0.75f ? 0.75f : fade);
         drawradar(x - roffset + rpoffset, y - roffset + rpoffset, rsize*blend);
-        // Shattered Shield frame (user-approved Oct 19): the same stone-ring
-        // art as the RPG radar. Cosmetic only — markers, compass and mode
-        // logic are untouched. (Revelade Revolution keeps stock radar.png;
-        // separate product.)
-        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
+        // Shattered Shield frame: the CLASSIC stone-ring art (the
+        // pre-Oct-28 radar_frame.png, kept as radar_frame_classic.png).
+        // The RPG radar slot now holds Ed's own cluster art, which is
+        // drawn over a composite rect there — it must NOT be stretched
+        // over this FPS square (its window would not match the FPS fan
+        // and its clock box / circles would sit empty). Cosmetic only.
+        glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame_classic.png")->id);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1, 1, 1, radartexalpha);
         drawradar(x - roffset, y - roffset, rsize);
@@ -3235,30 +3274,85 @@ namespace game
         return false;
     }
 
+    // Bundle (Ed, Oct 28, WoW-style buff row): one icon per ACTIVE buff
+    // type at the top of the screen, extending LEFT from the minimap's
+    // left edge (the cluster leaves the top strip left of the ring free).
+    // Icon is the buff's own crafting/item icon (base cell_draught /
+    // cell_tonic — buff rows store magnitude, not tier, so the base icon
+    // is the correct per-type choice). Timer is whole minutes from the
+    // server-clock expiry ("59m"), so it updates exactly once per minute
+    // by construction. Icons vanish on expiry (pruned here + server sync)
+    // and on logout (server clears buffs on disconnect; the next map
+    // load re-syncs empty). Gate is mapactive + alive, NOT showradar:
+    // buff status stays visible even if the player hides the minimap.
+    void drawrpgbuffrow(fpsent *d, int w, int h)
+    {
+        if(!rpg::mapactive(getclientmap())) return;
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
+        int attrs[8], exps[8];
+        int n = rpg::clientbufflist(attrs, exps, 8);
+        if(n <= 0) return;
+        // Ed's frame art (Oct 28): the row ends one gap left of the
+        // COMPOSITE's left edge (rpg_mmgeom), not the old ring box —
+        // the art extends past the ring on both sides, and the top
+        // box would otherwise collide with the row. Top unchanged
+        // (compy = s/20 = composite top).
+        float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
+        float x = compx, y = compy;
+        float B = 94.0f, igap = 12.0f, marg = 24.0f; // B ~= 40px at 768 (Ed's 32-48px spec)
+        float total = n*B + (n-1)*igap;
+        float startx = x - marg - total; // right-aligned: row ends one gap left of the ring
+        int now = (int)time(NULL);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(1, 1, 1, 1.0f);
+        loopi(n)
+        {
+            const char *tex = NULL;
+            if(attrs[i] == rpg::ATTR_STRENGTH) tex = "packages/ui/rpg/icons/cell_draught.png";
+            else if(attrs[i] == rpg::ATTR_VITALITY) tex = "packages/ui/rpg/icons/cell_tonic.png";
+            else continue; // no display icon defined for this buff type yet
+            float ix = startx + i*(B + igap);
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
+            rpg_drawtexuv(ix, y, B, B, 0, 0, 1, 1);
+            int mins = (exps[i] - now + 59) / 60; // ceil: 3599s -> 60m, 60s -> 1m
+            if(mins < 1) mins = 1;
+            defformatstring(tbuf)("%dm", mins);
+            rpg_hudtextc(tbuf, ix + B*0.5f, y + B + 16.0f, 22.0f);
+        }
+    }
+
     void drawrpgradar(fpsent *d, int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
         if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        // v0.1.31 (Ed, Oct 27): minimap 5% smaller and a little closer
-        // to the corner. 450 -> 427 (450 x 0.95), margin s/10 -> s/20.
-        // drawrpgquest uses the same geometry, so it moves with it.
-        // v0.1.35 (Ed, Oct 28): ring shifted down 42px so the clock fits
-        // ABOVE it (30px clock + 12px gap, top at the old s/20 margin).
-        int s = int(1800/4*0.95f), x = 1800*w/h - s - s/20, y = s/20 + 42;
+        // Ed's frame art (Oct 28): the map rect stays s x s (427, as
+        // since v0.1.31) but is now CENTERED on the art's ring center,
+        // and the frame texture is drawn over the whole composite
+        // (rpg_mmgeom), not over the map rect. The fan edge meets the
+        // window's inner edge by construction, markers already clamp
+        // at the fan edge, and the player arrow uses the map rect
+        // center (= ring center) as before.
+        float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
+        float x = mapx, y = mapy;
         glColor4f(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
         rpg_drawminimap(d, x, y, s); // full-map scale (Oct 19): whole map inside the ring
         if(minimapalpha >= 1) glEnable(GL_BLEND);
-        // RPG frame art (Oct 19): dark stone ring, rope border, silver studs,
-        // brass inner rim (packages/ui/rpg/hud/radar_frame.png) — the user's
-        // approved replacement for the rejected silver fang-ring art.
+        // Ed's own frame art (Oct 28, converted to RGBA in
+        // packages/ui/rpg/hud/radar_frame.png — see ~/workspace/mm-art/):
+        // ring + top clock box + four button circles, drawn over the
+        // full composite rect. The window is transparent, so the fan
+        // shows through it; the art's own circles are the button
+        // backings (no code-drawn backings below).
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1, 1, 1, radartexalpha);
-        drawradar(x, y, s);
+        drawradar(compx, compy, comp);
         glColor4f(1, 1, 1, 1.0f);
 
         float msize = s*0.06f, qsize = s*0.09f;
@@ -3318,77 +3412,64 @@ namespace game
             glColor4f(1, 1, 1, 1.0f);
         }
 
-        // v0.1.25 (item 4): WoW-style radar buttons + clock. Replaces the
-        // "[I] inventory [C] character" hint line above the action bar.
-        // Character (player icon) and inventory (satchel) are CLICKABLE:
-        // rpg_radariconclick (above) opens the same windows as the C / I
-        // keys. v0.1.35: the clock moved ABOVE the ring and a crafting
-        // icon takes its old spot below the ring. Hit-rects are stored
-        // for the click router; the round dark backing (circle texture,
-        // 1.2x icon size) keeps the icons readable over bright terrain
-        // and echoes the round minimap.
-        // v0.1.26 (item 3): icons sit ON the ring itself, not at the
-        // bounding-box corners. The v0.1.25 positions used the square's
-        // bottom corners, but the ring is circular — the corners lie
-        // outside the circle (0.707s from center vs 0.5s radius), so the
-        // icons floated detached below the ring. Now each icon is
-        // centered on the rim circle (radius s/2 about the ring center)
-        // at the bottom-left / bottom-right diagonals, WoW-style.
+        // Ed's frame art (Oct 28): icons sit ON his circles — the
+        // circles ARE the backings, so no icon_backing_circle draws
+        // at all. Each icon is 0.82x its circle's dark diameter, so
+        // the dark interior and the metal rim stay visible around
+        // it. Mapping (Ed): character -> lower-left, bag ->
+        // lower-right, crafting -> bottom-center-right. The
+        // bottom-center-left circle stays EMPTY (future social
+        // slot): no icon, no hit-rect, no click. The clock text
+        // goes in the art's top black inset box, centered; the
+        // code-drawn bottom time box is GONE entirely.
         {
-            // v0.1.27 (item 3, Ed-specified): icons 10% smaller than v0.1.26
-            // (0.16 -> 0.144 of ring size). The round backing is 1.2x the
-            // icon size, so it scales with the icon and the ring stays
-            // proportional; hit-rects use isz, so clicks follow the icon.
-            // Rim positions, C/I keys and clock unchanged.
-            float isz = s*0.144f;
-            float ccx = x + s*0.5f, ccy = y + s*0.5f, rim = s*0.5f*0.7071f;
-            float cix = ccx - rim - isz*0.5f, ciy = ccy + rim - isz*0.5f;
-            float bix = ccx + rim - isz*0.5f, biy = ccy + rim - isz*0.5f;
-            rpg_radar_char_rect[0] = cix; rpg_radar_char_rect[1] = ciy;
-            rpg_radar_char_rect[2] = cix + isz; rpg_radar_char_rect[3] = ciy + isz;
-            rpg_radar_bag_rect[0] = bix; rpg_radar_bag_rect[1] = biy;
-            rpg_radar_bag_rect[2] = bix + isz; rpg_radar_bag_rect[3] = biy + isz;
-            // v0.1.26 (Ed preview feedback): round button backings, not
-            // square boards — a circle echoes the round minimap and reads
-            // as an intentional button, not an afterthought. Backing is
-            // 1.2x the icon size, centered on the icon, so a dark ring
-            // shows all around the icon art. Hit-rects stay the icon
-            // square (click behavior unchanged).
-            float bisz = isz*1.2f;
-            glColor4f(1, 1, 1, 1.0f);
-            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_backing_circle.png")->id);
-            rpg_drawtexuv(cix - isz*0.1f, ciy - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
-            rpg_drawtexuv(bix - isz*0.1f, biy - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
+            float chx = compx + 0.1903f*comp, chy = compy + 0.7449f*comp, chz = 0.82f*0.1046f*comp;
+            float bgx = compx + 0.8079f*comp, bgy = compy + 0.7447f*comp, bgz = 0.82f*0.1060f*comp;
+            float crx = compx + 0.6311f*comp, cry = compy + 0.8716f*comp, crz = 0.82f*0.1140f*comp;
+            rpg_radar_char_rect[0] = chx - chz*0.5f; rpg_radar_char_rect[1] = chy - chz*0.5f;
+            rpg_radar_char_rect[2] = chx + chz*0.5f; rpg_radar_char_rect[3] = chy + chz*0.5f;
+            rpg_radar_bag_rect[0] = bgx - bgz*0.5f; rpg_radar_bag_rect[1] = bgy - bgz*0.5f;
+            rpg_radar_bag_rect[2] = bgx + bgz*0.5f; rpg_radar_bag_rect[3] = bgy + bgz*0.5f;
+            rpg_radar_craft_rect[0] = crx - crz*0.5f; rpg_radar_craft_rect[1] = cry - crz*0.5f;
+            rpg_radar_craft_rect[2] = crx + crz*0.5f; rpg_radar_craft_rect[3] = cry + crz*0.5f;
             glColor4f(1, 1, 1, 1.0f);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_char.png")->id);
-            rpg_drawtexuv(cix, ciy, isz, isz, 0, 0, 1, 1);
+            rpg_drawtexuv(chx - chz*0.5f, chy - chz*0.5f, chz, chz, 0, 0, 1, 1);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_bag.png")->id);
-            rpg_drawtexuv(bix, biy, isz, isz, 0, 0, 1, 1);
-            // v0.1.35 (Ed, Oct 28): clock moves ABOVE the ring, and a
-            // crafting icon takes the clock's old spot below the ring
-            // (centered, same size/backing as the char/bag icons; click
-            // opens the Craft window via rpg_radariconclick). No dedicated
-            // crafting texture exists, so the potion (the signature
-            // crafted product) stands in; Ed can ask for different art.
-            // Clock above: center y-27, so the 30px text spans y-42..y-12
-            // (top at the old s/20 margin, 12px gap to the ring).
+            rpg_drawtexuv(bgx - bgz*0.5f, bgy - bgz*0.5f, bgz, bgz, 0, 0, 1, 1);
+            // Craft button (Ed, Oct 28): white-outlined hammer icon,
+            // NOT the potion texture — the potion art is the buff icon
+            // and was confusing on the button, and the anvil was hard
+            // to see on the dark circle. Ed picked the hammer.
+            // (packages/ui/rpg/hud/icon_radar_craft_hammer.png, 64x64
+            // RGBA, glyph 42x50 with a white rim) draws at the same
+            // 0.82x size as the char/bag icons so it fills its ring
+            // the same way; the potion texture is untouched and stays
+            // the buff icon only.
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_craft_hammer.png")->id);
+            rpg_drawtexuv(crx - crz*0.5f, cry - crz*0.5f, crz, crz, 0, 0, 1, 1);
+            // Clock in the top inset box (white on the art's black
+            // panel; inset height 0.1116 of the composite). Ed, Oct 28:
+            // 12-hour with AM/PM (not 24-hour), one size step bigger,
+            // and bold. The engine has no discrete font-size steps, so
+            // one step is defined here as 0.58 -> 0.68 of inset height.
+            // The engine also has NO bold font (no bold face in
+            // packages/fonts, no bold flag in the text renderer), so
+            // bold is a faithful double-draw: the same string twice,
+            // offset half a screen pixel each side of center, which
+            // thickens the strokes without shifting the centered
+            // position. %I/%p give 12-hour with AM/PM; midnight 00:xx
+            // renders 12:xx AM, noon 12:xx PM. Ed, Oct 28: text nudged
+            // down 0.01 of the composite (about 2-3 screen px at
+            // 768p) from the inset center, 0.0762 -> 0.0862.
             time_t now = time(NULL);
             struct tm *lt = localtime(&now);
-            char tbuf[16] = "00:00";
-            if(lt) strftime(tbuf, sizeof(tbuf), "%H:%M", lt);
-            pushfont();
-            rpg_hudtextc(tbuf, x + s*0.5f, y - 27.0f, 30.0f);
-            popfont();
-            // Crafting icon below the ring, at the old clock center.
-            float crx = x + s*0.5f - isz*0.5f, cry = y + s + 12.0f - isz*0.5f;
-            rpg_radar_craft_rect[0] = crx; rpg_radar_craft_rect[1] = cry;
-            rpg_radar_craft_rect[2] = crx + isz; rpg_radar_craft_rect[3] = cry + isz;
-            glColor4f(1, 1, 1, 1.0f);
-            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_backing_circle.png")->id);
-            rpg_drawtexuv(crx - isz*0.1f, cry - isz*0.1f, bisz, bisz, 0, 0, 1, 1);
-            glColor4f(1, 1, 1, 1.0f);
-            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/icons/icon_potion.png")->id);
-            rpg_drawtexuv(crx, cry, isz, isz, 0, 0, 1, 1);
+            char tbuf[16] = "12:00 AM";
+            if(lt) strftime(tbuf, sizeof(tbuf), "%I:%M %p", lt);
+            float cpxh = 0.68f*0.1116f*comp;
+            float coff = 0.5f*1800.0f/h; // half a screen pixel each side
+            rpg_hudtextc(tbuf, compx + 0.4992f*comp - coff, compy + 0.0862f*comp, cpxh);
+            rpg_hudtextc(tbuf, compx + 0.4992f*comp + coff, compy + 0.0862f*comp, cpxh);
         }
     }
 
@@ -3485,7 +3566,7 @@ namespace game
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
         if(!rpg::mapactive(getclientmap()) && needminimap(!d->isInfected())) drawradarfull(d, w, h); // draw minimap (FPS path untouched)
         // RPG: the radar is back on RPG maps as the PvE tracker (user design, Oct 19).
-        { extern int rpg_testforce; if(rpg_testforce || rpg::mapactive(getclientmap())) drawrpgradar(d, w, h); }
+        { extern int rpg_testforce; if(rpg_testforce || rpg::mapactive(getclientmap())) { drawrpgradar(d, w, h); drawrpgbuffrow(d, w, h); } }
         if(showtimers) drawtimers(d, w, h);
 
         if(d->state!=CS_EDITING)

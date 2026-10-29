@@ -13,6 +13,7 @@
 // anything; the client loads the same files for display.
 #include "items.h"
 #include "crafting.h"
+#include "stats.h"
 #include "cube.h"
 
 #include <cstdlib>
@@ -42,22 +43,22 @@ namespace rpg
     static const itemdef FALLBACK_ITEMS[] =
     {
         // id              name            type            slot           icon                                        vwep                         dmg  arm  heal  stack  value mana
-        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     15,  0,   0,   false, 60,   0 , 0 },
-        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/warrior/sword",    15,  0,   0,   false, 60,   0 , 0 },
-        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 , 0 },
-        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 , 0 },
-        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 , 0 },
-        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 , 0 },
-        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 , 0 },
-        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 , 0 },
-        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 , 0 },
-        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 15,   0 , 0 },
-        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 25,   0 , 0 },
-        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  2,   0,   false, 25,   0 , 0 },
-        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  4,   0,   false, 45,   0 , 0 },
-        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 12,   0 , 0 },
-        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 , 0 },
-        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 , 0 },
+        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/warrior/sword",    15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 , 0, -1 },
+        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 , 0, -1 },
+        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 , 0, -1 },
+        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 12,   0 , 0, -1 },
+        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          0,  1,   0,   false, 18,   0 , 0, -1 },
+        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 25,   0 , 0, -1 },
+        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  2,   0,   false, 25,   0 , 0, -1 },
+        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  4,   0,   false, 45,   0 , 0, -1 },
+        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  1,   0,   false, 12,   0 , 0, -1 },
+        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 , 0, -1 },
+        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      12,  0,   0,   false, 25,   0 , 0, -1 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
@@ -86,7 +87,7 @@ namespace rpg
 
     const itemdef &item(int id)
     {
-        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, 0, 0, 0, false, 0, 0, 0 };
+        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, 0, 0, 0, false, 0, 0, 0, -1 };
         if(id < 0 || id >= itemcount()) return invalid;
         return usingdata ? dataitems[id] : FALLBACK_ITEMS[id];
     }
@@ -126,6 +127,7 @@ namespace rpg
         bool active = false;
         std::string id, name, type, slot, icon, vwep;
         int damage = 0, armor = 0, heal = 0, mana = 0, value = 0, tier = 0;
+        int buffattr = -1;
         bool stack = false;
     };
     static itembuild curitem;
@@ -201,6 +203,18 @@ namespace rpg
         {
             if(argc != 1 || !parseintarg(cmd, argv[0], curitem.tier, err)) return false;
             if(curitem.tier < 0 || curitem.tier > 4) { err = "ss_item_tier out of range 0..4"; return false; }
+            return true;
+        }
+        if(c == "ss_item_buff")
+        {
+            if(argc != 1) { err = "ss_item_buff: expected 1 argument (attribute name)"; return false; }
+            if(argv[0] == std::string("strength")) curitem.buffattr = ATTR_STRENGTH;
+            else if(argv[0] == std::string("dexterity")) curitem.buffattr = ATTR_DEXTERITY;
+            else if(argv[0] == std::string("vitality")) curitem.buffattr = ATTR_VITALITY;
+            else if(argv[0] == std::string("knowledge")) curitem.buffattr = ATTR_KNOWLEDGE;
+            else if(argv[0] == std::string("wisdom")) curitem.buffattr = ATTR_WISDOM;
+            else if(argv[0] == std::string("cunning")) curitem.buffattr = ATTR_CUNNING;
+            else { err = std::string("ss_item_buff: unknown attribute '") + argv[0] + "'"; return false; }
             return true;
         }
         if(c == "ss_item_stack")
@@ -343,6 +357,12 @@ namespace rpg
             { err = "item '" + b.id + "' sets armor but is not armor"; return false; }
             if(type != ITEM_CONSUMABLE && (b.heal != 0 || b.mana != 0))
             { err = "item '" + b.id + "' sets heal/mana but is not a consumable"; return false; }
+            if(b.buffattr < -1 || b.buffattr >= ATTR_COUNT)
+            { err = "item '" + b.id + "' has an out-of-range buff attribute"; return false; }
+            if(b.buffattr >= 0 && type != ITEM_CONSUMABLE)
+            { err = "item '" + b.id + "' sets a buff but is not a consumable"; return false; }
+            if(b.buffattr >= 0 && b.heal != 0)
+            { err = "item '" + b.id + "' sets both a buff and a heal; buff items must not heal"; return false; }
         }
         return true;
     }
@@ -368,6 +388,7 @@ namespace rpg
             d.value = b.value;
             d.mana = b.mana;
             d.tier = b.tier;
+            d.buffattr = b.buffattr;
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             if(!findfile(d.icon, "e"))

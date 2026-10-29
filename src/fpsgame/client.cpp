@@ -1227,6 +1227,7 @@ namespace game
             const rpg::itemdef &d = rpg::item(rpg_clinv[*i].item);
             if(d.type == rpg::ITEM_WEAPON) formatstring(s)("+%d damage", d.damage);
             else if(d.type == rpg::ITEM_ARMOR) formatstring(s)("Armor %d", d.armor);
+            else if(d.type == rpg::ITEM_CONSUMABLE && d.buffattr >= 0) formatstring(s)("%s +%d", rpg::attrname(d.buffattr), rpg::buffmagnitude(d.tier));
             else if(d.type == rpg::ITEM_CONSUMABLE) formatstring(s)("Heals %d", d.heal);
         }
         result(s);
@@ -3387,6 +3388,13 @@ namespace game
             {
                 int qid = getint(p), st = getint(p), kills = getint(p), need = getint(p);
                 rpg::setclientquest(qid, st, kills, need);
+                break;
+            }
+            case N_RPG_BUFFS: // bundle (Oct 28): active buff sync (attr, expires; -1 = clear all)
+            {
+                int attr = getint(p), expires = getint(p);
+                if(attr < 0) rpg::clearclientbuffs();
+                else rpg::setclientbuff(attr, expires);
                 break;
             }
             case N_RPG_QTEXT: // quest engine v2: objective display text

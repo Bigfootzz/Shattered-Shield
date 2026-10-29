@@ -372,6 +372,17 @@ void guiimage(char *path, char *action, float *scale, int *overlaid, char *alt, 
         alias("guirolloveranyaction", action);
     }
 }
+// v0.1.36 (WoW-style tight windows, Ed Oct 28): textured background for
+// content-fitted windows. Draws the texture stretched over the current
+// list's box; contributes no layout size (see gui::backgroundtex). A
+// missing texture draws nothing and reserves nothing, unlike guiimage.
+void guibackgroundtex(char *path)
+{
+    if(!cgui) return;
+    Texture *t = textureload(path, 0, true, false);
+    if(t==notexture) return;
+    cgui->backgroundtex(t);
+}
 
 void guicolor(int *color)
 {
@@ -676,6 +687,7 @@ COMMAND(guistrut,"fi");
 COMMAND(guispring, "i");
 COMMAND(guicolumn, "i");
 COMMAND(guiimage,"ssfisi");
+COMMAND(guibackgroundtex,"s");
 COMMAND(guislider,"sbbs");
 COMMAND(guilistslider, "sss");
 COMMAND(guinameslider, "ssss");

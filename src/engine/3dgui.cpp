@@ -667,6 +667,27 @@ struct gui : g3d_gui
         defaultshader->set();
     }
 
+    // v0.1.36 (WoW-style tight windows, Ed Oct 28): textured background
+    // stretched over the CURRENT list's full box (xsize x ysize at
+    // curx/cury). Layout pass: no-op, so it contributes no size and no
+    // hit target — the menu rect is exactly the content rect. Render
+    // pass: draws first (place it as the first child of the menu), so
+    // content draws over it. The menu rect is centered on screen by
+    // the engine, so the background's center is the menu center in
+    // every state: per-window tight frames with aligned centers and
+    // no tab-switch center shift, with no per-state size modeling.
+    // Tint mirrors icon_() (white lerped to light, which is white for
+    // 2D menus), so the parchment looks exactly as it did via guiimage.
+    void backgroundtex(Texture *t)
+    {
+        if(layoutpass) return;
+        if(!visible()) return;
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        vec color = colorfromhex(0xFFFFFF).lerp(light, 1.f);
+        glColor3fv(color.v);
+        rect_(curx, cury, xsize, ysize, 0);
+    }
+
     // RR -> colorizable icons
     void icon_(Texture *t, bool overlaid, int x, int y, int size, bool hit, int colour = 0xFFFFFF, const char *name = "")
     {

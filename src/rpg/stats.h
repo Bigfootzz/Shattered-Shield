@@ -35,6 +35,7 @@ namespace rpg
 
     // --- derived stats ---
     int stat_maxhp(int level);             // 90 + 10 * Vitality
+    int stat_maxhp(int level, int vitbonus); // 90 + 10 * (Vitality + bonus); Phase 2 buffs
     int stat_maxmana(int level);           // 40 + 10 * level + 10 * Wisdom
     int stat_manaregen(int level);         // 5 + Wisdom per second
     int stat_powerstrike(int level, int weapondmg); // 35 + weapon + Strength

@@ -45,6 +45,12 @@ namespace rpg
         return 90 + 10*attrscore(level, ATTR_VITALITY);
     }
 
+    int stat_maxhp(int level, int vitbonus)
+    {
+        if(vitbonus < 0) vitbonus = 0;
+        return 90 + 10*(attrscore(level, ATTR_VITALITY) + vitbonus);
+    }
+
     // MANA RETUNE Oct 22 (v0.1.8 fix 8): base 40 -> 60. Level-1 pool is now
     // 80 (was 60): Spark Bolt (12) x ~6.7 casts raw, Arcane (8) x 10,
     // Ice (15) x ~5.3. A disciplined 6s rotation (Ice+Arcane+Spark = 35 mana
