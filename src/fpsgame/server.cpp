@@ -4524,7 +4524,12 @@ namespace server
             rpg_sendvwep(cq); // weapon model swap is visible to everyone
             rpg_syncinv(cq);
         }
-        else sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Cannot equip that.");
+        else
+        {
+            const char *deny = rpg::equipdeny();
+            defformatstring(msg)("\f2%s", deny && deny[0] ? deny : "Cannot equip that.");
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        }
     }
 
     void rpg_unequip(clientinfo *cq, int slot)

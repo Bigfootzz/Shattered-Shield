@@ -54,6 +54,11 @@ namespace rpg
         int slot;          // SLOT_* above (SLOT_NONE for non-gear)
         const char *icon;  // packages/ path to the 64px sliced icon PNG
         const char *vwep;  // weapons only: model path attached at tag_weapon; else NULL
+        const char *weaponcat; // weapons only: category for class gating
+                           // ("mace"|"axe"|"sword"|"staff"|"wand"|"orb"|
+                           // "bow"|"crossbow"), or NULL for legacy weapons
+                           // with no category (equippable by all classes).
+                           // Data files set it with ss_item_weaponcat.
         int damage;        // weapons: bonus added to melee ability (Power Strike) damage
         int armor;         // armor: flat reduction of incoming monster damage
         int heal;          // consumables: HP restored on use

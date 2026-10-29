@@ -746,8 +746,64 @@ namespace rpg
         return true;
     }
 
+    // Reason for the last equipitem class refusal ("" otherwise); read by
+    // the server's equip handler so the player sees the specific refusal
+    // instead of a generic "cannot equip". Single-threaded game logic, so
+    // a static buffer is safe; cleared on every equipitem call.
+    static char equipdenybuf[128];
+    const char *equipdeny() { return equipdenybuf; }
+
+    // ASCII case-insensitive string equality (no locale dependency).
+    static bool classmatch(const char *raw, const char *want)
+    {
+        if(!raw || !want) return false;
+        while(*raw && *want)
+        {
+            char a = *raw >= 'A' && *raw <= 'Z' ? *raw + 32 : *raw;
+            char b = *want >= 'A' && *want <= 'Z' ? *want + 32 : *want;
+            if(a != b) return false;
+            raw++; want++;
+        }
+        return *raw == *want;
+    }
+
+    // Class of a character for weapon gating (Ed, Oct 29). Stored archetype
+    // first; it is empty for newer characters (DB write issue), so fall back
+    // to the model dir — the same derivation the starter kit and client
+    // ability gating use (ranger_male -> Ranger, wizard_male and
+    // sorceress_female -> Magi). False when neither source yields a known
+    // class, and the gate then fails closed.
+    static bool classfor(const char *name, char *out, int max)
+    {
+        if(out && max > 0) out[0] = '\0';
+        if(!name || !name[0] || !out || max <= 0) return false;
+        char raw[64]; raw[0] = '\0';
+        if((!chararchetype(name, raw, sizeof(raw)) || !raw[0]) &&
+           (!charmodel(name, raw, sizeof(raw)) || !raw[0])) return false;
+        char *u = strrchr(raw, '_'); // model dirs carry a sex suffix
+        if(u) *u = '\0';
+        if(classmatch(raw, "ranger")) copystring(out, "Ranger", max);
+        else if(classmatch(raw, "warrior")) copystring(out, "Warrior", max);
+        else if(classmatch(raw, "magi") || classmatch(raw, "wizard") || classmatch(raw, "sorceress")) copystring(out, "Magi", max);
+        else return false;
+        return true;
+    }
+
+    // Class weapon mapping (Ed, Oct 29): Warrior = maces, axes, swords;
+    // Magi = staffs, wands (orbs are the later off-hand enhancement, not
+    // equippable yet, so no class allows "orb" today); Ranger = bows,
+    // crossbow. Unknown classes fail closed.
+    static bool weaponcatallowed(const char *cls, const char *cat)
+    {
+        if(!strcmp(cls, "Warrior")) return !strcmp(cat, "mace") || !strcmp(cat, "axe") || !strcmp(cat, "sword");
+        if(!strcmp(cls, "Magi")) return !strcmp(cat, "staff") || !strcmp(cat, "wand");
+        if(!strcmp(cls, "Ranger")) return !strcmp(cat, "bow") || !strcmp(cat, "crossbow");
+        return false;
+    }
+
     bool equipitem(const char *name, const char *itemid)
     {
+        equipdenybuf[0] = '\0';
         cachedchar *cc = findcached(name);
         int id = finditem(itemid);
         if(!cc || id < 0) return false;
@@ -757,6 +813,24 @@ namespace rpg
         if(it == cc->inv.end() || it->second <= 0) return false; // must own it
         int old = cc->equipped[def.slot];
         if(old == id) return true; // already wearing it
+        // Class weapon restriction (Ed, Oct 29): a categorized weapon
+        // equips only for its class. Uncategorized weapons (legacy, e.g.
+        // the puglin stick) and non-weapons are unaffected. The gate sits
+        // after the already-wearing check, so a piece already equipped
+        // (e.g. from before this rule, loaded straight from rpg_equipment)
+        // is never stripped by a re-equip; only NEW disallowed equips are
+        // refused, with equipment and inventory left exactly as they were.
+        if(def.type == ITEM_WEAPON && def.weaponcat && def.weaponcat[0])
+        {
+            char cls[32];
+            if(!classfor(name, cls, sizeof(cls)) || !weaponcatallowed(cls, def.weaponcat))
+            {
+                if(cls[0]) snprintf(equipdenybuf, sizeof(equipdenybuf), "%s cannot use %s.", cls, def.name);
+                else copystring(equipdenybuf, "Your class cannot use that weapon.");
+                conoutf("rpg: weapon gate: '%s' (%s) refused %s (%s)", name, cls[0] ? cls : "unknown", def.name, def.weaponcat);
+                return false;
+            }
+        }
         // take one from the pack...
         it->second--;
         if(it->second <= 0) cc->inv.erase(it);

@@ -120,6 +120,7 @@ namespace rpg
     int itemcount(const char *name, const char *itemid);
     bool getinventory(const char *name, itemstack *out, int maxout, int &n); // session cache
     bool equipitem(const char *name, const char *itemid);  // validates slot; swaps occupied slot back to inv
+    const char *equipdeny(); // reason for the last equipitem refusal ("" when it did not refuse on class grounds)
     bool unequipslot(const char *name, int slot);
     int equippeditem(const char *name, int slot);          // item index, or -1
     int weapondamage(const char *name);                    // equipped mainhand bonus (0 when none)
