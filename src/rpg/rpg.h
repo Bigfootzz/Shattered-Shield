@@ -439,11 +439,13 @@ namespace rpg
     void setclientquesttext(int qid, const char *text); // objective display text
     // Bundle (Oct 28): HUD buff display, client presentation cache (never
     // authoritative). One entry per active buff type the server has told
-    // us about (attr -> server-clock expiry). The server syncs on use,
-    // expiry, and every map change; buffs clear server-side on logout.
-    void setclientbuff(int attr, int expires);
+    // us about (attr -> server-clock expiry + magnitude). The server syncs
+    // on use, expiry, and every map change; buffs clear server-side on logout.
+    // v0.1.37: magnitude rides the sync so the buff-row hover tooltip can
+    // show "+N Strength" (tier backgrounds stay inventory-only).
+    void setclientbuff(int attr, int expires, int mag);
     void clearclientbuffs();
-    int clientbufflist(int *attrs, int *exps, int max); // active, expiry-pruned, attr order
+    int clientbufflist(int *attrs, int *exps, int *mags, int max); // active, expiry-pruned, attr order
     bool getclientquest(int &qid, int &state, int &kills, int &need); // tracked quest
     bool getclientquesttext(int qid, char *buf, int buflen);
     int clientqueststate(int qid); // -1 when the client has no row for qid

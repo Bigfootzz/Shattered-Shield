@@ -3289,8 +3289,8 @@ namespace game
     {
         if(!rpg::mapactive(getclientmap())) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR) return;
-        int attrs[8], exps[8];
-        int n = rpg::clientbufflist(attrs, exps, 8);
+        int attrs[8], exps[8], mags[8];
+        int n = rpg::clientbufflist(attrs, exps, mags, 8);
         if(n <= 0) return;
         // Ed's frame art (Oct 28): the row ends one gap left of the
         // COMPOSITE's left edge (rpg_mmgeom), not the old ring box —
@@ -3309,8 +3309,10 @@ namespace game
         loopi(n)
         {
             const char *tex = NULL;
-            if(attrs[i] == rpg::ATTR_STRENGTH) tex = "packages/ui/rpg/icons/cell_draught.png";
-            else if(attrs[i] == rpg::ATTR_VITALITY) tex = "packages/ui/rpg/icons/cell_tonic.png";
+            // v0.1.37 (Ed): plain per-type bottles, NO background — no cell
+            // frame, no rarity backdrop. Tier backgrounds stay inventory-only.
+            if(attrs[i] == rpg::ATTR_STRENGTH) tex = "packages/ui/rpg/icons/icon_buff_strength.png";
+            else if(attrs[i] == rpg::ATTR_VITALITY) tex = "packages/ui/rpg/icons/icon_buff_vitality.png";
             else continue; // no display icon defined for this buff type yet
             float ix = startx + i*(B + igap);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
@@ -3319,6 +3321,53 @@ namespace game
             if(mins < 1) mins = 1;
             defformatstring(tbuf)("%dm", mins);
             rpg_hudtextc(tbuf, ix + B*0.5f, y + B + 16.0f, 22.0f);
+        }
+        // v0.1.37 (Ed): hover tooltip shows the actual bonus, magnitude first.
+        // Hit-test uses the RPG free cursor (screen px -> virtual coords):
+        // g3d_cursorpos is dead-center whenever no 2D menu is open, so it
+        // cannot drive HUD hover in normal play. Skip while a menu owns the
+        // mouse, while editing, or while RMB steering hides the cursor.
+        {
+            extern bool rpg_rmbsteering();
+            if(editmode || g3d_gui2dopen() || rpg_rmbsteering()) return;
+            float pcx = 0, pcy = 0; rpg::cursorget(pcx, pcy);
+            float vscale = 1800.0f/h;
+            float vx = pcx*vscale, vy = pcy*vscale;
+            int hover = -1;
+            loopi(n)
+            {
+                float ix = startx + i*(B + igap);
+                if(vx >= ix && vx < ix + B && vy >= y && vy < y + B) { hover = i; break; }
+            }
+            if(hover < 0) return;
+            const char *aname = rpg::attrname(attrs[hover]);
+            if(!aname || !aname[0]) return;
+            defformatstring(tstr)("+%d %s", mags[hover], aname);
+            float tpxh = 26.0f, tpad = 14.0f;
+            float save = gtextscale;
+            float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+            settextscale(tpxh/baseh);
+            float wpx = text_widthf(tstr);
+            settextscale(save);
+            float tw = wpx + tpad*2, th = tpxh + tpad*2;
+            float X = w*1800.0f/h;
+            float tx = startx + hover*(B + igap) + B*0.5f - tw*0.5f;
+            if(tx < 10) tx = 10;
+            if(tx + tw > X - 10) tx = X - 10 - tw;
+            float ty = y + B + 44.0f; // below the timer line, clear of the icon
+            // v0.1.37 fix (headless proof): the first pass drew the box with
+            // rpg_fillrect, whose immediate-mode quads do not rasterize in
+            // this HUD path (same v0.1.8 chat-plate lesson), so no plate or
+            // border appeared at all. Texture-backed rpg_solidquad (the chat
+            // plate's method) renders, and it resets GL color to white, so
+            // the text below draws at full brightness like the timers.
+            rpg_solidquad(tx, ty, tw, th, 0.08f, 0.08f, 0.12f, 0.95f);
+            rpg_solidquad(tx, ty, tw, 5.0f, 0.65f, 0.65f, 0.75f, 1.0f);
+            rpg_solidquad(tx, ty + th - 5.0f, tw, 5.0f, 0.65f, 0.65f, 0.75f, 1.0f);
+            rpg_solidquad(tx, ty, 5.0f, th, 0.65f, 0.65f, 0.75f, 1.0f);
+            rpg_solidquad(tx + tw - 5.0f, ty, 5.0f, th, 0.65f, 0.65f, 0.75f, 1.0f);
+            glColor4f(1, 1, 1, 1.0f); // rpg_hudtext inherits GL color
+            rpg_hudtext(tstr, int(tx + tpad), int(ty + tpad), tpxh);
         }
     }
 

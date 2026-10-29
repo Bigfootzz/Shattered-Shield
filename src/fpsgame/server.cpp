@@ -3151,7 +3151,9 @@ namespace server
         loopi(n)
         {
             int expires = (int)time(NULL) + secs[i];
-            sendf(cq->clientnum, 1, "ri3", N_RPG_BUFFS, attrs[i], expires);
+            // v0.1.37: magnitude rides along (was computed then dropped) so the
+            // buff-row hover tooltip can show "+N Strength" without guessing tier.
+            sendf(cq->clientnum, 1, "ri4", N_RPG_BUFFS, attrs[i], expires, mags[i]);
         }
     }
 

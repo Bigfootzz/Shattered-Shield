@@ -504,7 +504,13 @@ void cleargamma()
 
 VAR(dbgmodes, 0, 0, 1);
 
-int desktopw = 0, desktoph = 0;
+// v0.1.37 (Ed): desktop resolution exposed to script (read-only: min > max
+// sets IDF_READONLY, so menus can read $desktopw/$desktoph but not write
+// them) for the Resolution menu's Native button. Plain VAR, NOT VARP, so
+// these are never written to config: the startup query below refreshes
+// them on every launch, so no stale value can survive a display change.
+VAR(desktopw, 1, 0, 0);
+VAR(desktoph, 1, 0, 0);
 
 void setupscreen(int &usedcolorbits, int &useddepthbits, int &usedfsaa)
 {
@@ -524,6 +530,17 @@ void setupscreen(int &usedcolorbits, int &useddepthbits, int &usedfsaa)
 #endif
     }
     screen_fullscreen = fullscreen;
+    // v0.1.37 (Ed): first run (scr unset) defaults to the desktop's native
+    // resolution instead of the smallest same-aspect mode >= default (e.g.
+    // 1366x768 on a 1920x1080 display). Only when BOTH are unset: a single
+    // -1 keeps the old aspect derivation, and a manual pick keeps persisting
+    // as today, since scr is then set and this never re-applies. If the
+    // desktop query failed (0), fall through to the old behavior.
+    if(scr_w < 0 && scr_h < 0 && desktopw > 0 && desktoph > 0)
+    {
+        scr_w = desktopw;
+        scr_h = desktoph;
+    }
     int nummodes = SDL_GetNumDisplayModes(0);
     if(nummodes > 0)
     {

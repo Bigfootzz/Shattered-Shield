@@ -2540,6 +2540,7 @@ namespace game
         // RPG-specific, so no gate is needed.
         if(type & (CON_CHAT|CON_TEAMCHAT)) return false; // player chat keeps its own tab
         if(line && strstr(line, "LEVEL UP")) return false; // Ed: level notification stays in the top-left feed
+        if(line && strstr(line, "You craft")) return false; // v0.1.37 (Ed): craft results stay in the top-left feed, same precedent as LEVEL UP
         if(line && !strncmp(line, "rpg: ", 5)) return true;
         if((type & CON_INFO) && rpg_serverline(line)) return true;
         return false;
@@ -3397,11 +3398,11 @@ namespace game
                 rpg::setclientquest(qid, st, kills, need);
                 break;
             }
-            case N_RPG_BUFFS: // bundle (Oct 28): active buff sync (attr, expires; -1 = clear all)
+            case N_RPG_BUFFS: // bundle (Oct 28): active buff sync (attr, expires, mag; -1 = clear all). v0.1.37 adds mag; clear-all stays 2 ints so only read mag for real buffs.
             {
                 int attr = getint(p), expires = getint(p);
                 if(attr < 0) rpg::clearclientbuffs();
-                else rpg::setclientbuff(attr, expires);
+                else rpg::setclientbuff(attr, expires, getint(p));
                 break;
             }
             case N_RPG_QTEXT: // quest engine v2: objective display text
@@ -3418,6 +3419,16 @@ namespace game
                 rpg_craftresultok = ok;
                 copystring(rpg_craftresult, msg, sizeof(string));
                 rpg_craftresultset = true;
+                // v0.1.37 (Ed): the feed line for a successful craft comes
+                // from the server's rpg_qmsg path (rpg_craftresult sends the
+                // same line as N_RPG_QMSG, which the client prints as
+                // "rpg: You craft ..."); the rpg_ownline "You craft"
+                // exemption lets that line through to the top-left feed, so
+                // leaving the Craft tab no longer hides the result. No
+                // extra print here: one would double the feed line.
+                // Failures qmsg their own message, which has no "You craft"
+                // substring and stays out of the feed: no success line,
+                // no spam.
                 // Re-show the window: the result line lives in rpgcraft, and
                 // the window must still be open when the result arrives.
                 showgui("rpgcraft");

@@ -1926,21 +1926,23 @@ namespace rpg
     }
     // --- bundle (Oct 28): HUD buff display, client presentation cache ---
     // One entry per active buff type the server has told us about (attr ->
-    // server-clock expiry). Never authoritative; the server syncs on use,
-    // expiry, and every map change, and clears server-side on logout (so
-    // a reconnect + map load re-syncs empty and the row clears).
-    static std::map<int, int> clbuffs;
-    void setclientbuff(int attr, int expires) { if(attr >= 0) clbuffs[attr] = expires; }
+    // server-clock expiry + magnitude). Never authoritative; the server syncs
+    // on use, expiry, and every map change, and clears server-side on logout
+    // (so a reconnect + map load re-syncs empty and the row clears).
+    // v0.1.37: magnitude stored alongside expiry for the buff-row tooltip.
+    struct clbuff { int expires; int mag; };
+    static std::map<int, clbuff> clbuffs;
+    void setclientbuff(int attr, int expires, int mag) { if(attr >= 0) { clbuff b; b.expires = expires; b.mag = mag; clbuffs[attr] = b; } }
     void clearclientbuffs() { clbuffs.clear(); }
-    int clientbufflist(int *attrs, int *exps, int max)
+    int clientbufflist(int *attrs, int *exps, int *mags, int max)
     {
         if(!attrs || !exps || max <= 0) return 0;
         int now = (int)time(NULL), n = 0;
-        for(std::map<int, int>::iterator it = clbuffs.begin(); it != clbuffs.end();)
+        for(std::map<int, clbuff>::iterator it = clbuffs.begin(); it != clbuffs.end();)
         {
-            if(now >= it->second) { clbuffs.erase(it++); continue; } // expired: drop locally, server sync follows
+            if(now >= it->second.expires) { clbuffs.erase(it++); continue; } // expired: drop locally, server sync follows
             if(n >= max) break;
-            attrs[n] = it->first; exps[n] = it->second; n++;
+            attrs[n] = it->first; exps[n] = it->second.expires; if(mags) mags[n] = it->second.mag; n++;
             ++it;
         }
         return n;

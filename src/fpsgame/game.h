@@ -720,7 +720,7 @@ enum
     N_RPG_CRAFTL,   // c->s: request discovered-recipe list (no args)
     N_RPG_RECIPES,  // s->c: discovered recipes, one formatted line per recipe, \n-separated
     N_RPG_CRAFTRESULT, // s->c: craft result (success int, message string) — v0.1.34
-    N_RPG_BUFFS,    // s->c: active buff sync (attr, expires unix; attr -1 = clear all) — bundle, Oct 28
+    N_RPG_BUFFS,    // s->c: active buff sync (attr, expires unix, mag; attr -1 = clear all, 2 ints) — bundle, Oct 28; mag added v0.1.37
     NUMSV
 };
 
