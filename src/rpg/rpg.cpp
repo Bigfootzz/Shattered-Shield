@@ -334,8 +334,10 @@ namespace rpg
                 if(arch[0] >= 'a' && arch[0] <= 'z') arch[0] -= 32;
             }
             int bowid = finditem("wooden_bow");
+            int staffid = finditem("wooden_staff");
             const char *starter = (!strcmp(arch, "Ranger") && bowid >= 0)
-                ? "wooden_bow" : "puglin_stick";
+                ? "wooden_bow" : (!strcmp(arch, "Magi") && staffid >= 0)
+                ? "wooden_staff" : "puglin_stick";
             additem(name, starter, 1);
             equipitem(name, starter);
             additem(name, "health_potion", 2);
@@ -366,6 +368,22 @@ namespace rpg
                     additem(name, "wooden_bow", 1);
                     if(equipitem(name, "wooden_bow"))
                         conoutf("rpg: '%s' (Ranger) issued a Wooden Bow", name);
+                }
+            }
+            // Wooden Staff migration (mirror of the bow migration): Magi
+            // created before the staff starter kit keep everything they own;
+            // grant + equip a wooden staff only if they don't have one.
+            // Nothing is ever removed (equipitem swaps the old weapon back
+            // into the pack).
+            if(!strcmp(march, "Magi") &&
+               finditem("wooden_staff") >= 0 && itemcount(name, "wooden_staff") <= 0)
+            {
+                int mainhand = equippeditem(name, SLOT_MAINHAND);
+                if(mainhand < 0 || strcmp(item(mainhand).id, "wooden_staff"))
+                {
+                    additem(name, "wooden_staff", 1);
+                    if(equipitem(name, "wooden_staff"))
+                        conoutf("rpg: '%s' (Magi) issued a Wooden Staff", name);
                 }
             }
         }
