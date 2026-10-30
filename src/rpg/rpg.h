@@ -29,6 +29,10 @@ namespace rpg
     // Character lifecycle. Returns true when the character already existed
     // (row loaded), false when it was created fresh with defaults.
     bool onconnect(const char *name);
+    // Battlegrounds (v0.1.40, Slice 3): set a character's archetype row
+    // (bots are created by onconnect with an empty archetype; the class
+    // gate in rpg_cast reads this column). No-op when the row is missing.
+    bool setarchetype(const char *name, const char *arch);
     void ondisconnect(const char *name, const char *map, float x, float y, float z, float yaw);
     // Reload quest + repeatable caches from the DB for an already-connected
     // client. Needed because onconnect runs before the first map change, so

@@ -54,7 +54,7 @@ namespace ai
             vector<int> route;
             vec target, spot;
             int enemy, enemyseen, enemymillis, weappref, targnode, targlast, targtime, targseq,
-            lastrun, lasthunt, lastaction, lastcheck, jumpseed, jumprand, blocktime, huntseq, blockseq, lastaimrnd;
+            lastrun, lasthunt, lastaction, lastcheck, jumpseed, jumprand, blocktime, huntseq, blockseq, lastaimrnd, lastbgcast;
             float targyaw, targpitch, views[3], aimrnd[3];
             bool dontmove, becareful, tryreset, trywipe;
             
@@ -70,7 +70,7 @@ namespace ai
             {
                 weappref = WEAP_PISTOL;
                 spot = target = vec(0, 0, 0);
-                lastaction = lasthunt = lastcheck = enemyseen = enemymillis = blocktime = huntseq = blockseq = targtime = targseq = lastaimrnd = 0;
+                lastaction = lasthunt = lastcheck = enemyseen = enemymillis = blocktime = huntseq = blockseq = targtime = targseq = lastaimrnd = lastbgcast = 0;
                 lastrun = jumpseed = lastmillis;
                 jumprand = lastmillis+5000;
                 targnode = targlast = enemy = -1;

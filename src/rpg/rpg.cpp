@@ -1950,6 +1950,23 @@ namespace rpg
         sqlite3_close(cdb);
         return ok;
     }
+    bool setarchetype(const char *name, const char *arch)
+    {
+        if(!name || !name[0] || !arch) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "UPDATE characters SET archetype=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, arch, -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+            ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(cdb) > 0;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
     // Model dir for one character (used by rpg_enterworld to set the player
     // model). Direct DB read; infrequent so no session caching.
     bool charmodel(const char *name, char *out, int max)

@@ -47,16 +47,18 @@ namespace server
 
     static const int DEATHMILLIS = 300;
 
-    // Battlegrounds queue/match state (v0.1.40, Slice 2, no bots yet).
+    // Battlegrounds queue/match state (v0.1.40, Slices 2+3).
     // All server-side, single listen-server game at a time; the
-    // bot-fill hook (bg_botfilled) is set at queue-end minus 10s so
-    // the BOTS slice can fill teams there without rework.
+    // bot fill runs at queue-end minus 10s (bg_fillbots, Slice 3).
     static bool bg_queue_active = false;
     static int bg_queue_mode = 0;        // gamemode (7 = CTF)
     static int bg_queue_until = 0;       // totalmillis deadline
     static vector<int> bg_queue_members; // clientnums
     static bool bg_botfilled = false;    // BOTS SLICE hook point
+    static vector<int> bg_bots;          // clientnums of battleground bots (Slice 3)
+    VAR(bg_bot_teamsize, 1, 3, 8);       // players per team a full game targets (provisional: Ed has not set team size yet)
     static bool bg_match_active = false; // a match is running
+    static void bg_deletebots(); // defined with bg_fillbots below; changemap() calls it
     static bool bg_match_starting = false; // changemap issued, awaiting load
     static bool bg_start_active = false; // 10s start countdown running
     static int bg_start_until = 0;       // totalmillis deadline
@@ -2456,7 +2458,11 @@ namespace server
         // match changemap itself (krpg, 7) keeps it; the return
         // changemap (rpg_01, 16) clears it (already cleared by the
         // intermission hook; idempotent here).
-        if(!(mode == 7 && rpg::mapactive(s))) bg_match_active = false;
+        if(!(mode == 7 && rpg::mapactive(s)))
+        {
+            bg_match_active = false;
+            bg_deletebots(); // bots never follow players back to the RPG world
+        }
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         loopv(clients)
         {
@@ -2471,6 +2477,16 @@ namespace server
         waitingForMapLoad = true;
         if(smode) smode->cleanup();
         aiman::resetai();
+        // Battlegrounds (v0.1.40, Slice 3): resetai() deletes and
+        // re-adds bots, so their clientnums change (names are preserved
+        // by resetai). Re-point bg_bots at the re-added bots so the
+        // return changemap deletes the right ones; without this the
+        // stale list misses the match bots entirely.
+        if(mode == 7 && rpg::mapactive(s))
+        {
+            bg_bots.setsize(0);
+            loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_BOT) bg_bots.add(clients[i]->clientnum);
+        }
 
         gamemode = mode;
         gamemillis = 0;
@@ -3052,12 +3068,17 @@ namespace server
         // click IS the aim ("right-click to auto-attack" works from any facing).
         // Range, line-of-sight (spells), cooldown, mana and damage stay exactly
         // as before. advisory < 0 keeps the old nearest-target behavior.
+        // Battlegrounds (v0.1.40): on a battleground map, enemy-team
+        // players are valid targets (PvP); everywhere else abilities hit
+        // monsters only. Teammates and spectators are never valid.
+        bool bg_pvp = rpg::mapactive(smapname) && m_ctf;
         if(advisory >= 0)
         {
             clientinfo *t = NULL;
             loopv(clients) if(clients[i]->clientnum == advisory) { t = clients[i]; break; }
             if(!t || t == cq) return NULL;
-            if(t->state.ai.type != ai::AI_TYPE_MONSTER) return NULL; // monsters only: PvE world
+            if(t->state.ai.type == ai::AI_TYPE_MONSTER) { /* monster: always a candidate */ }
+            else if(!(bg_pvp && t->state.ai.type != ai::AI_TYPE_MONSTER && !isteam(t->team, cq->team))) return NULL; // monsters only, unless BG PvP vs an enemy player
             if(t->state.state != CS_ALIVE || t->state.health <= 0) return NULL;
             vec delta(t->state.o);
             delta.sub(cq->state.o);
@@ -3072,7 +3093,8 @@ namespace server
         {
             clientinfo *t = clients[i];
             if(t == cq) continue;
-            if(t->state.ai.type != ai::AI_TYPE_MONSTER) continue; // monsters only: PvE world
+            if(t->state.ai.type == ai::AI_TYPE_MONSTER) { /* monster: always a candidate */ }
+            else if(!(bg_pvp && !isteam(t->team, cq->team))) continue; // monsters only, unless BG PvP vs an enemy player
             if(t->state.state != CS_ALIVE || t->state.health <= 0) continue;
             vec delta(t->state.o);
             delta.sub(cq->state.o);
@@ -3218,6 +3240,57 @@ namespace server
     // Join the queue for mode `modestr` ("ctf" today). Called from the
     // ACT_BGQUEUE dialogue action. False on refusal (dialogue closes;
     // a SERVMSG tells the player why).
+    // Battlegrounds bots (v0.1.40, Slice 3): fill teams so games are
+    // always full. Normal player names from a fixed pool (stable across
+    // matches, so their level-1 RPG rows are reused, not multiplied).
+    // All Slice 3 bots are Magi casting Spark Bolt: the one ranged
+    // ability path that validates end to end (class gate + mana +
+    // cooldown + PvP targeting). Warrior/Ranger bot classes are
+    // follow-up work, not faked here. Teams are left for autoteam()
+    // at the match changemap, which balances every client by rank.
+    static const char *bg_botnames[] = { "Aldric", "Brenna", "Cedric", "Delia", "Edric", "Fenna", "Gareth", "Helene", "Ivo", "Janna", "Kellan", "Lira" };
+    static void bg_deletebots()
+    {
+        loopvrev(bg_bots)
+        {
+            clientinfo *bi = getinfo(bg_bots[i]);
+            if(bi) aiman::deleteai(bi);
+        }
+        bg_bots.shrink(0);
+    }
+    static void bg_fillbots()
+    {
+        int humans = 0;
+        loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_NONE && clients[i]->state.state != CS_SPECTATOR) humans++;
+        int want = bg_bot_teamsize*2 - humans;
+        if(want <= 0) return;
+        loopi(want)
+        {
+            const char *name = NULL;
+            loopk(sizeof(bg_botnames)/sizeof(bg_botnames[0]))
+            {
+                bool used = false;
+                loopv(clients) if(!strcmp(clients[i]->name, bg_botnames[k])) { used = true; break; }
+                if(!used) { name = bg_botnames[k]; break; }
+            }
+            if(!name) break; // name pool exhausted
+            clientinfo *bi = aiman::addai(75, -1, ai::AI_TYPE_BOT);
+            if(!bi) break;
+            copystring(bi->name, name, MAXNAMELEN+1);
+            bg_bots.add(bi->clientnum);
+            // RPG character so casts validate (level 1 + starter kit),
+            // then the Magi archetype so the Spark Bolt class gate passes.
+            // The name is set before the next refresh sends N_INITAI, so
+            // clients keep the server name instead of generating one.
+            if(rpg::connected())
+            {
+                rpg::onconnect(name);
+                rpg::setarchetype(name, "Magi");
+            }
+            conoutf("bg: bot '%s' (cn %d) joins the battleground", name, bi->clientnum);
+        }
+    }
+
     static bool bg_queue_join(clientinfo *cq, const char *modestr)
     {
         if(!cq) return false;
@@ -3261,12 +3334,12 @@ namespace server
             if(bg_queue_members.empty())
             {
                 bg_queue_active = false;
+                bg_deletebots(); // queue dissolved after fill: bots never reach a match
             }
             else
             {
-                // BOTS SLICE: fill missing players here (last ~10s).
-                // Stub in slice 2: flag only, no bots yet.
-                if(!bg_botfilled && totalmillis >= bg_queue_until - 10000) bg_botfilled = true;
+                // Fill missing players in the last ~10s of the countdown.
+                if(!bg_botfilled && totalmillis >= bg_queue_until - 10000) { bg_botfilled = true; bg_fillbots(); }
                 if(totalmillis >= bg_queue_until)
                 {
                     bg_queue_active = false;
@@ -4454,24 +4527,35 @@ namespace server
     void rpg_cast(clientinfo *cq, int ability, int yaw, int advisory)
     {
         if(!rpg::connected() || !rpg::validability(ability)) return;
-        if(cq->state.ai.type != ai::AI_TYPE_NONE) return; // only real players cast
+        // Battlegrounds (v0.1.40): BG bots cast during a match (their
+        // owner client sends N_RPG_CAST as the bot); outside matches
+        // only real players cast. Bots have no connection of their own,
+        // so every message addressed to the caster goes to the bot's
+        // owner instead: sendf to a bot clientnum would index the
+        // engine client list out of bounds. interm > 0 is the 30s
+        // scoreboard: bots stop casting there (intermission stops
+        // their movement but not their think/logic, so without this
+        // they would keep killing players after the game ended).
+        bool bg_botcast = cq->state.ai.type != ai::AI_TYPE_NONE && bg_match_active && !bg_start_active && interm <= 0;
+        if(cq->state.ai.type != ai::AI_TYPE_NONE && !bg_botcast) return; // only real players cast, except BG bots in a match
+        int msgcn = cq->state.ai.type != ai::AI_TYPE_NONE ? cq->ownernum : cq->clientnum;
         const rpg::abilitydef &ab = rpg::ability(ability);
         if(cq->state.state != CS_ALIVE)
         {
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to cast.");
+            sendf(msgcn, 1, "ris", N_SERVMSG, "\f2You must be alive to cast.");
             return;
         }
         int level = 1, xp = 0;
         if(!rpg::getstats(cq->name, level, xp))
         {
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Character not loaded.");
+            sendf(msgcn, 1, "ris", N_SERVMSG, "\f2Character not loaded.");
             return;
         }
         clientinfo *target = rpg_findtarget(cq, ab, yaw, advisory);
         if(!target)
         {
             defformatstring(msg)("\f2%s: \f7no target in range.", ab.name);
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            sendf(msgcn, 1, "ris", N_SERVMSG, msg);
             return;
         }
         int mana = 0, maxmana = 0;
@@ -4479,14 +4563,14 @@ namespace server
         if(mana < ab.manacost)
         {
             defformatstring(msg)("\f2%s: \f7not enough mana (%d/%d).", ab.name, mana, ab.manacost);
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            sendf(msgcn, 1, "ris", N_SERVMSG, msg);
             return;
         }
         int waitms = 0;
         if(!rpg::castready(cq->name, ability, totalmillis, waitms))
         {
             defformatstring(msg)("\f2%s \f7on cooldown (%.1fs).", ab.name, waitms/1000.0f);
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            sendf(msgcn, 1, "ris", N_SERVMSG, msg);
             return;
         }
         // Class gating (Oct 21): abilities with a reqclass are restricted to
@@ -4513,7 +4597,7 @@ namespace server
             if(!allowed)
             {
                 defformatstring(gmsg)("\f2%s: \f7requires %s.", ab.name, ab.reqclass);
-                sendf(cq->clientnum, 1, "ris", N_SERVMSG, gmsg);
+                sendf(msgcn, 1, "ris", N_SERVMSG, gmsg);
                 return;
             }
         }
@@ -4574,26 +4658,26 @@ namespace server
             conoutf("rpg: '%s' casts %s at '%s' (projectile %d, %d dmg)",
                     cq->name, ab.name, target->name, pr.id, castdmg);
             defformatstring(cmsg)("\f2%s \f7flies toward %s.", ab.name, target->name);
-            sendf(cq->clientnum, 1, "ris", N_SERVMSG, cmsg);
+            sendf(msgcn, 1, "ris", N_SERVMSG, cmsg);
             // push fresh mana + cooldown to the caster for the RPG HUD
             rpg::getmana(cq->name, mana, maxmana);
-            sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
-            sendf(cq->clientnum, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+            sendf(msgcn, 1, "ri3", N_RPG_MANA, mana, maxmana);
+            sendf(msgcn, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
             return;
         }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
         rpg_applydot(cq, target, ability, level); // Rend bleed (no-op for non-DoT abilities)
         conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
         defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
-        sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        sendf(msgcn, 1, "ris", N_SERVMSG, msg);
         // Battlegrounds (v0.1.40): floating damage number, attacker
         // only (Ed: competitive, see damage dealt). Gold, above the
         // target's head; the client renders it via particle_text.
-        sendf(cq->clientnum, 1, "ri5", N_RPG_FLOATDMG, castdmg, int(target->state.o.x*DMF), int(target->state.o.y*DMF), int((target->state.o.z+20)*DMF));
+        sendf(msgcn, 1, "ri5", N_RPG_FLOATDMG, castdmg, int(target->state.o.x*DMF), int(target->state.o.y*DMF), int((target->state.o.z+20)*DMF));
         // push fresh mana + cooldown to the caster for the RPG HUD
         rpg::getmana(cq->name, mana, maxmana);
-        sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
-        sendf(cq->clientnum, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+        sendf(msgcn, 1, "ri3", N_RPG_MANA, mana, maxmana);
+        sendf(msgcn, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
     }
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---

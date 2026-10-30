@@ -234,16 +234,29 @@ namespace aiman
 
     void resetai()
     {
+        // Battlegrounds (v0.1.40, Slice 3): keep each bot's server-set
+        // name as well as its skill. Stock code kept skills only, so a
+        // bot re-added on the new map arrived with an empty name and the
+        // client generated a gibberish one; for battleground bots that
+        // also lost their name-keyed RPG character (casts failed with
+        // "Character not loaded"). Monsters are untouched (BOT filter).
         vector<int> skills;
+        vector<char *> names;
         loopv(bots)
         {
             if(bots[i] != NULL && bots[i]->state.ai.type == ai::AI_TYPE_BOT)
             {
                 skills.add(bots[i]->state.ai.skill);
+                names.add(newstring(bots[i]->name));
             }
         }
         clearai();
-        loopv(skills) addai(skills[i], -1);
+        loopv(skills)
+        {
+            clientinfo *bi = addai(skills[i], -1);
+            if(bi) copystring(bi->name, names[i]);
+        }
+        loopv(names) delete[] names[i];
     }
 
     void scheduleresetai()

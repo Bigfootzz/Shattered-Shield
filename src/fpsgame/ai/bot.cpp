@@ -1,4 +1,5 @@
 #include "game.h"
+#include "rpg/rpg.h"
 
 namespace ai
 {
@@ -1034,6 +1035,24 @@ namespace ai
             }
         }
         
+        // Battlegrounds (v0.1.40, Slice 3): bots cast RPG abilities,
+        // never FPS guns, on battleground maps. Slice 3 bots are Magi:
+        // Spark Bolt (id 1, 120 range, instant) at the sighted enemy.
+        // The server re-validates everything (class, mana, cooldown,
+        // range, line of sight, enemy team), so this is only a trigger:
+        // a cast that would fail is dropped server-side. Throttled
+        // locally so one bot does not spam a message every think tick.
+        void bg_botcast(fpsent *d)
+        {
+            BotAiInfo *ai = getBotState(d);
+            if(lastmillis - ai->lastbgcast < 1500) return;
+            fpsent *e = ai->enemy >= 0 ? getclient(ai->enemy) : NULL;
+            if(!e || e->state != CS_ALIVE || isteam(d->team, e->team)) return;
+            if(e->o.squaredist(d->o) > 115*115) return; // Spark Bolt range 120, small margin
+            ai->lastbgcast = lastmillis;
+            addmsg(N_RPG_CAST, "rci3", d, 1, int(d->yaw), e->clientnum);
+        }
+
         void logic(fpsent *d, aistate &b, bool run)
         {
             bool allowmove = canmove(d) && b.type != AI_S_WAIT;
@@ -1044,7 +1063,8 @@ namespace ai
                 {
                     if(!request(d, b)) target(d, b, WEAP_IS_MELEE(d->gunselect), b.idle ? true : false);
                     BotAiInfo *ai = getBotState(d);
-                    shoot(d, ai->target);
+                    if(m_ctf && rpg::mapactive(getclientmap())) bg_botcast(d);
+                    else shoot(d, ai->target);
                 }
                 if(!intermission)
                 {
