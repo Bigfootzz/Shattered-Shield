@@ -1062,10 +1062,19 @@ namespace ai
                 if(allowmove)
                 {
                     if(!request(d, b)) target(d, b, WEAP_IS_MELEE(d->gunselect), b.idle ? true : false);
-                    BotAiInfo *ai = getBotState(d);
-                    if(m_ctf && rpg::mapactive(getclientmap())) bg_botcast(d);
-                    else shoot(d, ai->target);
                 }
+                // Battlegrounds (v0.1.40, stall fix): bots cast RPG abilities
+                // whenever alive with a sighted in-range enemy, even in
+                // AI_S_WAIT. Gating casts on allowmove silenced all combat
+                // whenever all flags were home: on waypoint-less maps the
+                // only route-free state is flag-driven PURSUE, so with flags
+                // home every bot sat in WAIT (dowait still acquires enemies
+                // via target(), but logic() never called bg_botcast). The
+                // server still re-validates every cast (live match only,
+                // class, mana, cooldown, range, line of sight, enemy team).
+                BotAiInfo *ai = getBotState(d);
+                if(m_ctf && rpg::mapactive(getclientmap())) bg_botcast(d);
+                else if(allowmove) shoot(d, ai->target);
                 if(!intermission)
                 {
                     if(d->ragdoll) cleanragdoll(d);
