@@ -515,6 +515,9 @@ namespace game
     ICOMMAND(rpgteststrafe, "i", (int *v), { if(player1) player1->strafe = *v; });
     // TEST-ONLY (harness): place the player at an exact position (radar proofs).
     ICOMMAND(rpgtestteleport, "fff", (float *x, float *y, float *z), { if(player1) { player1->o = vec(*x, *y, *z); player1->resetinterp(); player1->vel = vec(0, 0, 0); } });
+    // TEST-ONLY: set the RPG monster target by clientnum (headless
+    // harness cannot click). Same style as rpgtestteleport/rpgtestgod.
+    ICOMMAND(rpgtesttarget, "i", (int *cn), { rpg::selecttarget(*cn); conoutf("rpgtesttarget: %d", *cn); });
     // TEST-ONLY (harness): dump every live monster's position plus its
     // distance to the nearest RPG spawn point (mob-behaviour proofs:
     // anchoring, leash return, fresh-load village safety).
@@ -1668,6 +1671,12 @@ namespace game
 
     void changemapserv(const char *name, int mode)        // forced map change from the server
     {
+        // Battlegrounds (v0.1.40): remember the previous map/mode for
+        // the Abbott return spawn, and clear the queue display (the
+        // match map load replaces it with the start countdown).
+        copystring(bgprevmap, getclientmap());
+        bgprevmode = gamemode;
+        bgqueue_until = 0;
         if(multiplayer(false) && !m_mp(mode))
         {
             conoutf(CON_ERROR, "mode %s (%d) not supported in multiplayer", server::modename(gamemode), gamemode);
@@ -2824,7 +2833,53 @@ namespace game
                 s->respawn(gamemode);
                 parsestate(s, p);
                 s->state = CS_ALIVE;
-                if(cmode) cmode->pickspawn(s);
+                // Battlegrounds (v0.1.40): first spawn after a battleground
+                // return lands IN FRONT OF Lady Abbott in the RPG world
+                // (Ed, Oct 30). This handler is the real spawn path:
+                // map-start spawns arrive here via N_SPAWNSTATE, and the
+                // spawnplayer() in fps.cpp only serves the offline
+                // respawn path, so a hook there never fires for
+                // listen-server spawns. Prev-map inference: no new
+                // message needed. The player stands one talk-range step
+                // in front of her (14 units; talk range is 16) facing
+                // her (player yaw = Abbott yaw + 180, the /GPS rule),
+                // so she can be talked to immediately. Consumed on
+                // first use so later respawns use normal spawns.
+                if(s == player1 && bgprevmode == 7 && !strcmp(bgprevmap, "krpg") && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
+                {
+                    bgprevmap[0] = '\0'; bgprevmode = 0;
+                    int ai = rpg::npcindexbyid("abbott");
+                    const rpg::npcdef *nd = ai >= 0 ? rpg::npcat(ai) : NULL;
+                    if(nd)
+                    {
+                        float yaw = nd->yaw*RAD;
+                        vec fwd(-sinf(yaw), cosf(yaw), 0);
+                        s->o = vec(nd->x + fwd.x*14, nd->y + fwd.y*14, nd->z + 16);
+                        s->yaw = fmodf(nd->yaw + 180, 360);
+                        // The player arrives here mid-fall from the match
+                        // (krpg match spawns fall back to map center, see
+                        // the CTF pickspawn note below) with a large
+                        // falling velocity and possibly a pending
+                        // smoothmove interpolation toward the stale
+                        // pre-spawn position. Either one drags the
+                        // player back off Abbott-front after this
+                        // handler runs (proven by s2br3/4/7: hook placed
+                        // Abbott-front, quit-save still showed the old
+                        // falling position). Cancel both so the placed
+                        // position sticks.
+                        s->vel = vec(0, 0, 0);
+                        s->falling = vec(0, 0, 0);
+                        s->physstate = PHYS_FLOOR;
+                        s->timeinair = 0;
+                        s->deltapos = vec(0, 0, 0);
+                        s->newpos = s->o;
+                        s->smoothmillis = -1;
+                        s->move = 0; s->strafe = 0;
+                    }
+                    else if(cmode) cmode->pickspawn(s);
+                    else findplayerspawn(s);
+                }
+                else if(cmode) cmode->pickspawn(s);
                 else findplayerspawn(s);
                 if(s == player1)
                 {
@@ -3371,6 +3426,30 @@ namespace game
             {
                 int id = getint(p);
                 loopvrev(rpg_projfxs) if(rpg_projfxs[i].id == id) { rpg_projfxs.remove(i); break; }
+                break;
+            }
+            // Battlegrounds (v0.1.40): queue/start countdowns + floating
+            // damage numbers. Countdowns are client-local from receipt
+            // time; the queue display clears on the next map change.
+            case N_BG_QUEUE:
+            {
+                int mode = getint(p), secs = getint(p);
+                if(secs <= 0 || mode <= 0) { bgqueue_until = 0; bgqueue_mode = 0; }
+                else { bgqueue_mode = mode; bgqueue_until = lastmillis + secs*1000; }
+                break;
+            }
+            case N_BG_START:
+            {
+                int secs = getint(p);
+                bgstart_until = secs > 0 ? lastmillis + secs*1000 : 0;
+                break;
+            }
+            case N_RPG_FLOATDMG:
+            {
+                int dmg = getint(p);
+                vec pos(getint(p)/DMF, getint(p)/DMF, getint(p)/DMF);
+                defformatstring(txt)("%d", dmg);
+                particle_textcopy(pos, txt, PART_TEXT, 1, 0xFFD24A, 2.0f, 0);
                 break;
             }
             case N_RPG_HPMAX:

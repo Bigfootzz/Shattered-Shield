@@ -721,6 +721,10 @@ enum
     N_RPG_RECIPES,  // s->c: discovered recipes, one formatted line per recipe, \n-separated
     N_RPG_CRAFTRESULT, // s->c: craft result (success int, message string) — v0.1.34
     N_RPG_BUFFS,    // s->c: active buff sync (attr, expires unix, mag; attr -1 = clear all, 2 ints) — bundle, Oct 28; mag added v0.1.37
+    // Battlegrounds (v0.1.40)
+    N_BG_QUEUE,     // s->c: battleground queue status (mode int, seconds remaining; seconds <= 0 = clear)
+    N_BG_START,     // s->c: match start countdown (seconds)
+    N_RPG_FLOATDMG, // s->c: floating damage number (damage, x, y, z as DMF ints) -- to the attacker only
     NUMSV
 };
 
@@ -759,6 +763,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_RPG_FLOATDMG, 5,
     -1
 };
 
@@ -1283,6 +1288,9 @@ namespace game
     extern void drawblip(fpsent *d, float x, float y, float s, const vec &pos, bool flagblip, float maxdist = 0.86f);
     // Battlegrounds (v0.1.40): RPG minimap fan rect, for CTF blip re-targeting on RPG maps.
     extern void getrpgminimaprect(int w, int h, float &s, float &x, float &y);
+    // Battlegrounds (v0.1.40): queue/start countdown ends (lastmillis; 0 = inactive), queue mode, prev map/mode for the Abbott return spawn.
+    extern int bgqueue_until, bgqueue_mode, bgstart_until, bgprevmode;
+    extern string bgprevmap;
     extern void drawprogress(int x, int y, float start, float length, float size, bool left, bool sec, bool millis = false, const vec &colour = vec(1, 1, 1), float fade = 1, float skew = 1, float textscale = 1, const char *text = NULL, ...) PRINTFARGS(13, 14);
 
 

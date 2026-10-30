@@ -47,6 +47,20 @@ namespace server
 
     static const int DEATHMILLIS = 300;
 
+    // Battlegrounds queue/match state (v0.1.40, Slice 2, no bots yet).
+    // All server-side, single listen-server game at a time; the
+    // bot-fill hook (bg_botfilled) is set at queue-end minus 10s so
+    // the BOTS slice can fill teams there without rework.
+    static bool bg_queue_active = false;
+    static int bg_queue_mode = 0;        // gamemode (7 = CTF)
+    static int bg_queue_until = 0;       // totalmillis deadline
+    static vector<int> bg_queue_members; // clientnums
+    static bool bg_botfilled = false;    // BOTS SLICE hook point
+    static bool bg_match_active = false; // a match is running
+    static bool bg_match_starting = false; // changemap issued, awaiting load
+    static bool bg_start_active = false; // 10s start countdown running
+    static int bg_start_until = 0;       // totalmillis deadline
+
     struct clientinfo;
 
     struct gameevent
@@ -1696,6 +1710,10 @@ namespace server
 
     void checkpausegame()
     {
+        // Battlegrounds (v0.1.40): the 10s start countdown holds the
+        // pause even with no privileged players present (dedicated
+        // servers); bg_tick releases it on time.
+        if(bg_start_active) return;
         if(!gamepaused) return;
         int admins = 0;
         loopv(clients) if(clients[i]->privilege >= (restrictpausegame ? PRIV_ADMIN : PRIV_MASTER) || clients[i]->local) admins++;
@@ -2433,6 +2451,12 @@ namespace server
     }
     void changemap(const char *s, int mode)
     {
+        // Battlegrounds (v0.1.40): leaving a battleground (any map/mode
+        // other than CTF on a battleground map) ends match state. The
+        // match changemap itself (krpg, 7) keeps it; the return
+        // changemap (rpg_01, 16) clears it (already cleared by the
+        // intermission hook; idempotent here).
+        if(!(mode == 7 && rpg::mapactive(s))) bg_match_active = false;
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         loopv(clients)
         {
@@ -2663,7 +2687,7 @@ namespace server
         }
     }
 
-    void checkintermission()
+    void checkintermission(bool fromwin = false)
     {
         if(gamemillis >= gamelimit && !interm)
         {
@@ -2671,6 +2695,21 @@ namespace server
             if(smode) smode->intermission();
             changegamespeed(100);
             interm = gamemillis + 40000;
+            // Battlegrounds (v0.1.40): 30s scoreboard, not 40s. The
+            // timer-end winner (most captures; tie = draw) announces
+            // here; capture wins announce in ctfmode::scoreflag, so
+            // fromwin skips the second announcement.
+            if(m_ctf && rpg::mapactive(smapname))
+            {
+                interm = gamemillis + 30000;
+                if(!fromwin)
+                {
+                    int s1 = ctfmode.totalscore(1), s2 = ctfmode.totalscore(2);
+                    if(s1 > s2) sendservmsg("Blue team wins the battleground!");
+                    else if(s2 > s1) sendservmsg("Red team wins the battleground!");
+                    else sendservmsg("The battleground ends in a draw!");
+                }
+            }
 
             if(intermissionstats)
             {
@@ -2703,7 +2742,7 @@ namespace server
         }
     }
 
-    void startintermission() { gamelimit = min(gamelimit, gamemillis); checkintermission(); }
+    void startintermission() { gamelimit = min(gamelimit, gamemillis); checkintermission(true); }
 
     static void rpg_behaviordamage(clientinfo *monster, clientinfo *player); // RPG mob behaviour (Oct 20), defined with the ambient spawner below
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
@@ -3157,6 +3196,92 @@ namespace server
         }
     }
 
+    // --- Battlegrounds (v0.1.40): queue + match flow, server side ---
+    // Queue flow (Ed, Oct 30): Abbott dialogue -> 45s on-screen queue
+    // countdown -> (bots fill in the last ~10s: BOTS SLICE, stub below)
+    // -> changemap to the mode's map -> 10s start countdown (game
+    // paused) -> match (10-min timer or 3 captures) -> 30s scoreboard
+    // intermission -> changemap back to rpg_01 (the client spawns in
+    // front of Abbott by prev-map inference, no new message).
+    // Server-wide changemap moves EVERYONE (fake-it MVP: single player
+    // + bots later); multi-player separation is a later online-play
+    // problem, not this slice.
+    // Queue/match state is declared near the top of this file (before
+    // checkpausegame/changemap, which reference it).
+
+    static bool bg_clientlive(int cn)
+    {
+        loopv(clients) if(clients[i]->clientnum == cn) return true;
+        return false;
+    }
+
+    // Join the queue for mode `modestr` ("ctf" today). Called from the
+    // ACT_BGQUEUE dialogue action. False on refusal (dialogue closes;
+    // a SERVMSG tells the player why).
+    static bool bg_queue_join(clientinfo *cq, const char *modestr)
+    {
+        if(!cq) return false;
+        if(strcmp(modestr, "ctf"))
+        {
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "That battleground is not ready yet.");
+            return false;
+        }
+        if(bg_match_active)
+        {
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "A battleground is already in progress. Talk to Lady Abbott when it ends.");
+            return false;
+        }
+        if(bg_queue_active && bg_queue_mode != 7)
+        {
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, "A queue is already forming for another battleground.");
+            return false;
+        }
+        if(!bg_queue_active)
+        {
+            bg_queue_active = true;
+            bg_queue_mode = 7;
+            bg_queue_until = totalmillis + 45000;
+            bg_botfilled = false;
+            bg_queue_members.shrink(0);
+        }
+        loopv(bg_queue_members) if(bg_queue_members[i] == cq->clientnum) return true; // already queued
+        bg_queue_members.add(cq->clientnum);
+        int secs = (bg_queue_until - totalmillis + 999) / 1000;
+        if(secs < 0) secs = 0;
+        sendf(cq->clientnum, 1, "ri3", N_BG_QUEUE, 7, secs);
+        sendf(cq->clientnum, 1, "ris", N_SERVMSG, "You joined the battleground queue.");
+        return true;
+    }
+
+    static void bg_tick()
+    {
+        if(bg_queue_active)
+        {
+            loopvrev(bg_queue_members) if(!bg_clientlive(bg_queue_members[i])) bg_queue_members.remove(i);
+            if(bg_queue_members.empty())
+            {
+                bg_queue_active = false;
+            }
+            else
+            {
+                // BOTS SLICE: fill missing players here (last ~10s).
+                // Stub in slice 2: flag only, no bots yet.
+                if(!bg_botfilled && totalmillis >= bg_queue_until - 10000) bg_botfilled = true;
+                if(totalmillis >= bg_queue_until)
+                {
+                    bg_queue_active = false;
+                    bg_match_starting = true;
+                    changemap("krpg", 7);
+                }
+            }
+        }
+        if(bg_start_active && totalmillis >= bg_start_until)
+        {
+            bg_start_active = false;
+            pausegame(false);
+        }
+    }
+
     // --- dialogue sessions ---
     struct rpg_talksession
     {
@@ -3320,6 +3445,13 @@ namespace server
                 defformatstring(msg)("Received: %s", amt);
                 rpg_qmsg(cq, msg);
                 return true;
+            }
+            case rpg::ACT_BGQUEUE:
+            {
+                // Battlegrounds (v0.1.40): Abbott's queue action. The
+                // mode rides in a.item ("ctf" today; anything else is
+                // refused by bg_queue_join with a SERVMSG).
+                return bg_queue_join(cq, a.item);
             }
             case rpg::ACT_GIVEFETCHXP:
             {
@@ -4237,6 +4369,8 @@ namespace server
                 int hpbefore = t->state.health;
                 dodamage(t, caster, pr.damage, WEAP_FIST, push, false);
                 sendf(-1, 1, "ri4", N_RPG_PROJHIT, pr.id, pr.targetcn, pr.damage);
+                // Battlegrounds (v0.1.40): floating damage number, attacker only.
+                if(pr.castercn >= 0) sendf(pr.castercn, 1, "ri5", N_RPG_FLOATDMG, pr.damage, int(t->state.o.x*DMF), int(t->state.o.y*DMF), int((t->state.o.z+20)*DMF));
                 const rpg::abilitydef &ab = rpg::ability(pr.ability);
                 conoutf("rpg: projectile %s hits '%s' for %d (%d -> %d hp)",
                         ab.name, t->name, pr.damage, hpbefore, t->state.health);
@@ -4452,6 +4586,10 @@ namespace server
         conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
         defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+        // Battlegrounds (v0.1.40): floating damage number, attacker
+        // only (Ed: competitive, see damage dealt). Gold, above the
+        // target's head; the client renders it via particle_text.
+        sendf(cq->clientnum, 1, "ri5", N_RPG_FLOATDMG, castdmg, int(target->state.o.x*DMF), int(target->state.o.y*DMF), int((target->state.o.z+20)*DMF));
         // push fresh mana + cooldown to the caster for the RPG HUD
         rpg::getmana(cq->name, mana, maxmana);
         sendf(cq->clientnum, 1, "ri3", N_RPG_MANA, mana, maxmana);
@@ -5164,6 +5302,8 @@ namespace server
         rpg_projectiletick(); // moves bolts, applies hits/fizzles; no-op when empty
         // --- RPG: damage-over-time (v0.1.8, additive) ---
         rpg_dottick(); // ticks poison/bleed; no-op when empty
+        // --- Battlegrounds (v0.1.40): queue + start-countdown tick ---
+        bg_tick();
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Loot: server-validated walk-over pickup + expiry, RPG maps only.
         if(rpg::connected() && rpg::mapactive(smapname))
@@ -5290,6 +5430,23 @@ namespace server
                 sendservmsg(numLoadedMap == numTotalClients ? "All clients loaded the map" : "Some clients were too slow, starting the match anyway.");
                 pausegame(false);
                 waitingForMapLoad = false;
+                // Battlegrounds (v0.1.40): match changemap finished
+                // loading -> 10s start countdown with the game paused
+                // (timer starts when play starts: gamemillis is frozen
+                // while paused). Cleared unconditionally so a failed
+                // match changemap cannot arm a later unrelated load.
+                if(bg_match_starting)
+                {
+                    bg_match_starting = false;
+                    if(m_ctf && rpg::mapactive(smapname))
+                    {
+                        bg_match_active = true;
+                        bg_start_active = true;
+                        bg_start_until = totalmillis + 10000;
+                        pausegame(true);
+                        sendf(-1, 1, "ri2", N_BG_START, 10);
+                    }
+                }
             }
         }
 
@@ -5353,7 +5510,15 @@ namespace server
             {
                 if(demorecord) enddemorecord();
                     interm = -1;
-                checkvotes(true);
+                // Battlegrounds (v0.1.40): a finished battleground
+                // returns everyone to the RPG world instead of the
+                // vote flow (the client spawns in front of Abbott).
+                if(bg_match_active)
+                {
+                    bg_match_active = false;
+                    changemap("rpg_01", 16);
+                }
+                else checkvotes(true);
             }
         }
 

@@ -113,6 +113,7 @@ namespace rpg
         if(!strcmp(v, "takeitem") && e - t == 3)      { ac.verb = ACT_TAKEITEM; copystring(ac.item, a[t+1], sizeof(ac.item)); ac.count = atoi(a[t+2]); return 3; }
         if(!strcmp(v, "givexp") && e - t == 2)       { ac.verb = ACT_GIVEXP; ac.n = atoi(a[t+1]); return 2; }
         if(!strcmp(v, "givemoney") && e - t == 2)    { ac.verb = ACT_GIVEMONEY; ac.n = atoi(a[t+1]); return 2; }
+        if(!strcmp(v, "bgqueue") && e - t == 2)     { ac.verb = ACT_BGQUEUE; copystring(ac.item, a[t+1], sizeof(ac.item)); return 2; }
         if(!strcmp(v, "givefetchxp") && e - t == 2)   { ac.verb = ACT_GIVEFETCHXP; ac.qid = atoi(a[t+1]); return 2; }
         if(!strcmp(v, "spawnchampion") && e - t == 1) { ac.verb = ACT_SPAWNCHAMPION; return 1; }
         if(!strcmp(v, "rollfetch") && e - t == 2)     { ac.verb = ACT_ROLLFETCH; ac.qid = atoi(a[t+1]); return 2; }

@@ -212,6 +212,38 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         loopk(2) if(scores[k]) tscores.add(teamscore(ctfflagteam(k+1), scores[k]));
     }
 
+    // Battlegrounds (v0.1.40): fallback flag positions for battleground
+    // maps whose FLAG entities never survive load. krpg ships gametype
+    // "rpg" != gameident "fps", so samegame==false drops every
+    // game-specific entity at load (see entities.cpp preloadentities
+    // comment) -- the map file cannot be the flag source there. The
+    // data file is the single source of truth for BOTH sides: the
+    // server needs flag positions for take/score logic, the client
+    // needs them locally for blips, carry icon and touch detection
+    // (initflags only syncs state, not positions). Lines:
+    //   <map> <team 1|2> <x> <y> <z>   (blank lines and #-comments skipped)
+    // Runs from the game root in both deployments (Windows stage dir,
+    // Linux repo root), so a plain relative open is correct.
+    static int loadbgfallbackflags(const char *map, vec *outpos, int *outteam, int maxn)
+    {
+        int n = 0;
+        FILE *f = fopen("data/rpg/bgflags.cfg", "r");
+        if(!f) return 0;
+        char line[256];
+        while(n < maxn && fgets(line, sizeof(line), f))
+        {
+            if(line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+            char m[64]; int team; float x, y, z;
+            if(sscanf(line, "%63s %d %f %f %f", m, &team, &x, &y, &z) != 5) continue;
+            if(strcmp(m, map) || team < 1 || team > 2) continue;
+            outpos[n] = vec(x, y, z);
+            outteam[n] = team;
+            n++;
+        }
+        fclose(f);
+        return n;
+    }
+
 #ifndef SERVMODE
     // Battlegrounds (v0.1.40): banner data for drawctfbanners in fps.cpp.
     int getteamscoreflag(int team) { return totalscore(team); }
@@ -289,6 +321,13 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
             if(e.type != FLAG || e.attr2 < 1 || e.attr2 > 2) continue;
             if(!addflag(flags.length(), e.o, e.attr2, m_protect ? lastmillis : 0)) break;
         }
+        // Battlegrounds (v0.1.40): no entity flags (see loader comment).
+        if(!m_hold && flags.empty())
+        {
+            vec fbpos[2]; int fbteam[2];
+            int nfb = loadbgfallbackflags(smapname, fbpos, fbteam, 2);
+            loopi(nfb) addflag(flags.length(), fbpos[i], fbteam[i], m_protect ? lastmillis : 0);
+        }
         notgotflags = false;
     }
 
@@ -365,7 +404,16 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         int team = ctfteamflag(ci->team), score = addscore(team, 1);
         if(m_hold) spawnflag(goal);
         sendf(-1, 1, "rii9", N_SCOREFLAG, ci->clientnum, relay, relay >= 0 ? ++flags[relay].version : -1, goal, ++flags[goal].version, flags[goal].spawnindex, team, score, ci->state.flags);
-        if(score >= FLAGLIMIT) startintermission();
+        // Battlegrounds (v0.1.40): first to 3 captures wins on
+        // battleground maps (stock FLAGLIMIT 10 everywhere else).
+        // Team 1 = Blue, team 2 = Red (TEAM_0 blue text, TEAM_1 red).
+        int winlimit = (m_ctf && rpg::mapactive(smapname)) ? 3 : FLAGLIMIT;
+        if(score >= winlimit)
+        {
+            if(m_ctf && rpg::mapactive(smapname))
+                sendservmsgf("%s team wins the battleground!", team == 1 ? "Blue" : "Red");
+            startintermission();
+        }
     }
 
     void takeflag(clientinfo *ci, int i, int version)
@@ -667,6 +715,18 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
                 if(!addflag(index, e->o, e->attr2, m_protect ? 0 : -1000)) continue;
                 flags[index].spawnangle = e->attr1;
                 flags[index].light = e->light;
+            }
+            // Battlegrounds (v0.1.40): same fallback as the server side.
+            if(!m_hold && flags.empty())
+            {
+                vec fbpos[2]; int fbteam[2];
+                int nfb = loadbgfallbackflags(getclientmap(), fbpos, fbteam, 2);
+                loopi(nfb)
+                {
+                    int index = flags.length();
+                    if(!addflag(index, fbpos[i], fbteam[i], m_protect ? 0 : -1000)) continue;
+                    flags[index].spawnangle = 0;
+                }
             }
         }
     }
@@ -973,7 +1033,25 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
     void pickspawn(fpsent *d)
     {
         if(!m_hold || !pickholdspawn(d))
-            findplayerspawn(d, -1, m_hold ? 0 : ctfteamflag(d->team));
+        {
+            int tag = m_hold ? 0 : ctfteamflag(d->team);
+            // Battlegrounds (v0.1.40): krpg's single playerstart is
+            // team-neutral (attr2 0), so a teamed player never matches
+            // the team tag and stock findplayerspawn falls back to map
+            // center (players spawn falling from the sky). On
+            // battleground maps only, retry with any playerstart when
+            // no team-matching spawn exists; classic CTF maps keep
+            // stock behavior (their spawns carry team attrs, so the
+            // team call matches and this never runs).
+            if(rpg::mapactive(getclientmap()))
+            {
+                bool anymatch = false;
+                const vector<extentity *> &ents = entities::getents();
+                loopv(ents) if(ents[i]->type == ET_PLAYERSTART && (tag < 0 || ents[i]->attr2 == tag)) { anymatch = true; break; }
+                if(!anymatch) tag = -1;
+            }
+            findplayerspawn(d, -1, tag);
+        }
     }
 
     bool aihomerun(fpsent *d, ai::bot::aistate &b)

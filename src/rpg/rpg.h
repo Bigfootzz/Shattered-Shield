@@ -303,7 +303,7 @@ namespace rpg
     };
     enum { ACT_SETSTAGE = 0, ACT_COMPLETEQUEST, ACT_GIVEITEM, ACT_TAKEITEM,
            ACT_GIVEXP, ACT_GIVEFETCHXP, ACT_SPAWNCHAMPION, ACT_ROLLFETCH,
-           ACT_GIVEMONEY };
+           ACT_GIVEMONEY, ACT_BGQUEUE };
     struct dlgaction
     {
         int verb;             // ACT_*

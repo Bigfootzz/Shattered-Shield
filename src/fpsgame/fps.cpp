@@ -12,6 +12,10 @@ namespace game
 {
     bool intermission = false;
     int maptime = 0, maprealtime = 0, maplimit = -1;
+    // Battlegrounds (v0.1.40): queue/start countdown ends (lastmillis;
+    // 0 = inactive), queue mode, prev map/mode for the Abbott return spawn.
+    int bgqueue_until = 0, bgqueue_mode = 0, bgstart_until = 0, bgprevmode = 0;
+    string bgprevmap;
     int respawnent = -1;
     int lasthit = 0, lastspawnattempt = 0;
 
@@ -3681,6 +3685,31 @@ namespace game
         // band on RPG maps when the mode is CTF (the FPS scorebar above is
         // suppressed there, so the two never double-draw).
         if(m_ctf && rpg::mapactive(getclientmap())) drawctfbanners(d, w, h);
+
+        // Battlegrounds (v0.1.40): queue + start countdowns. The queue
+        // shows on the RPG map (top-center is free there: no banners
+        // in RPG mode); the start countdown is big center-screen over
+        // the paused match map. Both are client-local countdowns from
+        // the server's N_BG_QUEUE / N_BG_START receipt time.
+        if(bgqueue_until > lastmillis)
+        {
+            float X = w*1800.0f/h;
+            int secs = (bgqueue_until - lastmillis + 999)/1000;
+            pushfont(); setfont("default"); settextscale(0.8f);
+            draw_textx("BATTLEGROUND QUEUE", X/2.0f, 60, 255, 255, 255, 255, TEXT_CENTER_UP);
+            settextscale(1.f); popfont();
+            pushfont(); setfont("digit_white"); settextscale(1.2f);
+            draw_textx("%s  %d:%02d", X/2.0f, 130, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, bgqueue_mode == 7 ? "CAPTURE THE FLAG" : "BATTLEGROUND", secs/60, secs%60);
+            settextscale(1.f); popfont();
+        }
+        if(bgstart_until > lastmillis)
+        {
+            float X = w*1800.0f/h;
+            int secs = (bgstart_until - lastmillis + 999)/1000;
+            pushfont(); setfont("digit_white"); settextscale(2.5f);
+            draw_textx("MATCH STARTS IN %d", X/2.0f, 900, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs);
+            settextscale(1.f); popfont();
+        }
 
         // RPG: the compass/radar is FPS furniture; hidden on RPG maps only.
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
