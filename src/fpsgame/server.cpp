@@ -931,7 +931,7 @@ namespace server
                 rpg_syncinv(lc); // refresh level/xp on the client sheet
                 if(rpg::mapactive(smapname)) // max HP follows the formula; keep current HP
                 {
-                    int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(lc->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+                    int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(lc->name, rpg::ATTR_VITALITY) + rpg::gearbonus(lc->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
                     if(lc->state.health > maxhp) lc->state.health = maxhp;
                     lc->state.maxhealth = maxhp;
                     sendf(lc->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -2188,7 +2188,7 @@ namespace server
         int rpg_lvl = 1, rpg_xp = 0;
         if(!rpg::getstats(ci->name, rpg_lvl, rpg_xp)) return;
         gamestate &gs = ci->state;
-        int maxhp = rpg::stat_maxhp(rpg_lvl, rpg::buffbonus(ci->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+        int maxhp = rpg::stat_maxhp(rpg_lvl, rpg::buffbonus(ci->name, rpg::ATTR_VITALITY) + rpg::gearbonus(ci->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
         if(gs.health >= gs.maxhealth) gs.health = maxhp;
         else if(gs.health > maxhp) gs.health = maxhp;
         gs.maxhealth = maxhp;
@@ -2810,7 +2810,7 @@ namespace server
                     // N_RPG_HPMAX and refreshes its stat cache via rpg_syncinv.
                     if(rpg::mapactive(smapname))
                     {
-                        int maxhp = rpg::stat_maxhp(rpg_newlevel, rpg::buffbonus(actor->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+                        int maxhp = rpg::stat_maxhp(rpg_newlevel, rpg::buffbonus(actor->name, rpg::ATTR_VITALITY) + rpg::gearbonus(actor->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
                         if(actor->state.health > maxhp) actor->state.health = maxhp;
                         actor->state.maxhealth = maxhp;
                         sendf(actor->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -3078,7 +3078,7 @@ namespace server
         sendservmsgf("\f2%s \f7reached RPG level \f2%d!", cq->name, newlevel);
         if(rpg::mapactive(smapname))
         {
-            int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+            int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
             if(cq->state.health > maxhp) cq->state.health = maxhp;
             cq->state.maxhealth = maxhp;
             sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -4285,7 +4285,7 @@ namespace server
         d.targetcn = target->clientnum;
         d.casterncn = caster ? caster->clientnum : -1;
         d.ability = ability;
-        d.tickdmg = dd->tickdmg + (dd->attr >= 0 ? rpg::attrscore(level, dd->attr) : 0);
+        d.tickdmg = dd->tickdmg + (dd->attr >= 0 ? (caster ? rpg::effectiveattr(caster->name, level, dd->attr) : rpg::attrscore(level, dd->attr)) : 0);
         d.tickms = dd->tickms;
         d.ticksleft = ticks;
         d.nexttick = totalmillis + dd->tickms;
@@ -4400,19 +4400,19 @@ namespace server
         bool crit = false;
         if(rpg::mapactive(smapname))
         {
-            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::attrscore(level, rpg::ATTR_STRENGTH) + rpg::buffbonus(cq->name, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
+            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::effectiveattr(cq->name, level, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
             // Spell damage: ability base + 2xKnowledge. (stat_sparkbolt() is
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
             // Arrow Shot (physical pierce): base + 2xDexterity instead.
             // Venom Shot (poison arrow, v0.1.8): same Dex scaling -- it's
             // an arrow, not a spell.
-            else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_DEXTERITY);
-            else castdmg = ab.damage + 2*rpg::attrscore(level, rpg::ATTR_KNOWLEDGE);
-            if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level))))
+            else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_DEXTERITY);
+            else castdmg = ab.damage + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_KNOWLEDGE);
+            if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level, rpg::gearbonus(cq->name, rpg::ATTR_DEXTERITY) + rpg::buffbonus(cq->name, rpg::ATTR_DEXTERITY)))))
             {
                 crit = true;
-                castdmg = int(castdmg*rpg::stat_critmult(level) + 0.5f);
+                castdmg = int(castdmg*rpg::stat_critmult(level, rpg::gearbonus(cq->name, rpg::ATTR_CUNNING) + rpg::buffbonus(cq->name, rpg::ATTR_CUNNING)) + 0.5f);
             }
             rpg_forcecrit = false; // one-shot: the hook never leaks into real casts
         }
@@ -4579,7 +4579,7 @@ namespace server
                 int lvl = 1, xp = 0;
                 if(rpg::getstats(cq->name, lvl, xp))
                 {
-                    int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY));
+                    int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY));
                     cq->state.maxhealth = maxhp; // cap rises; current HP unchanged (no silent heal)
                     sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
                 }
@@ -4668,6 +4668,13 @@ namespace server
         if(!rpg::connected() || !cq) return;
         char keys[64][256];
         int n = rpg::recipelist(cq->name, keys, 64);
+        // Phase 3: the discovered list outgrew the 260-char `string`
+        // buffer on both ends (6 Phase 1/2 lines just fit; 13+ do not —
+        // R1 showed 5 lines, the 5th cut mid-word). Send in chunks: an
+        // empty message clears the client's list first, then each chunk
+        // (kept under 200 chars) appends. Single-threaded sends keep a
+        // burst atomic; no protocol change beyond clear + append.
+        sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, "");
         string out;
         out[0] = '\0';
         loopi(n)
@@ -4678,10 +4685,15 @@ namespace server
                 r->ingcount[0], rpg::itemname(rpg::finditem(r->ing[0])),
                 r->ingcount[1], rpg::itemname(rpg::finditem(r->ing[1])),
                 rpg::itemname(rpg::finditem(r->out)));
+            if(out[0] && (int)strlen(out) + 1 + (int)strlen(line) > 200)
+            {
+                sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, out);
+                out[0] = '\0';
+            }
             if(out[0]) concatstring(out, "\n");
             concatstring(out, line);
         }
-        sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, out);
+        if(out[0]) sendf(cq->clientnum, 1, "ris", N_RPG_RECIPES, out);
     }
 
     // v0.1.34: craft result notice — the server sends the outcome BOTH as
@@ -4706,11 +4718,45 @@ namespace server
         char key[256];
         if(!rpg::craftkey(itema, itemb, key, sizeof(key))) { rpg_craftresult(cq, 0, "Unknown ingredient."); return; }
         const rpg::craftrecipe *r = rpg::craftrecipebykey(key);
+        // Phase 3: an already-enhanced piece + material resolves back to
+        // its base recipe (enhanced ids carry ss_item_enhbase). The
+        // recorded recipe is the base pair, so one recipe covers a base
+        // piece and all of its enhanced tiers.
+        const char *enhgear = NULL;
+        if(!r)
+        {
+            const char *cands[2] = { itema, itemb };
+            for(int k = 0; k < 2 && !r; k++)
+            {
+                int cid = rpg::finditem(cands[k]);
+                if(cid < 0) continue;
+                const rpg::itemdef &cd = rpg::item(cid);
+                if(cd.gearstat < 0 || !cd.enhbase) continue;
+                const char *other = cands[1 - k];
+                char bkey[256];
+                if(!rpg::craftkey(cd.enhbase, other, bkey, sizeof(bkey))) continue;
+                const rpg::craftrecipe *br = rpg::craftrecipebykey(bkey);
+                if(br && br->enhance) { r = br; enhgear = cands[k]; }
+            }
+        }
+        // Which slotted id is the gear, which the material (enhance only).
+        const char *gearid = NULL, *matid = NULL;
+        if(r && r->enhance)
+        {
+            if(enhgear) { gearid = enhgear; matid = !strcmp(enhgear, itema) ? itemb : itema; }
+            else if(rpg::item(ida).type == rpg::ITEM_ARMOR) { gearid = itema; matid = itemb; }
+            else { gearid = itemb; matid = itema; }
+        }
         // Count check FIRST: never lose (or consume) what you don't have,
         // in either the success or the failure branch. Same-id slots need
         // the folded count (2 of one item); a recipe's own counts govern
         // when one matches.
-        if(r)
+        if(r && r->enhance)
+        {
+            if(rpg::itemcount(cq->name, gearid) < 1 || rpg::itemcount(cq->name, matid) < 1)
+            { rpg_craftresult(cq, 0, "You don't have those ingredients."); return; }
+        }
+        else if(r)
         {
             if(!strcmp(r->ing[0], r->ing[1]))
             {
@@ -4741,6 +4787,69 @@ namespace server
             }
             else rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials are safe.");
             conoutf("rpg: '%s' failed craft %s + %s (fail_lose %d)", cq->name, itema, itemb, craft_fail_lose);
+            return;
+        }
+
+        if(r->enhance)
+        {
+            // Phase 3 enhancement: transform the piece in place, consume
+            // the material. Nothing is removed until every gate passes,
+            // so a refused enhance loses nothing.
+            int gearidx = rpg::finditem(gearid), matidx = rpg::finditem(matid);
+            if(gearidx < 0 || matidx < 0 || rpg::item(matidx).type != rpg::ITEM_MATERIAL)
+            { rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials are safe."); return; }
+            // No equipped guard is needed here, deliberately: the count
+            // check above already refuses when no inventory copy exists
+            // (an equipped-only piece is not in inventory), and when a
+            // pack copy exists the transform below consumes exactly that
+            // copy — the equipped piece is never touched. An explicit
+            // equipped check would wrongly refuse the spare-copy case.
+            const rpg::itemdef &gd = rpg::item(gearidx);
+            const rpg::itemdef &md = rpg::item(matidx);
+            // Tier gate: unenhanced (no gear bonus) takes any material
+            // tier; an enhanced piece takes ONLY a strictly higher-tier
+            // material, so it can never be downgraded by accident.
+            if(gd.gearstat >= 0 && md.tier <= gd.tier)
+            {
+                defformatstring(ref)("That piece is already enhanced to %s. Only a higher-tier material can improve it.", rpg::crafttiername(gd.tier));
+                rpg_craftresult(cq, 0, ref);
+                conoutf("rpg: '%s' refused enhance %s (tier %s) with %s (tier %s): not strictly higher",
+                        cq->name, gearid, rpg::crafttiername(gd.tier), matid, rpg::crafttiername(md.tier));
+                return;
+            }
+            // Output tier equals the material tier directly (NOT the
+            // two-material midpoint rule); validation guarantees every
+            // tier variant exists, so this is the exact tier variant.
+            const char *outid = rpg::craftoutfortier(r, md.tier);
+            rpg::removeitem(cq->name, gearid, 1);
+            rpg::removeitem(cq->name, matid, 1);
+            if(!rpg::additem(cq->name, outid, 1))
+            {
+                // Refund on failure (should not happen for known items).
+                rpg::additem(cq->name, gearid, 1);
+                rpg::additem(cq->name, matid, 1);
+                rpg_craftresult(cq, 0, "Crafting failed.");
+                rpg_syncinv(cq);
+                return;
+            }
+            bool isnew = !rpg::recipediscovered(cq->name, r->key);
+            if(isnew) rpg::discoverrecipe(cq->name, r->key);
+            defformatstring(msg)("You enhance %s into %s.", rpg::itemname(gearidx), rpg::itemname(rpg::finditem(outid)));
+            rpg_craftresult(cq, 1, msg);
+            conoutf("rpg: '%s' enhances %s into %s (tier %s) with %s%s", cq->name,
+                    gearid, outid, rpg::crafttiername(md.tier), matid,
+                    isnew ? " [recipe discovered]" : "");
+            if(rpg::queststate(cq->name, 7) == 2)
+            {
+                rpg::questsetstage(cq->name, 7, 3);
+                bool leveled = false;
+                int newlevel = rpg::awardxp(cq->name, 100, &leveled);
+                if(newlevel > 0 && leveled) rpg_levelupfx(cq, newlevel);
+                rpg_qmsg(cq, "Quest complete: Necessity Is the Mother of Invention (+100 XP)");
+            }
+            rpg_syncinv(cq);
+            rpg_syncquest(cq);
+            rpg_sendrecipes(cq);
             return;
         }
 
@@ -5119,7 +5228,7 @@ namespace server
                             int lvl = 1, xp = 0;
                             if(rpg::getstats(cq->name, lvl, xp))
                             {
-                                int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY));
+                                int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY));
                                 if(cq->state.health > maxhp) { cq->state.health = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HP, cq->state.health); conoutf("rpg: '%s' vitality expiry clamped HP to %d", cq->name, maxhp); }
                                 if(cq->state.maxhealth != maxhp) { cq->state.maxhealth = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp); }
                             }

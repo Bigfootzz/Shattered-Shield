@@ -582,7 +582,7 @@ namespace rpg
         cachedchar *cc = findcached(name);
         if(!cc) return false;
         mana = cc->mana;
-        maxmana = rpg::maxmana(cc->level);
+        maxmana = maxmanafor(name, cc->level); // Phase 3: gear+buff Wisdom count
         return true;
     }
 
@@ -628,8 +628,8 @@ namespace rpg
             int dt = now - cc.lastregen;
             if(dt >= 1000)
             {
-                int cap = maxmana(cc.level);
-                cc.mana = min(cap, cc.mana + dt*stat_manaregen(cc.level)/1000);
+                int cap = maxmanafor(it->first.c_str(), cc.level); // Phase 3: gear+buff Wisdom count
+                cc.mana = min(cap, cc.mana + dt*stat_manaregen(cc.level, gearbonus(it->first.c_str(), ATTR_WISDOM) + buffbonus(it->first.c_str(), ATTR_WISDOM))/1000);
                 // Oct 20 regen rule: out of combat (no damage dealt or taken
                 // for REGEN_DELAY_MS), mana also climbs at the slow regen
                 // rate until full. This stacks on the Wisdom regen above,
@@ -956,6 +956,38 @@ namespace rpg
         if(jt == it->second.end()) return 0;
         if((int)time(NULL) >= jt->second.expires) return 0; // expired: prune reports it, this only reads
         return jt->second.magnitude;
+    }
+
+    // --- crafting Phase 3: persistent gear bonuses ---
+    // Post-weighting sum over equipped armor only (weapons never carry
+    // gearstat; validation enforces armor-only). Unknown class fails
+    // closed to half value via gearweight (see stats.cpp).
+    int gearbonus(const char *name, int attr)
+    {
+        if(!name || !name[0] || attr < 0 || attr >= ATTR_COUNT) return 0;
+        cachedchar *cc = findcached(name);
+        if(!cc) return 0;
+        char cls[32];
+        bool haveclass = classfor(name, cls, sizeof(cls));
+        int total = 0;
+        loopi(SLOT_COUNT) if(cc->equipped[i] >= 0)
+        {
+            const itemdef &d = item(cc->equipped[i]);
+            if(d.gearstat == attr && d.gearbonus > 0)
+                total += gearweight(d.gearbonus, attr, haveclass ? cls : "");
+        }
+        return total;
+    }
+
+    int effectiveattr(const char *name, int level, int attr)
+    {
+        if(attr < 0 || attr >= ATTR_COUNT) return 0;
+        return attrscore(level, attr) + gearbonus(name, attr) + buffbonus(name, attr);
+    }
+
+    int maxmanafor(const char *name, int level)
+    {
+        return stat_maxmana(level, gearbonus(name, ATTR_WISDOM) + buffbonus(name, ATTR_WISDOM));
     }
 
     bool buffactive(const char *name, int attr, int &magnitude, int &secondsleft)

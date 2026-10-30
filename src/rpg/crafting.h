@@ -33,11 +33,15 @@ namespace rpg
     struct craftrecipe
     {
         const char *key;        // canonical ingredient key
-        const char *ing[2];     // ingredient item ids (sorted order)
+        const char *ing[2];     // ingredient item ids (sorted order for material
+                                // pairs; declared order — gear, material — for
+                                // enhancement recipes, so ing[0] is the gear)
         int ingcount[2];        // required count per ingredient
         const char *out;        // base (tier 0) output item id
         int outcount;           // granted count
         const char *outtier[5]; // per-tier output variants, NULL when undefined
+        bool enhance;           // Phase 3: gear + material -> enhanced gear
+                                // (output tier = material tier, tier-gated)
     };
     int craftrecipecount();
     const craftrecipe *craftrecipebykey(const char *key);

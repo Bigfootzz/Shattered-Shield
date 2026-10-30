@@ -4,6 +4,7 @@
 #include "stats.h"
 #include "rpg.h"   // MAX_LEVEL
 #include <cstdlib> // rand
+#include <cstring> // strcmp (Phase 3 class weighting)
 
 namespace rpg
 {
@@ -63,9 +64,21 @@ namespace rpg
         return 60 + 10*level + 10*attrscore(level, ATTR_WISDOM);
     }
 
+    int stat_maxmana(int level, int wisbonus)
+    {
+        if(wisbonus < 0) wisbonus = 0;
+        return 60 + 10*level + 10*(attrscore(level, ATTR_WISDOM) + wisbonus);
+    }
+
     int stat_manaregen(int level)
     {
         return 5 + attrscore(level, ATTR_WISDOM);
+    }
+
+    int stat_manaregen(int level, int wisbonus)
+    {
+        if(wisbonus < 0) wisbonus = 0;
+        return 5 + attrscore(level, ATTR_WISDOM) + wisbonus;
     }
 
     int stat_powerstrike(int level, int weapondmg)
@@ -73,9 +86,21 @@ namespace rpg
         return 35 + weapondmg + attrscore(level, ATTR_STRENGTH);
     }
 
+    int stat_powerstrike(int level, int weapondmg, int strbonus)
+    {
+        if(strbonus < 0) strbonus = 0;
+        return 35 + weapondmg + attrscore(level, ATTR_STRENGTH) + strbonus;
+    }
+
     int stat_sparkbolt(int level)
     {
         return 50 + 2*attrscore(level, ATTR_KNOWLEDGE);
+    }
+
+    int stat_sparkbolt(int level, int knowbonus)
+    {
+        if(knowbonus < 0) knowbonus = 0;
+        return 50 + 2*(attrscore(level, ATTR_KNOWLEDGE) + knowbonus);
     }
 
     float stat_critchance(int level)
@@ -83,9 +108,41 @@ namespace rpg
         return 5.0f + 0.5f*attrscore(level, ATTR_DEXTERITY);
     }
 
+    float stat_critchance(int level, int dexbonus)
+    {
+        if(dexbonus < 0) dexbonus = 0;
+        return 5.0f + 0.5f*(attrscore(level, ATTR_DEXTERITY) + dexbonus);
+    }
+
     float stat_critmult(int level)
     {
         return 1.50f + 0.05f*attrscore(level, ATTR_CUNNING);
+    }
+
+    float stat_critmult(int level, int cunbonus)
+    {
+        if(cunbonus < 0) cunbonus = 0;
+        return 1.50f + 0.05f*(attrscore(level, ATTR_CUNNING) + cunbonus);
+    }
+
+    // Phase 3 class weighting (gear bonuses only; pure, shared server+client).
+    // Unknown class fails closed to half value for every attribute: no
+    // class ever gets full value it did not earn, and no crash on "".
+    int favoredattr(const char *cls)
+    {
+        if(!cls) return -1;
+        if(!strcmp(cls, "Warrior")) return ATTR_STRENGTH;
+        if(!strcmp(cls, "Ranger")) return ATTR_DEXTERITY;
+        if(!strcmp(cls, "Magi")) return ATTR_KNOWLEDGE;
+        return -1;
+    }
+
+    int gearweight(int rawbonus, int attr, const char *cls)
+    {
+        if(rawbonus <= 0) return 0;
+        if(attr < 0 || attr >= ATTR_COUNT) return 0;
+        if(attr == favoredattr(cls)) return rawbonus;
+        return rawbonus / 2; // integer division: half rounded down (3 -> 1)
     }
 
     bool stat_rollcrit(float chancepct)

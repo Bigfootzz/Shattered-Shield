@@ -138,6 +138,16 @@ namespace rpg
     int buffmagnitude(int tier); // tier 0..4 -> 2/3/5/7/10, clamped
     bool applybuff(const char *name, int attr, int magnitude, int durationsec); // set/refresh one buff type
     int buffbonus(const char *name, int attr); // active magnitude, 0 when none/expired
+    // --- crafting Phase 3: persistent gear bonuses (armor only) ---
+    // gearbonus() sums equipped armor pieces' gearstat bonuses for one
+    // attribute AFTER class weighting (favored full, rest half rounded
+    // down); 0 when nothing equipped or class unknown. effectiveattr()
+    // is the single stacking rule: base (= level) + gear (weighted) +
+    // timed buff (full). Server-authoritative; recomputed on every read,
+    // so equip/unequip/level/buff changes need no invalidation.
+    int gearbonus(const char *name, int attr);
+    int effectiveattr(const char *name, int level, int attr);
+    int maxmanafor(const char *name, int level); // stat_maxmana with gear+buff Wisdom
     bool buffactive(const char *name, int attr, int &magnitude, int &secondsleft);
     int buffprune(const char *name, int *expired, int maxexpired); // drop expired rows, return count + attrs
     void clearbuffs(const char *name); // logout: drop all rows + cache

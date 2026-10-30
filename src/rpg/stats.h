@@ -37,11 +37,24 @@ namespace rpg
     int stat_maxhp(int level);             // 90 + 10 * Vitality
     int stat_maxhp(int level, int vitbonus); // 90 + 10 * (Vitality + bonus); Phase 2 buffs
     int stat_maxmana(int level);           // 40 + 10 * level + 10 * Wisdom
+    int stat_maxmana(int level, int wisbonus); // Phase 3: + gear/buff Wisdom
     int stat_manaregen(int level);         // 5 + Wisdom per second
+    int stat_manaregen(int level, int wisbonus); // Phase 3: + gear/buff Wisdom
     int stat_powerstrike(int level, int weapondmg); // 35 + weapon + Strength
+    int stat_powerstrike(int level, int weapondmg, int strbonus); // Phase 3: + gear/buff Strength
     int stat_sparkbolt(int level);         // 50 + 2 * Knowledge
+    int stat_sparkbolt(int level, int knowbonus); // Phase 3: + gear/buff Knowledge
     float stat_critchance(int level);      // %: 5 + 0.5 * Dexterity
+    float stat_critchance(int level, int dexbonus); // Phase 3: + gear/buff Dexterity
     float stat_critmult(int level);        // x: 1.50 + 0.05 * Cunning
+    float stat_critmult(int level, int cunbonus); // Phase 3: + gear/buff Cunning
+
+    // --- Phase 3 class weighting (gear bonuses only) ---
+    // Favored attribute per class, full value; every other gear bonus
+    // counts at half, rounded down. Base attributes (= level) and timed
+    // buffs are NOT weighted (full value for every class).
+    int favoredattr(const char *cls);      // ATTR_* for "Warrior"/"Ranger"/"Magi", -1 when unknown
+    int gearweight(int rawbonus, int attr, const char *cls); // weighted bonus (floor on halves)
 
     // Server-side crit roll: true when a uniform 0-100 roll beats the chance.
     bool stat_rollcrit(float chancepct);

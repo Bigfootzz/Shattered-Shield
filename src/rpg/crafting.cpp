@@ -76,6 +76,7 @@ namespace rpg
     struct recipbuild
     {
         bool active = false;
+        bool enhance = false; // Phase 3: ss_recipe_enh flag (gear + material)
         std::string label;
         std::vector<std::pair<std::string, int> > ings;
         std::string out;
@@ -129,6 +130,12 @@ namespace rpg
             return true;
         }
         if(!currecipe.active) { err = c + " with no preceding ss_recipe"; return false; }
+        if(c == "ss_recipe_enh")
+        {
+            if(argc != 0) { err = "ss_recipe_enh: expected no arguments"; return false; }
+            currecipe.enhance = true;
+            return true;
+        }
         if(c == "ss_recipe_ing")
         {
             if(argc != 2) { err = "ss_recipe_ing: expected 2 arguments (item id, count)"; return false; }
@@ -177,9 +184,49 @@ namespace rpg
             for(size_t j = 0; j < seenlabels.size(); j++)
                 if(seenlabels[j] == r.label) { err = "duplicate recipe label '" + r.label + "'"; return false; }
             seenlabels.push_back(r.label);
-            // Phase 1: exactly two material ingredients, one consumable output.
-            if(r.ings.size() != 2) { err = "recipe '" + r.label + "' must have exactly 2 ingredients (Phase 1)"; return false; }
+            // Exactly two ingredients and one output for every recipe kind.
+            if(r.ings.size() != 2) { err = "recipe '" + r.label + "' must have exactly 2 ingredients"; return false; }
             if(!r.hasout) { err = "recipe '" + r.label + "' has no output"; return false; }
+            if(r.enhance)
+            {
+                // Phase 3 enhancement: declared order is gear, material.
+                // The output (all 5 tiers) is the same piece enhanced:
+                // armor, same slot as the input gear, gearstat set,
+                // enhbase pointing at the input gear, bonus = tier + 1.
+                // ALL tier variants are required: output tier equals the
+                // material tier exactly, so a missing variant would
+                // silently downgrade a rare-material craft via fallback.
+                int gid = finditem(r.ings[0].first.c_str());
+                int mid = finditem(r.ings[1].first.c_str());
+                if(gid < 0) { err = "recipe '" + r.label + "' names unknown gear '" + r.ings[0].first + "'"; return false; }
+                if(mid < 0) { err = "recipe '" + r.label + "' names unknown material '" + r.ings[1].first + "'"; return false; }
+                if(item(gid).type != ITEM_ARMOR) { err = "recipe '" + r.label + "' gear '" + r.ings[0].first + "' is not armor (Phase 3)"; return false; }
+                if(item(mid).type != ITEM_MATERIAL) { err = "recipe '" + r.label + "' material '" + r.ings[1].first + "' is not a material (Phase 3)"; return false; }
+                if(r.ings[0].second != 1 || r.ings[1].second != 1)
+                { err = "recipe '" + r.label + "' must use count 1 per ingredient (Phase 3)"; return false; }
+                const char *outs[5] = { r.out.c_str(), NULL, NULL, NULL, NULL };
+                for(int t = 1; t <= 4; t++)
+                {
+                    if(!r.hastier[t]) { err = "recipe '" + r.label + "' is missing tier variant " + std::string(crafttiername(t)) + " (Phase 3 requires all 5 tiers)"; return false; }
+                    outs[t] = r.outtier[t].c_str();
+                }
+                for(int t = 0; t <= 4; t++)
+                {
+                    int oid = finditem(outs[t]);
+                    if(oid < 0) { err = "recipe '" + r.label + "' names unknown output '" + std::string(outs[t]) + "'"; return false; }
+                    const itemdef &od = item(oid);
+                    if(od.type != ITEM_ARMOR) { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' is not armor (Phase 3)"; return false; }
+                    if(od.slot != item(gid).slot) { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' is not in the input gear's slot (Phase 3)"; return false; }
+                    if(od.gearstat < 0) { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' has no gear bonus (Phase 3)"; return false; }
+                    if(!od.enhbase || strcmp(od.enhbase, r.ings[0].first.c_str()))
+                    { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' does not derive from '" + r.ings[0].first + "' (Phase 3)"; return false; }
+                    if(od.tier != t) { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' tier does not match its variant tier (Phase 3)"; return false; }
+                    if(od.gearbonus != t + 1) { err = "recipe '" + r.label + "' output '" + std::string(outs[t]) + "' gear bonus is not tier + 1 (Phase 3)"; return false; }
+                }
+            }
+            else
+            {
+            // Phase 1: exactly two material ingredients, one consumable output.
             for(size_t j = 0; j < r.ings.size(); j++)
             {
                 int id = finditem(r.ings[j].first.c_str());
@@ -194,6 +241,7 @@ namespace rpg
                 int vid = finditem(r.outtier[t].c_str());
                 if(vid < 0) { err = "recipe '" + r.label + "' names unknown tier output '" + r.outtier[t] + "'"; return false; }
                 if(item(vid).type != ITEM_CONSUMABLE) { err = "recipe '" + r.label + "' tier output '" + r.outtier[t] + "' is not a consumable (Phase 1)"; return false; }
+            }
             }
             char key[MAXSTRLEN];
             if(!craftkey(r.ings[0].first.c_str(), r.ings[1].first.c_str(), key, sizeof(key)))
@@ -221,9 +269,11 @@ namespace rpg
         {
             const recipbuild &b = builtrecipes[i];
             craftrecipe r;
-            // sort ingredients by id for the canonical key + display order
+            // Material pairs sort ingredients for the canonical key +
+            // display order. Enhancement recipes keep declared order
+            // (gear, material) so ing[0] is always the gear piece.
             std::pair<std::string, int> a = b.ings[0], c = b.ings[1];
-            if(c.first < a.first) { std::pair<std::string, int> t = a; a = c; c = t; }
+            if(!b.enhance && c.first < a.first) { std::pair<std::string, int> t = a; a = c; c = t; }
             char key[MAXSTRLEN];
             if(!craftkey(a.first.c_str(), c.first.c_str(), key, sizeof(key))) continue; // validated above; never pool an unbuilt key
             r.key = craftpoolstr(key);
@@ -234,6 +284,7 @@ namespace rpg
             r.out = craftpoolstr(b.out);
             r.outcount = b.outcount;
             for(int t = 0; t < 5; t++) r.outtier[t] = b.hastier[t] ? craftpoolstr(b.outtier[t]) : NULL;
+            r.enhance = b.enhance;
             craftrecipes.push_back(r);
         }
         builtrecipes.clear();

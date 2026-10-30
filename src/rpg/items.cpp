@@ -129,6 +129,8 @@ namespace rpg
         std::string id, name, type, slot, icon, vwep, weaponcat;
         int damage = 0, armor = 0, heal = 0, mana = 0, value = 0, tier = 0;
         int buffattr = -1;
+        int gearstat = -1, gearbonus = 0;
+        std::string enhbase;
         bool stack = false;
     };
     static itembuild curitem;
@@ -219,6 +221,27 @@ namespace rpg
             else { err = std::string("ss_item_buff: unknown attribute '") + argv[0] + "'"; return false; }
             return true;
         }
+        // Phase 3 gear enhancement: persistent equipped bonus, armor only.
+        // Kept deliberately separate from ss_item_buff (consumables only).
+        if(c == "ss_item_gearstat")
+        {
+            if(argc != 1) { err = "ss_item_gearstat: expected 1 argument (attribute name)"; return false; }
+            if(argv[0] == std::string("strength")) curitem.gearstat = ATTR_STRENGTH;
+            else if(argv[0] == std::string("dexterity")) curitem.gearstat = ATTR_DEXTERITY;
+            else if(argv[0] == std::string("vitality")) curitem.gearstat = ATTR_VITALITY;
+            else if(argv[0] == std::string("knowledge")) curitem.gearstat = ATTR_KNOWLEDGE;
+            else if(argv[0] == std::string("wisdom")) curitem.gearstat = ATTR_WISDOM;
+            else if(argv[0] == std::string("cunning")) curitem.gearstat = ATTR_CUNNING;
+            else { err = std::string("ss_item_gearstat: unknown attribute '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_gearbonus")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.gearbonus, err)) return false;
+            if(curitem.gearbonus < 0 || curitem.gearbonus > 5) { err = "ss_item_gearbonus out of range 0..5"; return false; }
+            return true;
+        }
+        if(c == "ss_item_enhbase") { if(argc != 1) { err = "ss_item_enhbase: expected 1 argument (base gear id)"; return false; } curitem.enhbase = argv[0]; return true; }
         if(c == "ss_item_stack")
         {
             int v = 0;
@@ -375,6 +398,34 @@ namespace rpg
             { err = "item '" + b.id + "' sets a buff but is not a consumable"; return false; }
             if(b.buffattr >= 0 && b.heal != 0)
             { err = "item '" + b.id + "' sets both a buff and a heal; buff items must not heal"; return false; }
+            // Phase 3 gear enhancement: persistent equipped bonus, armor only,
+            // deliberately separate from buffattr (consumables only, above).
+            if(b.gearstat < -1 || b.gearstat >= ATTR_COUNT)
+            { err = "item '" + b.id + "' has an out-of-range gear attribute"; return false; }
+            if(b.gearstat >= 0 && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets a gear bonus but is not armor"; return false; }
+            if(b.gearstat >= 0 && (b.gearbonus < 1 || b.gearbonus > 5))
+            { err = "item '" + b.id + "' sets a gear attribute but no gear bonus 1..5"; return false; }
+            if(b.gearstat >= 0 && b.enhbase.empty())
+            { err = "item '" + b.id + "' sets a gear bonus but no ss_item_enhbase"; return false; }
+            if(b.gearstat < 0 && (b.gearbonus != 0 || !b.enhbase.empty()))
+            { err = "item '" + b.id + "' sets a gear bonus/base without a gear attribute"; return false; }
+        }
+        // Second pass: enhancement bases must exist, be unenhanced armor,
+        // and share the enhanced piece's slot (re-enhance resolution key).
+        for(size_t i = 0; i < builtitems.size(); i++)
+        {
+            const itembuild &b = builtitems[i];
+            if(b.gearstat < 0) continue;
+            const itembuild *base = NULL;
+            for(size_t j = 0; j < builtitems.size(); j++) if(builtitems[j].id == b.enhbase) { base = &builtitems[j]; break; }
+            if(!base) { err = "item '" + b.id + "' names unknown enhancement base '" + b.enhbase + "'"; return false; }
+            bool baseok = true;
+            int baseslot = slotfromname(base->slot, baseok);
+            bool slotok = true;
+            int slot = slotfromname(b.slot, slotok);
+            if(!baseok || typefromname(base->type) != ITEM_ARMOR || base->gearstat >= 0 || baseslot != slot)
+            { err = "item '" + b.id + "' enhancement base '" + b.enhbase + "' is not unenhanced armor in the same slot"; return false; }
         }
         return true;
     }
@@ -402,6 +453,9 @@ namespace rpg
             d.mana = b.mana;
             d.tier = b.tier;
             d.buffattr = b.buffattr;
+            d.gearstat = b.gearstat;
+            d.gearbonus = b.gearbonus;
+            d.enhbase = b.enhbase.empty() ? NULL : poolstr(b.enhbase);
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             if(!findfile(d.icon, "e"))

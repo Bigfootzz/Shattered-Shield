@@ -1116,6 +1116,24 @@ namespace game
     static rpg::itemstack rpg_clinv[64];
     static int rpg_cleq[rpg::SLOT_COUNT];
     static void rpg_refreshcl() { rpg::getclientinv(rpg_clinv, 64, rpg_cln, rpg_cleq); }
+    // Phase 3 client gear bonus (display only, never authoritative): the
+    // post-weighting sum over equipped armor, using the same archetype
+    // lookup the sheet header (rpgclass) already uses. Unknown class
+    // fails closed to half value, exactly like the server.
+    static int rpg_clientgearbonus(int attr)
+    {
+        if(!player1 || attr < 0 || attr >= rpg::ATTR_COUNT) return 0;
+        char arch[32]; arch[0] = '\0';
+        rpg::chararchetype(player1->name, arch, sizeof(arch));
+        rpg_refreshcl();
+        int total = 0;
+        loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
+            if(d.gearstat == attr && d.gearbonus > 0) total += rpg::gearweight(d.gearbonus, attr, arch);
+        }
+        return total;
+    }
     ICOMMAND(rpginvcount, "", (), { rpg_refreshcl(); intret(rpg_cln); });
     ICOMMAND(rpginvid, "i", (int *i), { rpg_refreshcl(); result(*i >= 0 && *i < rpg_cln ? rpg::item(rpg_clinv[*i].item).id : ""); });
     ICOMMAND(rpginvname, "i", (int *i), { rpg_refreshcl(); result(*i >= 0 && *i < rpg_cln ? rpg::itemname(rpg_clinv[*i].item) : ""); });
@@ -1233,6 +1251,7 @@ namespace game
         {
             const rpg::itemdef &d = rpg::item(rpg_clinv[*i].item);
             if(d.type == rpg::ITEM_WEAPON) formatstring(s)("+%d damage", d.damage);
+            else if(d.type == rpg::ITEM_ARMOR && d.gearstat >= 0) formatstring(s)("Armor %d, +%d %s (gear)", d.armor, d.gearbonus, rpg::attrname(d.gearstat));
             else if(d.type == rpg::ITEM_ARMOR) formatstring(s)("Armor %d", d.armor);
             else if(d.type == rpg::ITEM_CONSUMABLE && d.buffattr >= 0) formatstring(s)("%s +%d", rpg::attrname(d.buffattr), rpg::buffmagnitude(d.tier));
             else if(d.type == rpg::ITEM_CONSUMABLE) formatstring(s)("Heals %d", d.heal);
@@ -1247,6 +1266,7 @@ namespace game
         {
             const rpg::itemdef &d = rpg::item(rpg_cleq[id]);
             if(d.type == rpg::ITEM_WEAPON) formatstring(r)("+%d damage", d.damage);
+            else if(d.type == rpg::ITEM_ARMOR && d.gearstat >= 0) formatstring(r)("Armor %d, +%d %s (gear)", d.armor, d.gearbonus, rpg::attrname(d.gearstat));
             else if(d.type == rpg::ITEM_ARMOR) formatstring(r)("Armor %d", d.armor);
         }
         result(r);
@@ -1335,11 +1355,29 @@ namespace game
     ICOMMAND(rpgmaxmana, "", (), { int m = 0; int mm = 0; rpg::getclientmana(m, mm); intret(mm); });
     // --- stat system (milestone step 5): read-only client-cache queries for the K screen ---
     // Attributes derive from the client-known level (automatic growth); no protocol change.
-    ICOMMAND(rpgmaxhp, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(rpg::stat_maxhp(l)); });
+    // Phase 3: displayed derived stats include the client's equipped gear
+    // bonuses (post-weighting); timed buffs are server-side only and, as
+    // before, are not reflected in these client-side rows.
+    ICOMMAND(rpgmaxhp, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(rpg::stat_maxhp(l, rpg_clientgearbonus(rpg::ATTR_VITALITY))); });
     ICOMMAND(rpgattrname, "i", (int *i), { result(rpg::attrname(*i)); });
     ICOMMAND(rpgattr, "i", (int *i), { int l = 1; int x = 0; rpg::getclientstats(l, x); intret(rpg::attrscore(l, *i)); });
-    ICOMMAND(rpgcritchance, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("%.1f%%", rpg::stat_critchance(l)); result(s); });
-    ICOMMAND(rpgcritmult, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("x%.2f", rpg::stat_critmult(l)); result(s); });
+    ICOMMAND(rpggearbonus, "i", (int *i), { intret(rpg_clientgearbonus(*i)); });
+    ICOMMAND(rpggearline, "", (), {
+        static string s; s[0] = 0;
+        loopi(rpg::ATTR_COUNT)
+        {
+            int b = rpg_clientgearbonus(i);
+            if(b > 0)
+            {
+                defformatstring(part)("%s +%d", rpg::attrname(i), b);
+                if(s[0]) concatstring(s, ", ");
+                concatstring(s, part);
+            }
+        }
+        result(s);
+    });
+    ICOMMAND(rpgcritchance, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("%.1f%%", rpg::stat_critchance(l, rpg_clientgearbonus(rpg::ATTR_DEXTERITY))); result(s); });
+    ICOMMAND(rpgcritmult, "", (), { int l = 1; int x = 0; rpg::getclientstats(l, x); defformatstring(s)("x%.2f", rpg::stat_critmult(l, rpg_clientgearbonus(rpg::ATTR_CUNNING))); result(s); });
     ICOMMAND(rpgarmorred, "", (), {
         rpg_refreshcl(); int ar = 0;
         loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
@@ -1354,6 +1392,8 @@ namespace game
     ICOMMAND(rpgresist, "i", (int *i), { intret(0); });
     ICOMMAND(rpgabtype, "i", (int *i), { result(rpg::validability(*i) ? rpg::ability(*i).damagetype : ""); });
     // Attribute-derived ability damage for the Offense tab (Power Strike adds weapon + STR).
+    // Phase 3: includes equipped gear bonuses (post-weighting) on the
+    // ability's scaling attribute; timed buffs are server-side only.
     ICOMMAND(rpgabstatdmg, "i", (int *i), {
         if(!rpg::validability(*i)) { intret(0); return; }
         int l = 1; int x = 0; rpg::getclientstats(l, x);
@@ -1363,7 +1403,7 @@ namespace game
             const rpg::itemdef &d = rpg::item(rpg_cleq[i]);
             if(d.type == rpg::ITEM_WEAPON) wd += d.damage;
         }
-        intret(rpg::ability(*i).melee ? rpg::stat_powerstrike(l, wd) : rpg::stat_sparkbolt(l));
+        intret(rpg::ability(*i).melee ? rpg::stat_powerstrike(l, wd, rpg_clientgearbonus(rpg::ATTR_STRENGTH)) : rpg::stat_sparkbolt(l, rpg_clientgearbonus(rpg::ATTR_KNOWLEDGE)));
     });
 
     void switchname(const char *name)
@@ -3436,8 +3476,11 @@ namespace game
             }
             case N_RPG_RECIPES: // crafting Phase 1: discovered recipes, \n-separated lines
             {
+                // Phase 3: the server sends the list in chunks (an empty
+                // message clears first, then each chunk appends), because
+                // the full list outgrew the 260-char string buffer.
                 string lines; getstring(lines, p);
-                rpg_craftrecipen = 0;
+                if(!lines[0]) { rpg_craftrecipen = 0; break; }
                 char *cur = lines;
                 while(cur && *cur && rpg_craftrecipen < 64)
                 {
