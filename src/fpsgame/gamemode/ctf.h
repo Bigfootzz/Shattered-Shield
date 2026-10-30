@@ -212,6 +212,25 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         loopk(2) if(scores[k]) tscores.add(teamscore(ctfflagteam(k+1), scores[k]));
     }
 
+#ifndef SERVMODE
+    // Battlegrounds (v0.1.40): banner data for drawctfbanners in fps.cpp.
+    int getteamscoreflag(int team) { return totalscore(team); }
+    // -1 = no flag info (hold mode / no such flag); 0 at base, 1 carried, 2 dropped.
+    int getflagstatus(int team)
+    {
+        if(m_hold) return -1;
+        loopv(flags)
+        {
+            flag &f = flags[i];
+            if(f.team != team) continue;
+            if(f.owner) return 1;
+            if(f.droptime) return 2;
+            return 0;
+        }
+        return -1;
+    }
+#endif
+
     bool insidebase(const flag &f, const vec &o)
     {
         float dx = (f.spawnloc.x-o.x), dy = (f.spawnloc.y-o.y), dz = (f.spawnloc.z-o.z);
@@ -470,29 +489,39 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         }
     }
 
-    void drawblip(fpsent *d, float x, float y, float s, int i, bool flagblip)
+    void drawblip(fpsent *d, float x, float y, float s, int i, bool flagblip, float maxdist = 0.86f)
     {
         flag &f = flags[i];
         settexture(m_hold && (!flagblip || !f.owner || lastmillis%1000 < 500) ? (flagblip ? "data/hud/blip_neutral_flag.png" : "data/hud/blip_neutral.png") :
                     (!(m_hold ? ctfteamflag(f.owner->team) : f.team - 1) ?
                         (flagblip ? "data/hud/blip_blue_flag.png" : "data/hud/blip_blue.png") :
                         (flagblip ? "data/hud/blip_red_flag.png" : "data/hud/blip_red.png")), 3);
-        game::drawblip(d, x, y, s, flagblip ? (f.owner ? f.owner->o : (f.droptime ? f.droploc : f.spawnloc)) : f.spawnloc, flagblip);
+        game::drawblip(d, x, y, s, flagblip ? (f.owner ? f.owner->o : (f.droptime ? f.droploc : f.spawnloc)) : f.spawnloc, flagblip, maxdist);
     }
 
     void drawhud(fpsent *d, int w, int h)
     {
+        // Battlegrounds (v0.1.40): on RPG maps the CTF furniture moves to
+        // the RPG layout — carry icon out of the bottom strip (banner band
+        // instead), blips on the RPG fan rect, no CTF respawn countdown
+        // (the RPG 10s death window governs respawn there, Ed Oct 30).
+        bool rpgmap = rpg::mapactive(getclientmap());
         if(d->state == CS_ALIVE)
         {
             loopv(flags) if(flags[i].owner == d)
             {
-                int x = HICON_X + 2*HICON_STEP;
-                drawicon(m_hold ? HICON_NEUTRAL_FLAG : (flags[i].team==ctfteamflag(d->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG), x, 1600);
+                int x = HICON_X + 2*HICON_STEP, y = 1600;
+                if(rpgmap)
+                {
+                    float X = w*1800.0f/h;
+                    x = int(X/2 - HICON_SIZE/2); y = 150;
+                }
+                drawicon(m_hold ? HICON_NEUTRAL_FLAG : (flags[i].team==ctfteamflag(d->team) ? HICON_BLUE_FLAG : HICON_RED_FLAG), x, y);
                 if(m_hold)
                 {
                     glPushMatrix();
                     glScalef(2, 2, 1);
-                    draw_textf("%d", (x + HICON_SIZE + HICON_SPACE)/2, HICON_TEXTY/2, max(HOLDSECS - (lastmillis - flags[i].owntime)/1000, 0));
+                    draw_textf("%d", (x + HICON_SIZE + HICON_SPACE)/2, (y + 44)/2, max(HOLDSECS - (lastmillis - flags[i].owntime)/1000, 0));
                     glPopMatrix();
                 }
                 break;
@@ -500,25 +529,27 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         }
 
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        float s, x, y, blipclamp = 0.86f;
+        if(rpgmap) { game::getrpgminimaprect(w, h, s, x, y); blipclamp = 0.83f; }
+        else { s = 1800/4; x = 1800*w/h - s - s/10; y = s/10; }
         if(m_hold)
         {
             settexture("data/hud/blip_neutral.png", 3);
-            loopv(holdspawns) game::drawblip(d, x, y, s, holdspawns[i].o, false);
+            loopv(holdspawns) game::drawblip(d, x, y, s, holdspawns[i].o, false, blipclamp);
         }
         loopv(flags)
         {
             flag &f = flags[i];
             if(m_hold ? f.spawnindex < 0 : !ctfflagteam(f.team)) continue;
-            if(!m_hold) drawblip(d, x, y, s, i, false);
+            if(!m_hold) drawblip(d, x, y, s, i, false, blipclamp);
             if(f.owner)
             {
                 if(!m_hold && lastmillis%1000 >= 500) continue;
             }
             else if(f.droptime && (f.droploc.x < 0 || lastmillis%300 >= 150)) continue;
-            drawblip(d, x, y, s, i, true);
+            drawblip(d, x, y, s, i, true, blipclamp);
         }
-        if(d->state == CS_DEAD && (m_efficiency || !m_protect))
+        if(d->state == CS_DEAD && (m_efficiency || !m_protect) && !rpgmap)
         {
             int wait = respawnwait(d);
             if(wait>=0)

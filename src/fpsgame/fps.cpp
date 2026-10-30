@@ -2668,6 +2668,13 @@ namespace game
         mapy = ringcy - s*0.5f;
     }
 
+    // Battlegrounds (v0.1.40): RPG minimap fan rect for CTF blip re-targeting.
+    void getrpgminimaprect(int w, int h, float &s, float &x, float &y)
+    {
+        float compx, compy, comp, ringcx, ringcy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, x, y);
+    }
+
     void drawrpgquest(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
@@ -2942,7 +2949,7 @@ namespace game
         glEnd();
     }
 
-    void drawblip(fpsent *d, float x, float y, float s, const vec &pos, bool flagblip)
+    void drawblip(fpsent *d, float x, float y, float s, const vec &pos, bool flagblip, float maxdist)
     {
         float scale = calcradarscale();
         vec dir = d->o;
@@ -2950,7 +2957,7 @@ namespace game
         float size = flagblip ? 0.1f : 0.05f,
               xoffset = flagblip ? -2*(3/32.0f)*size : -size,
               yoffset = flagblip ? -2*(1 - 3/32.0f)*size : -size,
-              dist = dir.magnitude2(), maxdist = 0.86f; // new frame art: stay inside the 0.83-opening brass rim
+              dist = dir.magnitude2(); // battlegrounds: clamp is a parameter (FPS 0.86, RPG fan 0.83)
         if(dist >= maxdist) dir.mul(maxdist/dist);
         dir.rotate_around_z(-camera1->yaw*RAD);
         drawradar(x + s*0.5f*(1.0f + dir.x + xoffset), y + s*0.5f*(1.0f + dir.y + yoffset), size*s);
@@ -3581,6 +3588,65 @@ namespace game
         else if(ispaused()) drawprogress(cx, cy, 0, 1, cs, false, true, true, colour, blend*0.75f, 1.f, 0.5f, "PAUSED"); // paused
     }
 
+    // Battlegrounds (v0.1.40): top banners for CTF on RPG maps. Ed's rule
+    // (Oct 28): the battleground HUD is the RPG HUD plus mode banners on
+    // top, nothing else changed. The band is the vacant FPS scorebar band
+    // (suppressed on RPG maps), sized to end before the minimap cluster's
+    // left edge and clear the top-left feed. Team names are deliberately
+    // NOT drawn as text (stock names are zombie-shooter names); teams read
+    // by color + score + flag status until the medieval art pass renames
+    // them. All banner state is already on the client: no new protocol.
+    void drawctfbanners(fpsent *d, int w, int h)
+    {
+        if(!m_ctf || !rpg::mapactive(getclientmap())) return;
+        float X = w*1800.0f/h;
+        float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
+        float barw = min(1536.0f, 2.0f*(compx - X/2.0f) - 40.0f);
+        if(barw < 400) return; // too narrow to be useful; skip rather than overlap
+        float barh = 128.0f, barx = X/2.0f - barw/2.0f, bary = 10.0f;
+        float wingw = min(576.0f, barw*0.375f);
+        Texture *t = textureload("data/hud/scorebar.png", 3);
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        glColor4f(1.f, 1.f, 1.f, 1.f);
+        drawtexture(barx, bary, barw, barh);
+        t = textureload("data/hud/scorebar_wingacc.png", 3);
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        glColor4f(colorteam[0][0], colorteam[0][1], colorteam[0][2], 1.f);
+        drawtexture(barx, bary, wingw, barh);
+        glColor4f(colorteam[1][0], colorteam[1][1], colorteam[1][2], 1.f);
+        drawtexture(barx+barw, bary, -wingw, barh);
+        int s1 = cmode ? cmode->getteamscoreflag(1) : 0;
+        int s2 = cmode ? cmode->getteamscoreflag(2) : 0;
+        int f1 = cmode ? cmode->getflagstatus(1) : -1;
+        int f2 = cmode ? cmode->getflagstatus(2) : -1;
+        static const char *flagstat[3] = { "AT BASE", "CARRIED", "DROPPED" };
+        int secs = maplimit > 0 ? max(maplimit-lastmillis, 0)/1000 : -1;
+        pushfont(); setfont("default"); settextscale(0.7f);
+        draw_textx("CAPTURE THE FLAG", X/2.0f, bary+40, 255, 255, 255, 255, TEXT_CENTER_UP);
+        settextscale(1.f); popfont();
+        pushfont(); setfont("digit_white"); settextscale(1.4f);
+        if(secs >= 0) draw_textx("%d:%02d", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs/60, secs%60);
+        else draw_textx("--:--", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP);
+        settextscale(1.f); popfont();
+        pushfont(); setfont("digit_white"); settextscale(1.5f);
+        draw_textx("%d", barx+wingw/2, bary+70, colorteam[0][0]*255.f, colorteam[0][1]*255.f, colorteam[0][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, s1);
+        draw_textx("%d", barx+barw-wingw/2, bary+70, colorteam[1][0]*255.f, colorteam[1][1]*255.f, colorteam[1][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, s2);
+        settextscale(1.f); popfont();
+        if(f1 >= 0 && f1 < 3)
+        {
+            pushfont(); setfont("default"); settextscale(0.6f);
+            draw_textx(flagstat[f1], barx+wingw/2, bary+115, 255, 255, 255, 255, TEXT_CENTER_UP);
+            settextscale(1.f); popfont();
+        }
+        if(f2 >= 0 && f2 < 3)
+        {
+            pushfont(); setfont("default"); settextscale(0.6f);
+            draw_textx(flagstat[f2], barx+barw-wingw/2, bary+115, 255, 255, 255, 255, TEXT_CENTER_UP);
+            settextscale(1.f); popfont();
+        }
+    }
+
     void gameplayhud(int w, int h)
     {
         fpsent *d = hudplayer();
@@ -3610,6 +3676,11 @@ namespace game
         // RPG: the mode score bar is FPS furniture; hidden on RPG maps only.
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).
         if(!rpg::mapactive(getclientmap()) && needscorebar(player1)) drawscorebar(d, w, h); // draw scorebar
+
+        // Battlegrounds (v0.1.40): mode banners live in the vacant scorebar
+        // band on RPG maps when the mode is CTF (the FPS scorebar above is
+        // suppressed there, so the two never double-draw).
+        if(m_ctf && rpg::mapactive(getclientmap())) drawctfbanners(d, w, h);
 
         // RPG: the compass/radar is FPS furniture; hidden on RPG maps only.
         // FPS/battleground modes are untouched (gate only suppresses on RPG maps).

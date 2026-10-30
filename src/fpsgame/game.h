@@ -1205,6 +1205,9 @@ namespace game
         virtual void drawblips(fpsent *d, int w, int h, int x, int y, int s, float rscale) {}
         virtual int getteamscore(const char *team) { return 0; }
         virtual void getteamscores(vector<teamscore> &scores) {}
+        // Battlegrounds (v0.1.40): CTF banner data. Defaults mean "no flag info".
+        virtual int getteamscoreflag(int team) { return 0; }
+        virtual int getflagstatus(int team) { return -1; } // -1 none; 0 at base, 1 carried, 2 dropped
         virtual fpsent *getclient(int cn) { return NULL; }
         virtual void update(int curtime) {}
         virtual void message(int type, ucharbuf &p) {}
@@ -1277,7 +1280,9 @@ namespace game
     extern float calcradarscale();
     extern void drawminimap(fpsent *d, float x, float y, float s);
     extern void drawradar(float x, float y, float s);
-    extern void drawblip(fpsent *d, float x, float y, float s, const vec &pos, bool flagblip);
+    extern void drawblip(fpsent *d, float x, float y, float s, const vec &pos, bool flagblip, float maxdist = 0.86f);
+    // Battlegrounds (v0.1.40): RPG minimap fan rect, for CTF blip re-targeting on RPG maps.
+    extern void getrpgminimaprect(int w, int h, float &s, float &x, float &y);
     extern void drawprogress(int x, int y, float start, float length, float size, bool left, bool sec, bool millis = false, const vec &colour = vec(1, 1, 1), float fade = 1, float skew = 1, float textscale = 1, const char *text = NULL, ...) PRINTFARGS(13, 14);
 
 
