@@ -3344,7 +3344,7 @@ namespace server
                 {
                     bg_queue_active = false;
                     bg_match_starting = true;
-                    changemap("krpg", 7);
+                    changemap("ctf_obelisk_b1", 7);
                 }
             }
         }

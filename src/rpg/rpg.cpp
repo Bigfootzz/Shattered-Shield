@@ -664,12 +664,13 @@ namespace rpg
 
     // --- inventory & equipment v1 (milestone step 4) ---
     // The RPG layer (equipment effects, loot, abilities-as-RPG) lives on the
-    // RPG maps only: rpg_01 is the world, krpg the battleground test map.
+    // RPG maps only: rpg_01 is the world, krpg the battleground test map,
+    // ctf_obelisk_b1 the CTF castle map (Abbott's CTF queue retarget, v0.1.40).
     // Everything else keeps pure FPS behavior.
     bool mapactive(const char *map)
     {
         if(!map || !map[0]) return false;
-        return !strcmp(map, "rpg_01") || !strcmp(map, "krpg");
+        return !strcmp(map, "rpg_01") || !strcmp(map, "krpg") || !strcmp(map, "ctf_obelisk_b1");
     }
 
     // Write the session cache's inventory + equipment rows for one character.

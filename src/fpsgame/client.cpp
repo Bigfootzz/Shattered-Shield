@@ -2845,7 +2845,7 @@ namespace game
                 // her (player yaw = Abbott yaw + 180, the /GPS rule),
                 // so she can be talked to immediately. Consumed on
                 // first use so later respawns use normal spawns.
-                if(s == player1 && bgprevmode == 7 && !strcmp(bgprevmap, "krpg") && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
+                if(s == player1 && bgprevmode == 7 && (!strcmp(bgprevmap, "krpg") || !strcmp(bgprevmap, "ctf_obelisk_b1")) && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
                 {
                     bgprevmap[0] = '\0'; bgprevmode = 0;
                     int ai = rpg::npcindexbyid("abbott");
