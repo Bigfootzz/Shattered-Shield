@@ -1727,6 +1727,14 @@ namespace game
         }
         startgame();
         if(rpg_loadprofile) conoutf("rpgprof: changemapserv(%s): load_world+startgame %dms", name ? name : "", SDL_GetTicks()-t0);
+        // v0.1.40 (Ed Oct 30, .39 note 5): entering an RPG map clears the
+        // visible console, so the map-load chatter (LOADED entities, the
+        // fps-header warning, READ MAP, GAME MODE, RECORDING DEMO) is off
+        // the screen. clearconsole pops only the visible conlines buffer:
+        // log-file/stdout history is intact, and demo recording itself is
+        // NOT disabled. Gated on M_RPG so battleground/FPS loads keep their
+        // existing console behavior.
+        if(m_check(mode, M_RPG)) execute("clearconsole");
     }
 
     int getmode() { return gamemode; };
