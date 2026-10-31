@@ -963,12 +963,12 @@ namespace server
     void makeInfected(clientinfo *victim, int infectionType, bool forceNetworking); // defined below
     void rpgmana_cmd(tagval *args, int numargs)
     {
-        if(numargs < 1) { conoutf("usage: rpgmana <name>"); return; }
+        if(numargs < 1) { conoutf("usage: rpgmana_sv <name>"); return; }
         int mana = 0, maxmana = 0;
         if(!rpg::getmana(args[0].getstr(), mana, maxmana)) { conoutf("rpgmana: no session for '%s'", args[0].getstr()); return; }
         conoutf("rpgmana: %s -- %d/%d", args[0].getstr(), mana, maxmana);
     }
-    COMMANDN(rpgmana, rpgmana_cmd, "sV");
+    COMMANDN(rpgmana_sv, rpgmana_cmd, "sV");
 
     // TEST-ONLY HP pin for rpgspawnmonster <hp>: applied inside sendspawn
     // (after spawnstate resets health to the monster-type default), so the
