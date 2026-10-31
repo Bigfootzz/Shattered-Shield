@@ -340,6 +340,60 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     defaultshader->set();
     glColor3f(1, 1, 1);
 
+    // Battlegrounds load screen (Oct 31, Ed's request): when a battleground
+    // match map is loading, show a dedicated screen instead of the generic
+    // one -- the existing loadscreen art as the base, a dark plate, and the
+    // map display name + mode + prepare line, centered in a middle band.
+    // This draws on EVERY progress step of the load, which covers both load
+    // paths: menu/startup loads (where restorebackground() already drew the
+    // logo art) and in-game changemap loads (where restorebackground() is
+    // skipped because a frame was rendered, so without this the screen
+    // would stay the frozen last frame). The progress bar below still
+    // draws as usual and never overlaps: the text band ends well above it
+    // (bar top sits at h - 0.1125*min(w,h); the band ends near 0.55*h).
+    {
+        const char *bgmap = NULL, *bgmode = NULL, *bgflavor = NULL;
+        if(game::getbgloadinfo(bgmap, bgmode, bgflavor))
+        {
+            // Full-bleed base art (covers the frozen frame on in-game
+            // changemaps; identical to what restorebackground draws on
+            // menu/startup loads).
+            settexture("packages/ui/rpg/menu/loadscreen.png", 0);
+            glColor4f(1.f, 1.f, 1.f, 1.f);
+            glBegin(GL_TRIANGLE_STRIP);
+            glTexCoord2f(0, 0); glVertex2f(0, 0);
+            glTexCoord2f(1, 0); glVertex2f(w, 0);
+            glTexCoord2f(0, 1); glVertex2f(0, h);
+            glTexCoord2f(1, 1); glVertex2f(w, h);
+            glEnd();
+            // Text block metrics (same pattern as renderbackground's
+            // caption: pixel width = text_width * tsz).
+            float m = float(min(w, h));
+            float tszMap = 0.085f*m/FONTH, tszMode = 0.05f*m/FONTH, tszFlav = 0.035f*m/FONTH;
+            float wMap = text_width(bgmap)*tszMap, wMode = text_width(bgmode)*tszMode, wFlav = text_width(bgflavor)*tszFlav;
+            float bw = max(wMap, max(wMode, wFlav)) + 0.08f*m;
+            float y0 = 0.30f*h;
+            float bh = (0.085f + 0.02f + 0.05f + 0.015f + 0.035f)*m + 0.06f*m;
+            // Dark plate behind the text for legibility over the art.
+            glDisable(GL_TEXTURE_2D);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glColor4f(0.f, 0.f, 0.f, 0.55f);
+            glBegin(GL_QUADS);
+            glVertex2f(0.5f*(w - bw), y0 - 0.03f*m); glVertex2f(0.5f*(w + bw), y0 - 0.03f*m);
+            glVertex2f(0.5f*(w + bw), y0 + bh); glVertex2f(0.5f*(w - bw), y0 + bh);
+            glEnd();
+            glEnable(GL_TEXTURE_2D);
+            // Map display name (gold), mode (white), flavor (light gray).
+            float y = y0;
+            glPushMatrix(); glTranslatef(0.5f*(w - wMap), y, 0); glScalef(tszMap, tszMap, 1); draw_text(bgmap, 0, 0, 250, 179, 66, 255); glPopMatrix();
+            y += 0.085f*m + 0.02f*m;
+            glPushMatrix(); glTranslatef(0.5f*(w - wMode), y, 0); glScalef(tszMode, tszMode, 1); draw_text(bgmode, 0, 0, 255, 255, 255, 255); glPopMatrix();
+            y += 0.05f*m + 0.015f*m;
+            glPushMatrix(); glTranslatef(0.5f*(w - wFlav), y, 0); glScalef(tszFlav, tszFlav, 1); draw_text(bgflavor, 0, 0, 200, 200, 200, 255); glPopMatrix();
+        }
+    }
+
     float fh = 0.075f*min(w, h), fw = fh*10,
           fx = renderedframe ? w - fw - fh/4 : 0.5f*(w - fw),
           fy = renderedframe ? fh/4 : h - fh*1.5f;

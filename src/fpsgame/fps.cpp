@@ -15,6 +15,12 @@ namespace game
     // Battlegrounds (v0.1.40): queue/start countdown ends (lastmillis;
     // 0 = inactive), queue mode, prev map/mode for the Abbott return spawn.
     int bgqueue_until = 0, bgqueue_mode = 0, bgstart_until = 0, bgprevmode = 0;
+    // Battlegrounds (v0.1.41): Cancel button state. cancel_sent blocks
+    // double-sends for the current queue (re-armed by N_BG_QUEUE);
+    // cursorfreed tracks that this client freed the cursor for the
+    // button, so queue end restores the grab exactly once.
+    bool bgqueue_cancel_sent = false;
+    static bool bgqueue_cursorfreed = false;
     string bgprevmap;
     int respawnent = -1;
     int lasthit = 0, lastspawnattempt = 0;
@@ -3326,6 +3332,21 @@ namespace game
             else if(attrs[i] == rpg::ATTR_VITALITY) tex = "packages/ui/rpg/icons/icon_buff_vitality.png";
             else continue; // no display icon defined for this buff type yet
             float ix = startx + i*(B + igap);
+            // v0.1.41 prep (Ed, Oct 31): drop shadow so the clear-glass
+            // bottles read against bright backgrounds. rpg_drawtexuv forces
+            // white, so the shadow pass goes through drawquad directly:
+            // same texture, black, offset down-right, then the real icon
+            // on top. No blur (that would need a new asset); the offset
+            // silhouette is the shadow. Values: offset (8, 10) virtual
+            // units (~3-4px at 768p height), black at 0.65 alpha. The
+            // shadow ends 8 units before the next icon (igap 12), so rows
+            // never bleed into each other. Solid backing plate stays the
+            // fallback if this does not read in game.
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glColor4f(0, 0, 0, 0.65f);
+            drawquad(ix + 8.0f, y + 10.0f, B, B, 0, 0, 1, 1, false, false);
+            glColor4f(1, 1, 1, 1.0f);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex(tex)->id);
             rpg_drawtexuv(ix, y, B, B, 0, 0, 1, 1);
             int mins = (exps[i] - now + 59) / 60; // ceil: 3599s -> 60m, 60s -> 1m
@@ -3651,6 +3672,51 @@ namespace game
         }
     }
 
+    // Battleground queue Cancel button (v0.1.41, Ed's pick Oct 31):
+    // fixed geometry in the overlay's virtual space (y down from top,
+    // X = w*1800/h wide, same space as the title/mode/time lines).
+    // 320 wide comfortably holds "CANCEL" at default 0.8 with padding
+    // (worst-case cap advances bound it under 240); 80 tall gives the
+    // 57-tall label room to breathe. Top at 240 = one overlay
+    // line-step below the time line (180) with a 22-unit gap under
+    // the time text (digit font 32 tall at 1.2 = 38, bottom 218).
+    static const float bgcancel_w = 320.0f, bgcancel_h = 80.0f, bgcancel_y = 240.0f;
+    static void bgcancelrect(float X, float &bx, float &by, float &bw, float &bh)
+    {
+        bw = bgcancel_w; bh = bgcancel_h;
+        bx = X/2.0f - bw/2.0f; by = bgcancel_y;
+    }
+
+    // menukey hook (3dgui.cpp): left-click first refusal for the queue
+    // Cancel button. Returns true only when the click actually lands
+    // on the button while a queue is active and no cancel was already
+    // sent: then the click is consumed (the MOUSE1 attack bind never
+    // fires) and the cancel is sent. Anything else returns false and
+    // input flows on untouched. The overlay clears locally at once;
+    // the server ack re-clears it (idempotent). If the click raced the
+    // changemap tick, the server ignores it (queue already gone) and
+    // the client is in the match anyway — leaving a match is separate
+    // work, out of scope.
+    bool bgqueuecancelclick()
+    {
+        if(bgqueue_until <= lastmillis || bgqueue_cancel_sent) return false;
+        int mx = 0, my = 0;
+        SDL_GetMouseState(&mx, &my);
+        int ww = 0, hh = 0;
+        if(screen) SDL_GetWindowSize(screen, &ww, &hh);
+        if(!ww || !hh) return false;
+        float X = ww*1800.0f/hh;
+        float bx, by, bw, bh;
+        bgcancelrect(X, bx, by, bw, bh);
+        float vx = mx*1800.0f/hh, vy = my*1800.0f/hh;
+        if(vx < bx || vx > bx+bw || vy < by || vy > by+bh) return false;
+        bgqueue_cancel_sent = true;
+        bgqueue_until = 0; bgqueue_mode = 0;
+        if(bgqueue_cursorfreed) { bgqueue_cursorfreed = false; grabinput = true; inputgrab(true); }
+        addmsg(N_BG_CANCEL, "r");
+        return true;
+    }
+
     void gameplayhud(int w, int h)
     {
         fpsent *d = hudplayer();
@@ -3693,14 +3759,65 @@ namespace game
         // the server's N_BG_QUEUE / N_BG_START receipt time.
         if(bgqueue_until > lastmillis)
         {
+            // The button needs a real cursor: free input while queued
+            // (mouse-look pauses for the 45s; WASD still moves). The
+            // engine re-grabs on window focus gain, so re-assert every
+            // frame; the else-branch below restores on queue end.
+            if(grabinput) { grabinput = false; inputgrab(false); }
+            bgqueue_cursorfreed = true;
             float X = w*1800.0f/h;
             int secs = (bgqueue_until - lastmillis + 999)/1000;
+            // v0.1.41 prep (Ed, Oct 31): the overlay reads as off-center in
+            // game photos. The centering math itself is sound (TEXT_CENTER_UP
+            // at X/2, proven centered in the headless queue screenshot), but
+            // two real defects made it LOOK off-center: (1) the mode label
+            // never rendered — digit_white has glyphs only for - . / 0-9 :
+            // (data/hud/digit_font.cfg), so "CAPTURE THE FLAG" was silently
+            // dropped and the timer line showed a bare "0:17"; (2) white
+            // text washes out against bright sky. Fix: the mode label gets
+            // its own centered line in the default font (visible), the time
+            // stays in digit_white, and every line gets TEXT_SHADOW. Each
+            // line is independently TEXT_CENTER_UP at X/2, so the block is
+            // centered by construction. (The start-countdown line below has
+            // the same digit_white letter-drop defect — "MATCH STARTS IN %d"
+            // renders as digits only — left untouched pending Ed's word.)
             pushfont(); setfont("default"); settextscale(0.8f);
-            draw_textx("BATTLEGROUND QUEUE", X/2.0f, 60, 255, 255, 255, 255, TEXT_CENTER_UP);
+            draw_textx("BATTLEGROUND QUEUE", X/2.0f, 60, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
+            settextscale(1.f); popfont();
+            pushfont(); setfont("default"); settextscale(0.8f);
+            draw_textx(bgqueue_mode == 7 ? "CAPTURE THE FLAG" : "BATTLEGROUND", X/2.0f, 120, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
             settextscale(1.f); popfont();
             pushfont(); setfont("digit_white"); settextscale(1.2f);
-            draw_textx("%s  %d:%02d", X/2.0f, 130, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, bgqueue_mode == 7 ? "CAPTURE THE FLAG" : "BATTLEGROUND", secs/60, secs%60);
+            draw_textx("%d:%02d", X/2.0f, 180, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW, -1, -1, secs/60, secs%60);
             settextscale(1.f); popfont();
+            // Cancel button (v0.1.41): fixed rect, centered, same
+            // TEXT_SHADOW style as the overlay lines. Click routing is
+            // game::bgqueuecancelclick via menukey (3dgui.cpp); this
+            // block only draws. The button lives only while the queue
+            // block runs: at changemap the overlay (and the button)
+            // is gone, so there is no cancel affordance once the
+            // match starts.
+            float bx, by, bw, bh;
+            bgcancelrect(X, bx, by, bw, bh);
+            glDisable(GL_TEXTURE_2D);
+            glColor4f(1, 1, 1, 0.25f);
+            drawquad(bx, by, bw, bh, 0, 0, 1, 1, false, false);
+            glColor4f(0, 0, 0, 0.60f);
+            drawquad(bx+3, by+3, bw-6, bh-6, 0, 0, 1, 1, false, false);
+            glEnable(GL_TEXTURE_2D);
+            glColor4f(1, 1, 1, 1);
+            pushfont(); setfont("default"); settextscale(0.8f);
+            int btw = 0, bth = 0;
+            text_bounds("CANCEL", btw, bth);
+            draw_textx("CANCEL", X/2.0f, by + (bh - bth)/2.0f, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
+            settextscale(1.f); popfont();
+        }
+        else if(bgqueue_cursorfreed)
+        {
+            // Queue ended (ack, changemap, or timer expiry): hand the
+            // mouse back exactly as it was.
+            bgqueue_cursorfreed = false;
+            grabinput = true; inputgrab(true);
         }
         if(bgstart_until > lastmillis)
         {

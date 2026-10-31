@@ -3326,6 +3326,28 @@ namespace server
         return true;
     }
 
+    // Leave the queue (N_BG_CANCEL, v0.1.41). Removes the member and
+    // acks with N_BG_QUEUE 0,0 so the client clears its overlay; the
+    // ack is sent even if the client was not in the list, so a
+    // client/server disagreement still clears. If the queue empties,
+    // dissolve immediately (same two lines as bg_tick's empty path)
+    // so bots never linger. If the queue is already gone (cancel raced
+    // the changemap tick), ignore: the client is in the match, and
+    // leaving a match is separate work. Queue join changes no RPG
+    // state (no teleport, no flag), so cancel needs no
+    // position/inventory restore.
+    static void bg_queue_cancel(clientinfo *cq)
+    {
+        if(!cq || !bg_queue_active) return;
+        loopvrev(bg_queue_members) if(bg_queue_members[i] == cq->clientnum) bg_queue_members.remove(i);
+        sendf(cq->clientnum, 1, "ri3", N_BG_QUEUE, 0, 0);
+        if(bg_queue_members.empty())
+        {
+            bg_queue_active = false;
+            bg_deletebots();
+        }
+    }
+
     static void bg_tick()
     {
         if(bg_queue_active)
@@ -6484,6 +6506,11 @@ namespace server
             {
                 int idx = getint(p);
                 if(cq) rpg_respond(cq, idx);
+                break;
+            }
+            case N_BG_CANCEL: // battlegrounds v0.1.41: leave the queue
+            {
+                if(cq) bg_queue_cancel(cq);
                 break;
             }
             // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---

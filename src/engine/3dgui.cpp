@@ -1336,6 +1336,15 @@ bool menukey(int code, bool isdown, int cooked)
                 return true;
         }
 
+        // Shattered Shield battlegrounds (v0.1.41): the queue Cancel
+        // button is a raw HUD draw, not a GUI window, so GUI
+        // hit-testing never sees it. Give the game first refusal on
+        // left-clicks nothing else consumed: a click on the button
+        // sends the cancel and returns true here, so the MOUSE1 attack
+        // bind never fires for a button click. Menus, console, and
+        // field editing all run before this point and still win.
+        if(code==-1 && isdown && game::bgqueuecancelclick()) return true;
+
         return false;
     }
     switch(code)

@@ -724,6 +724,7 @@ enum
     // Battlegrounds (v0.1.40)
     N_BG_QUEUE,     // s->c: battleground queue status (mode int, seconds remaining; seconds <= 0 = clear)
     N_BG_START,     // s->c: match start countdown (seconds)
+    N_BG_CANCEL,    // c->s: leave the battleground queue (no args) — v0.1.41, Ed's Cancel button pick
     N_RPG_FLOATDMG, // s->c: floating damage number (damage, x, y, z as DMF ints) -- to the attacker only
     NUMSV
 };
@@ -763,7 +764,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_RPG_FLOATDMG, 5,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_RPG_FLOATDMG, 5,
     -1
 };
 
@@ -1290,6 +1291,7 @@ namespace game
     extern void getrpgminimaprect(int w, int h, float &s, float &x, float &y);
     // Battlegrounds (v0.1.40): queue/start countdown ends (lastmillis; 0 = inactive), queue mode, prev map/mode for the Abbott return spawn.
     extern int bgqueue_until, bgqueue_mode, bgstart_until, bgprevmode;
+    extern bool bgqueue_cancel_sent; // Cancel sent for the current queue (blocks double-sends; re-armed by N_BG_QUEUE)
     extern string bgprevmap;
     extern void drawprogress(int x, int y, float start, float length, float size, bool left, bool sec, bool millis = false, const vec &colour = vec(1, 1, 1), float fade = 1, float skew = 1, float textscale = 1, const char *text = NULL, ...) PRINTFARGS(13, 14);
 

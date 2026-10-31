@@ -1669,6 +1669,30 @@ namespace game
     static string incomingmapname = "";
     const char *getincomingmapname() { return incomingmapname; }
 
+    // Battlegrounds load screen flag (Oct 31): true only between
+    // changemapserv's load_world() and startgame() for a battleground
+    // changemap, so the dedicated load screen shows exactly for
+    // battleground match loads — never for RPG loads, menus, edits, or
+    // in-match progress calls (a texture load mid-match must not redraw it).
+    static bool bgloading = false;
+
+    bool getbgloadinfo(const char *&mapdisplay, const char *&modelabel, const char *&flavor)
+    {
+        if(!bgloading) return false;
+        // Battleground map display names (Ed's naming). Only Stormhold
+        // exists today; Frostgate Keep is a future KOTH map with no .ogz
+        // yet and is deliberately absent until it ships.
+        if(strcmp(incomingmapname, "ctf_obelisk_b1")) return false;
+        mapdisplay = "Stormhold";
+        // Only mode 7 (CTF) is used by the battleground flow today; the
+        // fallback covers any future battleground mode id.
+        modelabel = gamemode == 7 ? "Capture the Flag" : server::modename(gamemode);
+        // Neutral prepare line: the Abbott flavor draft was never approved,
+        // so no lore line is used here until Ed supplies one.
+        flavor = "Prepare for battle.";
+        return true;
+    }
+
     void changemapserv(const char *name, int mode)        // forced map change from the server
     {
         // Battlegrounds (v0.1.40): remember the previous map/mode for
@@ -1695,6 +1719,11 @@ namespace game
         if(editmode) toggleedit();
         if(m_demo) { entities::resetspawns(); return; }
         copystring(incomingmapname, name ? name : "");
+        // Battlegrounds load screen (Oct 31): arm the dedicated screen for
+        // this load only when it is a battleground match changemap (mode 7
+        // into Stormhold). Cleared after startgame() below; the m_demo
+        // early-return above never arms it.
+        bgloading = (mode == 7 && name && !strcmp(name, "ctf_obelisk_b1"));
         // --- RPG: editor Phase 1 (Oct 24, 2026) ---
         // Load per-map NPCs BEFORE the preload loop below, so the loop
         // preloads the models for THIS map's NPC file, not the previous map's.
@@ -1726,6 +1755,7 @@ namespace game
             senditemstoserver = false;
         }
         startgame();
+        bgloading = false;
         if(rpg_loadprofile) conoutf("rpgprof: changemapserv(%s): load_world+startgame %dms", name ? name : "", SDL_GetTicks()-t0);
         // v0.1.40 (Ed Oct 30, .39 note 5): entering an RPG map clears the
         // visible console, so the map-load chatter (LOADED entities, the
@@ -3443,7 +3473,7 @@ namespace game
             {
                 int mode = getint(p), secs = getint(p);
                 if(secs <= 0 || mode <= 0) { bgqueue_until = 0; bgqueue_mode = 0; }
-                else { bgqueue_mode = mode; bgqueue_until = lastmillis + secs*1000; }
+                else { bgqueue_mode = mode; bgqueue_until = lastmillis + secs*1000; bgqueue_cancel_sent = false; } // fresh queue re-arms Cancel
                 break;
             }
             case N_BG_START:

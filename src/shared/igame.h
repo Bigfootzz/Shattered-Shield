@@ -90,6 +90,8 @@ namespace game
     extern bool canjump();
     extern bool allowmove(physent *d);
     extern void doattack(bool on, bool altfire);
+    extern bool bgqueuecancelclick(); // battleground queue Cancel button hit: true = click consumed (cancel sent)
+    extern bool getbgloadinfo(const char *&mapdisplay, const char *&modelabel, const char *&flavor); // battlegrounds load screen: true only while a battleground match map is loading (flag set in changemapserv around load_world, cleared after startgame); fills the display strings
     extern dynent *iterdynents(int i);
     extern int numdynents();
     extern void rendergame(bool mainpass);
