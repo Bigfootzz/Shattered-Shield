@@ -93,7 +93,16 @@ namespace game
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
             if(!mdl) break;
-            if(i != playermodel && (!multiplayer(false) || forceplayermodels || (!mdl->selectable && !allplayermodels))) continue;
+            // Battlegrounds queue-freeze fix (Oct 31): in a solo local game
+            // multiplayer() is false, so the old guard skipped every model
+            // but the player's own — but battleground bots spawn with random
+            // selectable models, and their first rendered frame then loaded
+            // those bodies + vweps synchronously and froze the RPG world
+            // for ~10s at fill time. On RPG maps (rpg_01, krpg,
+            // ctf_obelisk_b1 — the whole queue flow), warm all selectable
+            // models at world entry so the cost lands on the loading screen
+            // (with progress) instead. FPS solo maps keep the old behavior.
+            if(i != playermodel && ((!multiplayer(false) && !rpgmap) || forceplayermodels || (!mdl->selectable && !allplayermodels))) continue;
             if(m_teammode)
             {
                 preloadmodel(mdl->blueteam);
