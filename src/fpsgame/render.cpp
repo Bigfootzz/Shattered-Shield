@@ -93,6 +93,9 @@ namespace game
         // below, so warm it once here (loadmodel caches by name) instead
         // of paying a first-frame load hitch like the old vwep path did.
         preloadmodel("playermodels/attachments/cape");
+        // Magi cape variant (Nov 1): the Magi models wear a variant
+        // re-baked in Magi neck-local space (same colors), so warm it too.
+        preloadmodel("playermodels/attachments/cape_magi");
         loopi(NUMPLAYERMODELS)
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
@@ -256,22 +259,31 @@ namespace game
                 a[ai++] = modelattach("tag_tip", &d->pvpglowpos);
             }
         }
-        // --- PvP cape (Nov 1): one design for all classes, a rigid drape
+        // --- PvP cape (Nov 1): one design, two bakes — a rigid drape
         // skinned to a single root joint and baked in neck-local space
         // (see packages/models/playermodels/attachments/cape/iqm.cfg).
         // The tag is defined with IDENTITY offset in each player model's
         // iqm.cfg (neck_01 on the ranger/warrior rig, Neck on the Magi
-        // rig); any offset would shift the drape off the back. Default
+        // rig); any offset would shift the drape off the back. Magi
+        // wear a variant re-baked in Magi neck-local space (same
+        // charcoal + gold colors, same set): the shared drape is
+        // twisted for the Magi neck frame and buries in the robe
+        // bell, so wizard_male / sorceress_female get
+        // playermodels/attachments/cape_magi (see its iqm.cfg). Default
         // anim (-1): the cape has no frames, so it renders in bind pose
         // at the animated neck tag — the same static-attach pattern as
-        // the bow vwep. Unconditional on purpose: no cape ownership or
+        // the bow vwep. Still ungated on purpose: no cape ownership or
         // skin-selection system exists yet, so there is nothing to gate
-        // on (that gating is a separate decision for Ed). Fail-safe:
+        // on beyond the model bake (that gating is a separate decision
+        // for Ed). Fail-safe:
         // link() returns false when tag_cape is missing (infected /
         // zombie models carry no such tag) and the entry is skipped with
         // the body still rendering; a missing cape file is skipped the
         // same way by rendermodel.
-        a[ai++] = modelattach("tag_cape", "playermodels/attachments/cape");
+        // Magi wear the variant, everyone else the shared cape.
+        // mdl.ffa is the model path (identical across team skins).
+        bool magicape = !strcmp(mdl.ffa, "playermodels/wizard_male") || !strcmp(mdl.ffa, "playermodels/sorceress_female");
+        a[ai++] = modelattach("tag_cape", magicape ? "playermodels/attachments/cape_magi" : "playermodels/attachments/cape");
         if(d->state==CS_ALIVE)
         {
             if((testquad || d->quadmillis) && mdl.quad)
