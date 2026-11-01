@@ -89,6 +89,10 @@ namespace game
         // (mdl->quad) is never drawn there - skip it (load-time fix, Oct 22).
         // The vwep (hand weapon) IS drawn in third person; keep it.
         bool rpgmap = rpg::mapactive(getincomingmapname());
+        // PvP cape (Nov 1): attached to every player model in renderplayer
+        // below, so warm it once here (loadmodel caches by name) instead
+        // of paying a first-frame load hitch like the old vwep path did.
+        preloadmodel("playermodels/attachments/cape");
         loopi(NUMPLAYERMODELS)
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
@@ -219,7 +223,7 @@ namespace game
             hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
-        modelattach a[6]; // 5 entries max (weapon, powerup, shield, muzzle, tip) + terminator
+        modelattach a[7]; // 6 entries max (weapon, tip, powerup, shield, cape, muzzle) + terminator
         // v0.1.16: Revelade FPS vweps removed (Ed). Vweps organized by class:
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
@@ -252,6 +256,22 @@ namespace game
                 a[ai++] = modelattach("tag_tip", &d->pvpglowpos);
             }
         }
+        // --- PvP cape (Nov 1): one design for all classes, a rigid drape
+        // skinned to a single root joint and baked in neck-local space
+        // (see packages/models/playermodels/attachments/cape/iqm.cfg).
+        // The tag is defined with IDENTITY offset in each player model's
+        // iqm.cfg (neck_01 on the ranger/warrior rig, Neck on the Magi
+        // rig); any offset would shift the drape off the back. Default
+        // anim (-1): the cape has no frames, so it renders in bind pose
+        // at the animated neck tag — the same static-attach pattern as
+        // the bow vwep. Unconditional on purpose: no cape ownership or
+        // skin-selection system exists yet, so there is nothing to gate
+        // on (that gating is a separate decision for Ed). Fail-safe:
+        // link() returns false when tag_cape is missing (infected /
+        // zombie models carry no such tag) and the entry is skipped with
+        // the body still rendering; a missing cape file is skipped the
+        // same way by rendermodel.
+        a[ai++] = modelattach("tag_cape", "playermodels/attachments/cape");
         if(d->state==CS_ALIVE)
         {
             if((testquad || d->quadmillis) && mdl.quad)
