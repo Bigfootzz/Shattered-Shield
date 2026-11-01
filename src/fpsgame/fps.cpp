@@ -2732,26 +2732,55 @@ namespace game
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, x, y);
     }
 
+    // v0.1.43 (Nov 1, multi-quest tracker): up to 4 tracked quests stacked
+    // down the right side, with a collapse button at the top of the box.
+    // Hit-rect in virtual coords (1800-tall space), written by
+    // drawrpgquest each frame it draws and cleared (-1) at entry, so a
+    // stale rect never eats clicks — same pattern as the hotbar/radar
+    // rects. Collapse state is file-static (persists across frames and
+    // map changes within the session, like rpg_radarzoomidx); default is
+    // EXPANDED. No saved-settings persistence.
+    static float rpg_questcollapse_rect[4] = {-1, -1, -1, -1};
+    static bool rpg_questcollapsed = false;
+    bool rpg_questcollapseclick(float vx, float vy)
+    {
+        if(!rpg::mapactive(getclientmap())) return false;
+        if(rpg_questcollapse_rect[0] >= 0 && vx >= rpg_questcollapse_rect[0] && vx < rpg_questcollapse_rect[2] &&
+           vy >= rpg_questcollapse_rect[1] && vy < rpg_questcollapse_rect[3])
+        {
+            rpg_questcollapsed = !rpg_questcollapsed;
+            return true;
+        }
+        return false;
+    }
+
     void drawrpgquest(int w, int h)
     {
+        // Clear the collapse hit-rect FIRST, before any early return, so
+        // an off-map / spectator / no-quest frame never leaves a stale
+        // rect behind to eat clicks (hotbar pattern).
+        loopi(4) rpg_questcollapse_rect[i] = -1;
         if(!rpg::mapactive(getclientmap())) return;
-        int qid = 0, st = -1, kills = 0, need = 0;
-        if(!rpg::getclientquest(qid, st, kills, need)) return;
-        const rpg::questdef *qd = rpg::questdefbyid(qid);
-        if(!qd || !qd->name[0]) return;
+        // Multi-quest tracker: collect up to 4 in-progress quests
+        // (lowest-id first, same order as the old single-quest lookup).
+        // Show ONLY active ones (1-4 plates, never empty plates); draw
+        // nothing when none are active (old behavior).
+        int qids[4], sts[4], kills[4], needs[4];
+        int nq = rpg::getclientquests(qids, sts, kills, needs, 4);
+        if(nq <= 0) return;
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*1800.0f/h;
         // Ed's frame art (Oct 28): shared composite geometry from
-        // rpg_mmgeom (above). The plate's right edge stays at the
+        // rpg_mmgeom (above). The plates' right edge stays at the
         // composite's right edge (rx+rs = X - s/20, unchanged), and
-        // its top drops below the bottom button circles (rim bottom
+        // the top drops below the bottom button circles (rim bottom
         // 0.9928 of the composite) plus one 24-unit gap — the old
         // position would sit on top of the circles.
         float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
         int rs = int(s), rx = int(X - rs - rs/20);
-        float ty = compy + 0.9928f*comp + 24.0f;
+        float ty0 = compy + 0.9928f*comp + 24.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -2761,23 +2790,54 @@ namespace game
         // text with 16px padding on each side.
         float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
         float saveScale = gtextscale;
-        settextscale(30.0f/baseh); float nmw = text_widthf(qd->name);
-        // quest engine v2: the server sends the objective display text
-        // (N_RPG_QTEXT); kill quests fall back to kills/need.
-        static string progbuf;
-        char objtext[160];
-        const char *prog = NULL;
-        if(rpg::getclientquesttext(qid, objtext, sizeof(objtext))) prog = objtext;
-        else { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
-        settextscale(26.0f/baseh); float pgw = text_widthf(prog);
+        // Collapse button: a 30x30 header button at the TOP of the
+        // tracker box, right edge flush with the plates' right edge
+        // (rx+rs). Its top sits exactly where the old single plate's
+        // top sat (ty0 - 10), which the Oct 28 geometry already proved
+        // clear of the bottom button circles; the plates shift down by
+        // button height + gap so the button never overlaps plate text.
+        // The button position depends only on the minimap geometry, so
+        // it is identical in expanded and collapsed states and the
+        // hit-test always matches what is drawn.
+        const float btn = 30.0f, btngap = 8.0f;
+        float bxl = rx + rs - btn, bxr = rx + rs;
+        float byt = ty0 - 10.0f, byb = byt + btn;
+        rpg_solidquad(bxl, byt, btn, btn, 0.0f, 0.0f, 0.0f, 0.72f);
+        rpg_chattextc(rpg_questcollapsed ? "+" : "-", bxl + btn/2, byt + btn/2, 26.0f, 1.0f, 1.0f, 1.0f);
+        rpg_questcollapse_rect[0] = bxl; rpg_questcollapse_rect[1] = byt;
+        rpg_questcollapse_rect[2] = bxr; rpg_questcollapse_rect[3] = byb;
+        if(!rpg_questcollapsed)
+        {
+            // Stacked plates, full row height (no compaction: 4 plates
+            // + gaps run ~410 units down the side in 1800-tall space,
+            // which Ed explicitly approved). Each plate reuses the old
+            // single-plate drawing (fonts, colors, padding, true-width
+            // measurement, right-alignment), shifted down per quest.
+            const float plateh = 38.0f + 26.0f + 20.0f, plategap = 12.0f;
+            loopi(nq)
+            {
+                const rpg::questdef *qd = rpg::questdefbyid(qids[i]);
+                if(!qd || !qd->name[0]) continue;
+                float ty = ty0 + btn + btngap + i*(plateh + plategap);
+                settextscale(30.0f/baseh); float nmw = text_widthf(qd->name);
+                // quest engine v2: the server sends the objective display text
+                // (N_RPG_QTEXT); kill quests fall back to kills/need.
+                string progbuf;
+                char objtext[160];
+                const char *prog = NULL;
+                if(rpg::getclientquesttext(qids[i], objtext, sizeof(objtext))) prog = objtext;
+                else { formatstring(progbuf)("%d/%d", kills[i], needs[i]); prog = progbuf; }
+                settextscale(26.0f/baseh); float pgw = text_widthf(prog);
+                // plate behind both lines (right-aligned pair ending at rx+rs),
+                // sized from the wider line's TRUE extent plus padding
+                float platew = max(nmw, pgw);
+                rpg_solidquad(rx + rs - platew - 16.0f, ty - 10.0f, platew + 32.0f,
+                              plateh, 0.0f, 0.0f, 0.0f, 0.72f);
+                rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
+                rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
+            }
+        }
         settextscale(saveScale);
-        // plate behind both lines (right-aligned pair ending at rx+rs),
-        // sized from the wider line's TRUE extent plus padding
-        float platew = max(nmw, pgw);
-        rpg_solidquad(rx + rs - platew - 16.0f, ty - 10.0f, platew + 32.0f,
-                      38.0f + 26.0f + 20.0f, 0.0f, 0.0f, 0.0f, 0.72f);
-        rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
-        rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
         popfont();
     }
 

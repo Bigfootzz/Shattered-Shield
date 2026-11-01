@@ -2225,6 +2225,30 @@ namespace rpg
         }
         return false;
     }
+    int getclientquests(int *qids, int *states, int *kills, int *needs, int max)
+    {
+        // Multi-quest tracker (Nov 1): the SAME in-progress rule as
+        // getclientquest, but collect up to max instead of returning the
+        // first. clquests is a std::map keyed by quest id, so iteration
+        // is lowest-id first — the same order the old single-quest
+        // lookup showed. Arrays are filled 0..n-1 only; n never exceeds
+        // max, so no overrun. getclientquest itself is untouched (NPC
+        // hover states and other single-quest uses keep calling it).
+        if(!qids || !states || !kills || !needs || max <= 0) return 0;
+        int n = 0;
+        for(std::map<int, clquest>::iterator it = clquests.begin(); it != clquests.end(); ++it)
+        {
+            const questdef *qd = questdefbyid(it->first);
+            if(!qd) continue;
+            if(it->second.state > 0 && it->second.state != qd->finalstage)
+            {
+                qids[n] = it->first; states[n] = it->second.state;
+                kills[n] = it->second.kills; needs[n] = it->second.need;
+                if(++n >= max) break;
+            }
+        }
+        return n;
+    }
     bool getclientquesttext(int qid, char *buf, int buflen)
     {
         std::map<int, clquest>::iterator it = clquests.find(qid);

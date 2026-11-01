@@ -320,6 +320,7 @@ namespace game
     bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
     bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
     bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
+    bool rpg_questcollapseclick(float vx, float vy); // fps.cpp: v0.1.43 quest tracker collapse button
     static bool rpg_isdlgo(); // defined below (dialogue-open gate, mirrors the key binds)
 
     static void rpg_doclick(int button)
@@ -344,6 +345,12 @@ namespace game
         // the mouse while open, so this gate is defensive; without it a
         // bar click during dialogue would cast where key 1-5 would answer.
         if(!rpg_isdlgo() && button == 0 && rpg_hotbarclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        // v0.1.43: quest tracker collapse button eats LEFT clicks only,
+        // same pattern as the radar/hotbar widgets. Display-only toggle,
+        // so no dialogue gate (mirrors the radar icons, not the hotbar
+        // cast path): collapsing the tracker during dialogue is harmless,
+        // and in practice the dialogue GUI owns the mouse while open.
+        if(button == 0 && rpg_questcollapseclick(cx*1800.0f/h, cy*1800.0f/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
