@@ -689,7 +689,7 @@ enum
     N_RPG_INVL,    // c->s: request inventory+equipment sync (no args)
     N_RPG_INV,     // s->c: inventory sync (inv string, equip string)
     N_RPG_GOLD,    // s->c: copper sync (total copper int) — v0.1.23 currency
-    N_RPG_VENDOR,  // s->c: open vendor GUI (no args) — v0.1.23 vendor
+    N_RPG_VENDOR,  // s->c: open vendor GUI (vendor id int: 0 Glimmer, 1 Blasque) — v0.1.23 vendor, id added Oct 31
     N_RPG_BUY,     // c->s: buy item from vendor (item id string) — v0.1.23
     N_RPG_SELL,    // c->s: sell item to vendor (item id string) — v0.1.23
     N_RPG_LOOT,    // s->c: loot drop spawned (idx, item, x, y, z as DMF ints)
@@ -726,6 +726,7 @@ enum
     N_BG_START,     // s->c: match start countdown (seconds)
     N_BG_CANCEL,    // c->s: leave the battleground queue (no args) — v0.1.41, Ed's Cancel button pick
     N_RPG_FLOATDMG, // s->c: floating damage number (damage, x, y, z as DMF ints) -- to the attacker only
+    N_RPG_EMBERS, // s->c: Embers sync (total Embers int) — Oct 31, Blasque shop; appended last so no existing wire value moves
     NUMSV
 };
 
@@ -760,11 +761,11 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_DEMOPACKET, 0,
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
-    N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 1, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
+    N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 2, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_RPG_FLOATDMG, 5,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2,
     -1
 };
 
@@ -1039,6 +1040,7 @@ struct fpsent : dynent, fpsstate
     int ownernum, lastnode;
 
     vec muzzle;
+    vec pvpglowpos; // PvP weapon tip, read from the vwep's tag_tip during render (sentinel = no glow)
 
     fpsent() :
         weight(100),
@@ -1059,7 +1061,8 @@ struct fpsent : dynent, fpsstate
         
         follow(-1),
         ownernum(-1),
-        muzzle(-1, -1, -1)
+        muzzle(-1, -1, -1),
+        pvpglowpos(-1, -1, -1)
     {
         name[0] = team[0] = info[0] = 0;
         respawn(0);

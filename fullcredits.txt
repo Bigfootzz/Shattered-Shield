@@ -6,6 +6,9 @@ Models:
     (packages/models/npcs/monk; Tomas; CC0, OpenGameArt)
     CDmir (Cestmir Dammer) and TinyWorlds: bartender model and textures
     (packages/models/npcs/bartender; Maren; CC0, OpenGameArt)
+    Sema (Celestia Studio): Skeleton Bow model and textures
+    (packages/models/playermodels/vwep/ranger/skeleton_bow; Ranger PvP weapon;
+    free to use with credit, same license as the staff, per the author's post)
 	
 Textures:
    Snipergoth

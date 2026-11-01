@@ -65,6 +65,21 @@ namespace rpg
     int stat_mitigate(int rawdmg, int armor);
     int stat_armorreductionpct(int armor); // whole-percent reduction, for display
 
+    // --- PvP gear (Oct 31, SPEC: pvpreduce / maxhp itemdef fields) ---
+    // Equipped-item sums mirroring armorvalue() (rpg.cpp) over SLOT_COUNT
+    // via the public equippeditem() accessor; placed here, not in rpg.cpp,
+    // because SPEC file ownership gives this workstream stats.cpp/stats.h
+    // + the server call sites only (rpg.cpp is the vendor workstream's
+    // file). Unknown/missing characters sum to 0. These read the
+    // item-defs workstream's fields (item(id).pvpreduce / item(id).maxhp).
+    int pvpreducevalue(const char *name); // summed PvP reduction %, clamped 0..100
+    int maxhpbonusvalue(const char *name); // summed flat max-HP bonus, >= 0
+    // PvP damage formula: armor mitigation first, then the summed PvP
+    // percent off the mitigated value (integer division, minimum 1):
+    //   taken = stat_mitigate(raw, armor) * (100 - pvpreducepct) / 100
+    // pvpreducepct <= 0 returns the plain mitigated value unchanged.
+    int stat_mitigatepvp(int rawdmg, int armor, int pvpreducepct);
+
     // --- damage types & resists: data now, behavior later ---
     // Every ability records its type; every character carries six resists
     // defaulting to 0, which change nothing. Typed monster damage and the

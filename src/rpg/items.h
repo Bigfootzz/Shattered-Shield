@@ -83,6 +83,18 @@ namespace rpg
                            // initializers predate these fields and rely on it)
         int gearbonus = 0; // Phase 3 default: no bonus
         const char *enhbase = NULL; // Phase 3 default: not an enhanced piece
+        // PvP jewelry/armor (Oct 31): class-gated shop gear, stats-only like
+        // other neck/ring pieces. pvpclass NULL = not a PvP item; pvpreduce
+        // is percent reduction vs PLAYER damage only; maxhp is a flat
+        // max-HP bonus while worn; emberprice is the price in Embers
+        // (0 = not for sale for Embers). Data files set them with
+        // ss_item_pvpclass / ss_item_pvpreduce / ss_item_maxhp /
+        // ss_item_emberprice. Positional fallback initializers predate
+        // these fields and rely on the defaults below.
+        const char *pvpclass = NULL; // PvP default: not a PvP item
+        int pvpreduce = 0; // PvP default: no PvP reduction
+        int maxhp = 0; // PvP default: no max-HP bonus
+        int emberprice = 0; // PvP default: not for sale for Embers
     };
 
     int itemcount();                    // number of defs in the ACTIVE table

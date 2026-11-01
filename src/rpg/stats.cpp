@@ -159,6 +159,49 @@ namespace rpg
         return taken < 1 ? 1 : taken;
     }
 
+    // PvP gear (Oct 31): equipped sums mirroring armorvalue() in rpg.cpp
+    // (same SLOT_COUNT loop, same -1 slot guard), but through the public
+    // equippeditem() accessor so they can live in this file per SPEC
+    // ownership. Unlike the pure formulas above, these read the session
+    // equipment cache; on a client without the character cached they sum
+    // to 0. Field names are the SPEC-fixed itemdef fields owned by the
+    // item-defs workstream (pvpreduce = percent, maxhp = flat HP).
+    int pvpreducevalue(const char *name)
+    {
+        if(!name || !name[0]) return 0;
+        int total = 0;
+        for(int i = 0; i < SLOT_COUNT; i++)
+        {
+            int id = equippeditem(name, i);
+            if(id >= 0) total += item(id).pvpreduce;
+        }
+        if(total < 0) total = 0;
+        if(total > 100) total = 100;
+        return total;
+    }
+
+    int maxhpbonusvalue(const char *name)
+    {
+        if(!name || !name[0]) return 0;
+        int total = 0;
+        for(int i = 0; i < SLOT_COUNT; i++)
+        {
+            int id = equippeditem(name, i);
+            if(id >= 0) total += item(id).maxhp;
+        }
+        if(total < 0) total = 0;
+        return total;
+    }
+
+    int stat_mitigatepvp(int rawdmg, int armor, int pvpreducepct)
+    {
+        int taken = stat_mitigate(rawdmg, armor);
+        if(pvpreducepct <= 0) return taken;
+        if(pvpreducepct > 100) pvpreducepct = 100;
+        int reduced = taken*(100 - pvpreducepct)/100;
+        return reduced < 1 ? 1 : reduced;
+    }
+
     int stat_armorreductionpct(int armor)
     {
         if(armor <= 0) return 0;

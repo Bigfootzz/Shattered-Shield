@@ -2066,8 +2066,46 @@ namespace game
         rpg_hudtext(str, int(cx - wpx/2), int(cy - pxh/2), pxh);
     }
 
+    // v0.1.42 (tester feedback, Nov 1): clickable action bar. Hit-rects in
+    // virtual coords (1800-tall space), written by drawrpghud each frame it
+    // draws and cleared (-1) at entry, so stale rects never eat clicks.
+    // Only slots holding an ability get a rect (empty kit frames stay
+    // click-through to the world pick, as before). rpg_hotbarclick is
+    // called from rpg_doclick (client.cpp) after the radar check, before
+    // the world pick, mirroring the chat-tab/radar routing. Clicking a
+    // slot runs the SAME abilityN command its number key runs (which is
+    // rpg_castslot in client.cpp), so cooldowns, mana, targeting and the
+    // server validation are identical to the key path by construction.
+    // NOTE: this block must stay above drawrpghud (which writes the rects);
+    // the radar block below declares its own rects next to its click fn
+    // because drawrpgradar follows it, but drawrpghud precedes this file's
+    // radar section.
+    static float rpg_hotbar_rect[10][4] = {{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1},{-1,-1,-1,-1}};
+    bool rpg_hotbarclick(float vx, float vy)
+    {
+        if(!rpg::mapactive(getclientmap())) return false;
+        loopi(10)
+        {
+            if(rpg_hotbar_rect[i][0] >= 0 && vx >= rpg_hotbar_rect[i][0] && vx < rpg_hotbar_rect[i][2] &&
+               vy >= rpg_hotbar_rect[i][1] && vy < rpg_hotbar_rect[i][3])
+            {
+                // Slots 1-5 have abilityN commands (the number-key path).
+                // A slot past 5 holding an ability (no class has one today;
+                // classabilities caps at 6) falls through to the world pick
+                // rather than inventing a new command.
+                if(i < 5) { defformatstring(cmd)("ability%d", i+1); execute(cmd); return true; }
+                return false;
+            }
+        }
+        return false;
+    }
+
     void drawrpghud(fpsent *d, int w, int h)
     {
+        // v0.1.42: clear the action-bar hit-rects FIRST, before any early
+        // return, so a dead/spectator/off-map frame never leaves stale
+        // rects behind to eat clicks. The slot loop below rewrites them.
+        loopi(10) loopj(4) rpg_hotbar_rect[i][j] = -1;
         if(!rpg::mapactive(getclientmap())) return;
         if(d->state == CS_DEAD || d->state == CS_SPECTATOR)
         {
@@ -2188,6 +2226,10 @@ namespace game
             rpg_drawtexuv(qx, sloty, slotn, slotn, 0, 0, 1, 1);
             if(i < hudn)
             {
+                // v0.1.42: action-bar hit-rect for the click handler (same
+                // geometry as the drawn slot frame and the hover tooltip).
+                rpg_hotbar_rect[i][0] = qx; rpg_hotbar_rect[i][1] = sloty;
+                rpg_hotbar_rect[i][2] = qx + slotn; rpg_hotbar_rect[i][3] = sloty + slotn;
                 int aid = hudids[i];
                 if(aid >= 0 && aid < 8 && abiconfiles[aid])
                 {
@@ -2644,25 +2686,30 @@ namespace game
     // v0.1.9: readable digital face (Ed: the Cinzel GUI font is unreadable at
     // tracker sizes) + a transparent black plate behind the two text lines,
     // sized from the text extents (same idiom as the chat box plate).
-    // Ed's frame art (Oct 28): shared minimap-cluster geometry. The
-    // frame texture is his own 1254x1254 design (converted to RGBA,
+    // Ed's frame art (Nov 1 redesign): shared minimap-cluster geometry.
+    // The frame texture is his own 1254x1254 design (converted to RGBA,
     // packages/ui/rpg/hud/radar_frame.png) — a ring with a clock box
-    // on top and four button circles below, NOT a plain square ring.
-    // Fractions were measured off that art (1254-square fractions):
-    //   ring center (0.4976, 0.4825), window inner radius 0.2935
-    //   clock inset center (0.4992, 0.0762), inset height 0.1116
+    // on top, four large button circles below, and two small zoom
+    // sockets upper-right. Fractions measured off that art (1254-square):
+    //   ring center (0.4952, 0.4856), terrain window ELLIPSE rx 0.3110, ry 0.3046
+    //   clock inset center x 0.4992, text at 0.0862, inset height 0.1116 (unchanged)
     //   circles (center frac, dark-diameter frac):
-    //     char  lower-left          (0.1903, 0.7449) 0.1046
-    //     bag   lower-right         (0.8079, 0.7447) 0.1060
-    //     craft bottom-center-right (0.6311, 0.8716) 0.1140
-    //     social bottom-center-left (0.3659, 0.8720) 0.1141 (EMPTY)
-    //   bottom circles' outer rim bottom: 0.9565
-    // The composite is scaled so the window's inner edge coincides
-    // with the terrain fan's edge (fan radius 0.39 of the map rect
-    // s): comp = s*0.39/0.2935. The map rect stays s x s centered
-    // on the ring center; markers already clamp at 0.78 (the fan
-    // edge), so they stay inside the window with no change. Anchors:
-    // composite right edge = old ring-box right edge (X - s/20),
+    //     char  lower-left          (0.1539, 0.7903) 0.1435
+    //     bag   lower-right         (0.8397, 0.7903) 0.1435
+    //     craft bottom-center-right (0.6467, 0.8940) 0.1435
+    //     social bottom-center-left (0.3469, 0.8963) 0.1435 (EMPTY)
+    //     zoom+ upper-right small   (0.8134, 0.2177) 0.0877
+    //     zoom- upper-right small   (0.8589, 0.3014) 0.0877
+    //   bottom assembly's outer bottom: 0.9928
+    // The composite scale is UNCHANGED (comp = s*0.39/0.2935, the old
+    // window radius kept as the scale anchor), so the buff row, quest
+    // plate (rim fraction updated to 0.9928), and banner anchors do not
+    // move. The map rect stays s x s centered on the ring center. The
+    // terrain fan is the window's bounding circle (radius 0.4132*s, see
+    // rpg_drawminimap), so it fills the elliptical window edge-to-edge
+    // with the ring hiding the excess; markers clamp at 0.78 as before,
+    // inside the window on both axes (0.39*s < 0.4048*s short axis).
+    // Anchors: composite right edge = old ring-box right edge (X - s/20),
     // composite top = old top margin (s/20), so the cluster never
     // clips off the top of the screen.
     static void rpg_mmgeom(int w, int h, float &s, float &compx, float &compy, float &comp, float &ringcx, float &ringcy, float &mapx, float &mapy)
@@ -2672,8 +2719,8 @@ namespace game
         comp = s*0.39f/0.2935f;
         compx = X - s/20 - comp;
         compy = s/20;
-        ringcx = compx + 0.4976f*comp;
-        ringcy = compy + 0.4825f*comp;
+        ringcx = compx + 0.4952f*comp;
+        ringcy = compy + 0.4856f*comp;
         mapx = ringcx - s*0.5f;
         mapy = ringcy - s*0.5f;
     }
@@ -2699,12 +2746,12 @@ namespace game
         // rpg_mmgeom (above). The plate's right edge stays at the
         // composite's right edge (rx+rs = X - s/20, unchanged), and
         // its top drops below the bottom button circles (rim bottom
-        // 0.9565 of the composite) plus one 24-unit gap — the old
+        // 0.9928 of the composite) plus one 24-unit gap — the old
         // position would sit on top of the circles.
         float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
         int rs = int(s), rx = int(X - rs - rs/20);
-        float ty = compy + 0.9565f*comp + 24.0f;
+        float ty = compy + 0.9928f*comp + 24.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -2927,24 +2974,41 @@ namespace game
         glEnd();
     }
 
+    // Nov 1 frame: minimap zoom (tester feedback). Steps; 1.0 is today's
+    // view and the farthest-out level — zoom never goes wider. The index
+    // is file-static, so zoom persists across frames and map changes and
+    // resets only on client restart. No scroll-wheel zoom (buttons only).
+    static const float rpg_radarzoomsteps[4] = { 1.0f, 1.5f, 2.0f, 3.0f };
+    static int rpg_radarzoomidx = 0;
+    static float rpg_radarzoom() { return rpg_radarzoomsteps[rpg_radarzoomidx]; }
+
     // RPG radar minimap: same fan as drawminimap, but at the full-map
     // rpg_radarscale() so the whole map fits the ring.
-    // v0.1.9b (Ed: minimap must stay inside the ring): the fan is drawn at
-    // 0.78 of the rect (matching the marker clamp) so terrain never escapes
-    // the stone-ring opening; 48 segments for a visibly smooth circle.
-    // Texcoords scale with the vertices so the mapping stays truthful.
+    // Nov 1 frame: the terrain window is an ELLIPSE (rx 0.3110, ry 0.3046
+    // of the composite), not a circle. The fan stays CIRCULAR at the
+    // ellipse's bounding radius (rx = s*0.39*0.3110/0.2935 = 0.4132*s,
+    // hence the 0.8264 factors below): the window is contained in that
+    // circle, and the frame's opaque ring hides the fan's excess past
+    // the short axis (0.4132*s - 0.4048*s = 3.6 virtual units). A truly
+    // elliptical fan would stretch terrain ~2% and break the marker
+    // agreement below; the bounding circle keeps the texture mapping
+    // EXACTLY as before (texture radius / screen radius =
+    // 2*rpg_radarscale()/s), so markers plot truthfully at any zoom.
+    // Zoom divides the texture radius (magnified terrain) while the fan
+    // circle stays fixed to the window; markers multiply dir by the same
+    // zoom in rpg_drawmarker. 48 segments for a visibly smooth circle.
     void rpg_drawminimap(fpsent *d, float x, float y, float s)
     {
         vec pos = vec(d->o).sub(minimapcenter).mul(minimapscale).add(0.5f), dir;
         vecfromyawpitch(camera1->yaw, 0, 1, 0, dir);
-        float scale = rpg_radarscale()*0.78f;
+        float scale = rpg_radarscale()*0.8264f/rpg_radarzoom();
         glBegin(GL_TRIANGLE_FAN);
         loopi(48)
         {
             vec tc = vec(dir).rotate_around_z(i/48.0f*2*M_PI);
             glTexCoord2f(pos.x + tc.x*scale*minimapscale.x, pos.y + tc.y*scale*minimapscale.y);
             vec v = vec(0, -1, 0).rotate_around_z(i/48.0f*2*M_PI);
-            glVertex2f(x + 0.5f*s*(1.0f + 0.78f*v.x), y + 0.5f*s*(1.0f + 0.78f*v.y));
+            glVertex2f(x + 0.5f*s*(1.0f + 0.8264f*v.x), y + 0.5f*s*(1.0f + 0.8264f*v.y));
         }
         glEnd();
     }
@@ -3248,9 +3312,10 @@ namespace game
         float scale = rpg_radarscale();
         vec dir = d->o;
         dir.sub(pos).div(scale);
-        // Marker clamp for the frame art (Oct 19): the stone ring's interior
-        // opening is 0.83 of the rect half-width (vs 0.92 stock), so edge
-        // markers are pulled slightly inward to stay inside the brass rim.
+        dir.mul(rpg_radarzoom()); // Nov 1 zoom: markers magnify with the terrain
+        // Marker clamp: edge markers are pulled slightly inward to stay
+        // inside the window. 0.78 in dir units is 0.39*s on screen, inside
+        // the Nov 1 window's short axis (0.4048*s) at any zoom.
         float dist = dir.magnitude2(), maxdist = 0.78f;
         if(dist >= maxdist) dir.mul(maxdist/dist);
         dir.rotate_around_z(-camera1->yaw*RAD);
@@ -3267,6 +3332,8 @@ namespace game
     static float rpg_radar_char_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_bag_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_craft_rect[4] = {-1, -1, -1, -1};
+    static float rpg_radar_zoomin_rect[4] = {-1, -1, -1, -1};
+    static float rpg_radar_zoomout_rect[4] = {-1, -1, -1, -1};
     bool rpg_radariconclick(float vx, float vy)
     {
         if(!rpg::mapactive(getclientmap())) return false;
@@ -3286,6 +3353,22 @@ namespace game
            vy >= rpg_radar_craft_rect[1] && vy < rpg_radar_craft_rect[3])
         {
             execute("rpgcraft"); // v0.1.35: minimap crafting icon, syncs + shows craft window
+            return true;
+        }
+        // Nov 1 frame: zoom buttons (glyphs baked into the art's two small
+        // upper-right sockets). Same funnel as the cluster icons (left
+        // clicks only, menu owns the mouse when open). Clicking at either
+        // end of the range still eats the click; the index clamps.
+        if(rpg_radar_zoomin_rect[0] >= 0 && vx >= rpg_radar_zoomin_rect[0] && vx < rpg_radar_zoomin_rect[2] &&
+           vy >= rpg_radar_zoomin_rect[1] && vy < rpg_radar_zoomin_rect[3])
+        {
+            if(rpg_radarzoomidx < 3) rpg_radarzoomidx++;
+            return true;
+        }
+        if(rpg_radar_zoomout_rect[0] >= 0 && vx >= rpg_radar_zoomout_rect[0] && vx < rpg_radar_zoomout_rect[2] &&
+           vy >= rpg_radar_zoomout_rect[1] && vy < rpg_radar_zoomout_rect[3])
+        {
+            if(rpg_radarzoomidx > 0) rpg_radarzoomidx--;
             return true;
         }
         return false;
@@ -3405,16 +3488,16 @@ namespace game
 
     void drawrpgradar(fpsent *d, int w, int h)
     {
-        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
-        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
-        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = -1; return; }
+        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
+        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        // Ed's frame art (Oct 28): the map rect stays s x s (427, as
+        // Ed's frame art (Nov 1 redesign): the map rect stays s x s (427, as
         // since v0.1.31) but is now CENTERED on the art's ring center,
         // and the frame texture is drawn over the whole composite
-        // (rpg_mmgeom), not over the map rect. The fan edge meets the
-        // window's inner edge by construction, markers already clamp
-        // at the fan edge, and the player arrow uses the map rect
+        // (rpg_mmgeom), not over the map rect. The fan is the window's
+        // bounding circle (see rpg_drawminimap), markers clamp inside
+        // the window, and the player arrow uses the map rect
         // center (= ring center) as before.
         float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
@@ -3424,10 +3507,10 @@ namespace game
         bindminimap();
         rpg_drawminimap(d, x, y, s); // full-map scale (Oct 19): whole map inside the ring
         if(minimapalpha >= 1) glEnable(GL_BLEND);
-        // Ed's own frame art (Oct 28, converted to RGBA in
-        // packages/ui/rpg/hud/radar_frame.png — see ~/workspace/mm-art/):
-        // ring + top clock box + four button circles, drawn over the
-        // full composite rect. The window is transparent, so the fan
+        // Ed's own frame art (Nov 1 redesign, converted to RGBA in
+        // packages/ui/rpg/hud/radar_frame.png): ring + top clock box +
+        // four large button circles + two small zoom sockets, drawn over
+        // the full composite rect. The window is transparent, so the fan
         // shows through it; the art's own circles are the button
         // backings (no code-drawn backings below).
         glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/radar_frame.png")->id);
@@ -3493,7 +3576,7 @@ namespace game
             glColor4f(1, 1, 1, 1.0f);
         }
 
-        // Ed's frame art (Oct 28): icons sit ON his circles — the
+        // Ed's frame art (Nov 1 redesign): icons sit ON his circles — the
         // circles ARE the backings, so no icon_backing_circle draws
         // at all. Each icon is 0.82x its circle's dark diameter, so
         // the dark interior and the metal rim stay visible around
@@ -3502,17 +3585,25 @@ namespace game
         // bottom-center-left circle stays EMPTY (future social
         // slot): no icon, no hit-rect, no click. The clock text
         // goes in the art's top black inset box, centered; the
-        // code-drawn bottom time box is GONE entirely.
+        // code-drawn bottom time box is GONE entirely. The two small
+        // upper-right sockets are the zoom buttons (glyphs baked into
+        // the art): their hit-rects use the same 0.82x convention.
         {
-            float chx = compx + 0.1903f*comp, chy = compy + 0.7449f*comp, chz = 0.82f*0.1046f*comp;
-            float bgx = compx + 0.8079f*comp, bgy = compy + 0.7447f*comp, bgz = 0.82f*0.1060f*comp;
-            float crx = compx + 0.6311f*comp, cry = compy + 0.8716f*comp, crz = 0.82f*0.1140f*comp;
+            float chx = compx + 0.1539f*comp, chy = compy + 0.7903f*comp, chz = 0.82f*0.1435f*comp;
+            float bgx = compx + 0.8397f*comp, bgy = compy + 0.7903f*comp, bgz = 0.82f*0.1435f*comp;
+            float crx = compx + 0.6467f*comp, cry = compy + 0.8940f*comp, crz = 0.82f*0.1435f*comp;
+            float zpx = compx + 0.8134f*comp, zpy = compy + 0.2177f*comp, zpz = 0.82f*0.0877f*comp;
+            float zmx = compx + 0.8589f*comp, zmy = compy + 0.3014f*comp, zmz = 0.82f*0.0877f*comp;
             rpg_radar_char_rect[0] = chx - chz*0.5f; rpg_radar_char_rect[1] = chy - chz*0.5f;
             rpg_radar_char_rect[2] = chx + chz*0.5f; rpg_radar_char_rect[3] = chy + chz*0.5f;
             rpg_radar_bag_rect[0] = bgx - bgz*0.5f; rpg_radar_bag_rect[1] = bgy - bgz*0.5f;
             rpg_radar_bag_rect[2] = bgx + bgz*0.5f; rpg_radar_bag_rect[3] = bgy + bgz*0.5f;
             rpg_radar_craft_rect[0] = crx - crz*0.5f; rpg_radar_craft_rect[1] = cry - crz*0.5f;
             rpg_radar_craft_rect[2] = crx + crz*0.5f; rpg_radar_craft_rect[3] = cry + crz*0.5f;
+            rpg_radar_zoomin_rect[0] = zpx - zpz*0.5f; rpg_radar_zoomin_rect[1] = zpy - zpz*0.5f;
+            rpg_radar_zoomin_rect[2] = zpx + zpz*0.5f; rpg_radar_zoomin_rect[3] = zpy + zpz*0.5f;
+            rpg_radar_zoomout_rect[0] = zmx - zmz*0.5f; rpg_radar_zoomout_rect[1] = zmy - zmz*0.5f;
+            rpg_radar_zoomout_rect[2] = zmx + zmz*0.5f; rpg_radar_zoomout_rect[3] = zmy + zmz*0.5f;
             glColor4f(1, 1, 1, 1.0f);
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_char.png")->id);
             rpg_drawtexuv(chx - chz*0.5f, chy - chz*0.5f, chz, chz, 0, 0, 1, 1);

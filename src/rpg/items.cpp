@@ -131,6 +131,8 @@ namespace rpg
         int buffattr = -1;
         int gearstat = -1, gearbonus = 0;
         std::string enhbase;
+        std::string pvpclass;
+        int pvpreduce = 0, maxhp = 0, emberprice = 0;
         bool stack = false;
     };
     static itembuild curitem;
@@ -242,6 +244,32 @@ namespace rpg
             return true;
         }
         if(c == "ss_item_enhbase") { if(argc != 1) { err = "ss_item_enhbase: expected 1 argument (base gear id)"; return false; } curitem.enhbase = argv[0]; return true; }
+        // PvP jewelry/armor (Oct 31): class-gated shop gear, stats-only.
+        if(c == "ss_item_pvpclass")
+        {
+            if(argc != 1) { err = "ss_item_pvpclass: expected 1 argument (class)"; return false; }
+            if(argv[0] == std::string("Magi") || argv[0] == std::string("Warrior") || argv[0] == std::string("Ranger")) curitem.pvpclass = argv[0];
+            else { err = std::string("ss_item_pvpclass: unknown class '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_pvpreduce")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.pvpreduce, err)) return false;
+            if(curitem.pvpreduce < 0 || curitem.pvpreduce > 100) { err = "ss_item_pvpreduce out of range 0..100"; return false; }
+            return true;
+        }
+        if(c == "ss_item_maxhp")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.maxhp, err)) return false;
+            if(curitem.maxhp < 0) { err = "ss_item_maxhp must be >= 0"; return false; }
+            return true;
+        }
+        if(c == "ss_item_emberprice")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.emberprice, err)) return false;
+            if(curitem.emberprice < 0) { err = "ss_item_emberprice must be >= 0"; return false; }
+            return true;
+        }
         if(c == "ss_item_stack")
         {
             int v = 0;
@@ -374,8 +402,14 @@ namespace rpg
             { err = "armor '" + b.id + "' must name a body slot (head/torso/legs/feet/neck/ring1/ring2)"; return false; }
             if(type != ITEM_WEAPON && type != ITEM_ARMOR && slot != SLOT_NONE)
             { err = "item '" + b.id + "' is not gear and cannot name a slot"; return false; }
-            if(b.damage < 0 || b.armor < 0 || b.heal < 0 || b.mana < 0 || b.value < 0)
+            if(b.damage < 0 || b.armor < 0 || b.heal < 0 || b.mana < 0 || b.value < 0 || b.pvpreduce < 0 || b.maxhp < 0 || b.emberprice < 0)
             { err = "item '" + b.id + "' has a negative stat"; return false; }
+            // PvP gear (Oct 31): class-gated shop gear — armor (jewelry/armor
+            // set) and weapons (PvP weapons carry the same class gate; their
+            // stats were defined Oct 31 as the 3-piece set totals). Updated
+            // from armor-only when weapon stats were defined.
+            if(!b.pvpclass.empty() && type != ITEM_ARMOR && type != ITEM_WEAPON)
+            { err = "item '" + b.id + "' sets a PvP class but is not gear"; return false; }
             if(type != ITEM_WEAPON && b.damage != 0)
             { err = "item '" + b.id + "' sets damage but is not a weapon"; return false; }
             if(!b.weaponcat.empty())
@@ -456,6 +490,10 @@ namespace rpg
             d.gearstat = b.gearstat;
             d.gearbonus = b.gearbonus;
             d.enhbase = b.enhbase.empty() ? NULL : poolstr(b.enhbase);
+            d.pvpclass = b.pvpclass.empty() ? NULL : poolstr(b.pvpclass);
+            d.pvpreduce = b.pvpreduce;
+            d.maxhp = b.maxhp;
+            d.emberprice = b.emberprice;
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             if(!findfile(d.icon, "e"))

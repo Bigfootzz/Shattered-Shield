@@ -319,6 +319,8 @@ namespace game
     // commas, so multi-declaration bodies live here instead.
     bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
     bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
+    bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
+    static bool rpg_isdlgo(); // defined below (dialogue-open gate, mirrors the key binds)
 
     static void rpg_doclick(int button)
     {
@@ -335,6 +337,13 @@ namespace game
         // v0.1.25: radar buttons eat LEFT clicks only (right-click stays attack;
         // same tab-click pattern as the chat tabs, but left-gated)
         if(button == 0 && rpg_radariconclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        // v0.1.42: action bar slots eat LEFT clicks only, same pattern. The
+        // dialogue gate mirrors the number-key binds (rpgdlgo -> rpgrespond):
+        // while a dialogue panel is open, keys answer it instead of casting,
+        // so clicks must not cast either. In practice the dialogue GUI owns
+        // the mouse while open, so this gate is defensive; without it a
+        // bar click during dialogue would cast where key 1-5 would answer.
+        if(!rpg_isdlgo() && button == 0 && rpg_hotbarclick(cx*1800.0f/h, cy*1800.0f/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
@@ -660,6 +669,7 @@ namespace game
     ICOMMAND(rpg_dlg_resp, "i", (int *i),
         result(*i >= 0 && *i < rpg_dlg_nresp ? rpg_dlg_resps[*i] : ""));
     ICOMMAND(rpgdlgo, "", (), intret(rpg_dlg_open ? 1 : 0)); // 1 while the dialogue panel is open
+    static bool rpg_isdlgo() { return rpg_dlg_open; } // v0.1.42: click-path dialogue gate
     ICOMMAND(rpgrespond, "i", (int *i), if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i));
     // v0.1.8: close dialogue from the X button (sends a -1 response to end)
     ICOMMAND(rpg_closerdlg, "", (), { if(rpg_dlg_open) { addmsg(N_RPG_RESPOND, "ri", -1); rpg_dlg_open = false; cleargui(1); } });
@@ -1300,6 +1310,9 @@ namespace game
         defformatstring(m)("%dg %ds %dc", g, s, cc);
         result(m);
     });
+    // PvP currency (Oct 31): plain int, no denominations — Blasque's shop
+    // shows it as "Your Embers: X" via (rpgembers).
+    ICOMMAND(rpgembers, "", (), { intret(rpg::getclientembers()); });
     ICOMMAND(rpgweapondmg, "", (), {
         rpg_refreshcl(); int wd = 0;
         loopi(rpg::SLOT_COUNT) if(rpg_cleq[i] >= 0)
@@ -3365,11 +3378,21 @@ namespace game
                 rpg::setclientcopper(getint(p));
                 break;
             }
+            case N_RPG_EMBERS: // Oct 31: PvP currency sync (Blasque shop display)
+            {
+                rpg::setclientembers(getint(p));
+                break;
+            }
             case N_RPG_VENDOR: // v0.1.23: open vendor GUI (fresh inv sync first)
             {
                 addmsg(N_RPG_INVL, "r");
-                // rpgvendoropen (rpg.cfg) sets rpg_atvendor = 1 then shows GUI.
-                if(identexists("rpgvendoropen")) execute("rpgvendoropen");
+                // Oct 31: the server now sends WHICH vendor (0 Glimmer,
+                // 1 Blasque). Blasque opens his own menu; anything else
+                // keeps the original Glimmer path, so old behavior is
+                // unchanged when the id is 0 or the PvP alias is missing.
+                int vendorid = getint(p);
+                if(vendorid == 1 && identexists("rpgvendor_pvpopen")) execute("rpgvendor_pvpopen");
+                else if(identexists("rpgvendoropen")) execute("rpgvendoropen");
                 else showgui("rpgvendor");
                 break;
             }

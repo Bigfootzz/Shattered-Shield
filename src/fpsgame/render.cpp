@@ -120,9 +120,42 @@ namespace game
     VAR(testarmour, 0, 0, 1);
     VAR(testteam, 0, 0, 3);
 
+    // --- SHARED PvP weapon glow (Oct 31, Ed's call): ONE signature glow on
+    // every PvP weapon so players recognize PvP gear from afar. Single
+    // color constant: change it here and every PvP weapon changes with it.
+    // Amber/gold, tuned to read at distance: a generous light radius plus a
+    // large glow sprite at the tip (the light alone stops at its radius;
+    // the sprite is visible from anywhere in view).
+    static const int PVPGLOW_COLOR = 0xFFB832; // amber/gold
+    static const float PVPGLOW_LIGHT_RADIUS = 32;
+    static const float PVPGLOW_SPRITE_SIZE = 3.0f;
+
+    static vec pvpglowcolorvec()
+    {
+        return vec(float((PVPGLOW_COLOR >> 16) & 0xFF), float((PVPGLOW_COLOR >> 8) & 0xFF), float(PVPGLOW_COLOR & 0xFF)).div(255.0f);
+    }
+
+    // Spawn one frame of glow at a weapon tip. Called every frame from the
+    // stored tip position (same one-frame-stale pattern as d->muzzle: the
+    // tag is read during batched rendering, so the position is consumed on
+    // the next frame — invisible at 60fps). The dynlight is re-added each
+    // frame with a 100ms fade, which is what makes it steady instead of
+    // flashing; the glow sprite and flame particles overlap across frames
+    // the same way.
+    static void spawnpvpglow(const vec &tip)
+    {
+        vec color = pvpglowcolorvec();
+        adddynlight(tip, PVPGLOW_LIGHT_RADIUS, color, 100, 0, 0, PVPGLOW_LIGHT_RADIUS, color);
+        particle_splash(PART_GLOW, 1, 100, tip, PVPGLOW_COLOR, PVPGLOW_SPRITE_SIZE, 2, 0);
+        regular_particle_flame(PART_FLAME, tip, 1.2f, 2.5f, PVPGLOW_COLOR, 2, 2.0f, 200.0f, 600.0f, -15);
+    }
+
     void renderplayer(fpsent *d, const playermodelinfo &mdl, int team, float fade, bool mainpass)
     {
         ASSERT(d->gunselect >= 0 && d->gunselect < NUMWEAPS);
+        // PvP glow: consume last frame's stored tip position before the
+        // readout below re-arms it (same pattern as d->muzzle).
+        if(mainpass && d->pvpglowpos.x >= 0) spawnpvpglow(d->pvpglowpos);
         int lastaction = d->lastaction,
             hold = mdl.vwep || d->gunselect==WEAP_PISTOL ? 0
                                                          : clamp<int, int>(ANIM_HOLD1+d->gunselect, ANIM_HOLD1, ANIM_HOLD7)|ANIM_LOOP,
@@ -186,7 +219,7 @@ namespace game
             hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
-        modelattach a[5];
+        modelattach a[6]; // 5 entries max (weapon, powerup, shield, muzzle, tip) + terminator
         // v0.1.16: Revelade FPS vweps removed (Ed). Vweps organized by class:
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
@@ -208,6 +241,16 @@ namespace game
             a[ai++] = modelattach("tag_weapon", rpgvwep && rpgvwep[0] ? rpgvwep : (mdl.vwep ? mdl.vwep : vweps[
                 d->gunselect + (d->gunselect == WEAP_FIST && d->ammo[d->gunselect] < 1 ? sizeof(vweps)/sizeof(vweps[0]) - 1 : 0)
             ]), vanim, vtime);
+            // PvP glow readout: MUST come after the tag_weapon attach above.
+            // link() recurses into already-linked parts, so this entry finds
+            // tag_tip inside the just-attached vwep and records its world
+            // position (same mechanism as tag_muzzle, one level deeper).
+            // A vwep without tag_tip leaves the sentinel untouched: no glow.
+            if(mainpass && rpgvwep && rpgvwep[0] && rpg::vwep_has_pvpglow(rpgvwep))
+            {
+                d->pvpglowpos = vec(-1, -1, -1);
+                a[ai++] = modelattach("tag_tip", &d->pvpglowpos);
+            }
         }
         if(d->state==CS_ALIVE)
         {
@@ -375,12 +418,30 @@ namespace game
         // one's model at its map position on RPG maps only. NULL light gets
         // proper world lighting via lightreaching.
         if(rpg::mapactive(getclientmap()))
+        {
+            // PvP glow positions, one per NPC index (same one-frame-stale
+            // pattern as the player path). Any NPC model carrying a tag_tip
+            // joint glows — the gold imp vendor variant will carry one at
+            // its baked staff's tip. Models without the tag keep the
+            // sentinel: no glow, no behavior change.
+            static vector<vec> npcglowpos;
             for(int ni = 0; ni < rpg::npccount(); ni++)
             {
                 const rpg::npcdef *nd = rpg::npcat(ni);
-                if(nd && nd->model[0])
-                    rendermodel(NULL, nd->model, ANIM_IDLE|ANIM_LOOP, vec(nd->x, nd->y, nd->z), nd->yaw, 0);
+                if(!nd || !nd->model[0]) continue;
+                while(npcglowpos.length() <= ni) npcglowpos.add(vec(-1, -1, -1));
+                modelattach *na = NULL;
+                modelattach nat[2];
+                if(mainpass)
+                {
+                    if(npcglowpos[ni].x >= 0) spawnpvpglow(npcglowpos[ni]);
+                    npcglowpos[ni] = vec(-1, -1, -1);
+                    nat[0] = modelattach("tag_tip", &npcglowpos[ni]);
+                    na = nat;
+                }
+                rendermodel(NULL, nd->model, ANIM_IDLE|ANIM_LOOP, vec(nd->x, nd->y, nd->z), nd->yaw, 0, MDL_CULL_VFC|MDL_CULL_DIST|MDL_CULL_OCCLUDED|MDL_LIGHT, NULL, na);
             }
+        }
         rendermovables();
         entities::renderentities();
         renderbouncers();

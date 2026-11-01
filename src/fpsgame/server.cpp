@@ -59,6 +59,7 @@ namespace server
     VAR(bg_bot_teamsize, 1, 3, 8);       // players per team a full game targets (provisional: Ed has not set team size yet)
     static bool bg_match_active = false; // a match is running
     static void bg_deletebots(); // defined with bg_fillbots below; changemap() calls it
+    static void bg_grantwin(int winnerteam); // Embers win reward, defined above checkintermission
     static bool bg_match_starting = false; // changemap issued, awaiting load
     static bool bg_start_active = false; // 10s start countdown running
     static int bg_start_until = 0;       // totalmillis deadline
@@ -947,7 +948,7 @@ namespace server
                 rpg_syncinv(lc); // refresh level/xp on the client sheet
                 if(rpg::mapactive(smapname)) // max HP follows the formula; keep current HP
                 {
-                    int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(lc->name, rpg::ATTR_VITALITY) + rpg::gearbonus(lc->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+                    int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(lc->name, rpg::ATTR_VITALITY) + rpg::gearbonus(lc->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(lc->name); // Phase 2: Vitality buff
                     if(lc->state.health > maxhp) lc->state.health = maxhp;
                     lc->state.maxhealth = maxhp;
                     sendf(lc->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -2208,7 +2209,7 @@ namespace server
         int rpg_lvl = 1, rpg_xp = 0;
         if(!rpg::getstats(ci->name, rpg_lvl, rpg_xp)) return;
         gamestate &gs = ci->state;
-        int maxhp = rpg::stat_maxhp(rpg_lvl, rpg::buffbonus(ci->name, rpg::ATTR_VITALITY) + rpg::gearbonus(ci->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+        int maxhp = rpg::stat_maxhp(rpg_lvl, rpg::buffbonus(ci->name, rpg::ATTR_VITALITY) + rpg::gearbonus(ci->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(ci->name); // Phase 2: Vitality buff
         if(gs.health >= gs.maxhealth) gs.health = maxhp;
         else if(gs.health > maxhp) gs.health = maxhp;
         gs.maxhealth = maxhp;
@@ -2703,6 +2704,43 @@ namespace server
         }
     }
 
+    // --- Battlegrounds: Embers win reward (Nov 1, locked rates) ---
+    // +100 Embers to EACH HUMAN player on the winning team, once per
+    // game. Called from checkintermission below, which is the single
+    // funnel for BOTH win paths: a 3-capture win reaches it via
+    // ctfmode::scoreflag -> startintermission -> checkintermission(true),
+    // and a timer-end win reaches it directly (fromwin=false). The
+    // enclosing `!interm` guard makes it once-per-game: the first call
+    // sets interm, so later captures/ticks cannot re-enter. Winner is
+    // the totalscore comparison (team 1 = Blue, team 2 = Red); a draw
+    // grants nothing. Human-only: bots are filtered by AI_TYPE_NONE
+    // (they bank nothing, no persistent character). Team match uses
+    // ctfteamflag, the same mapping scoreflag uses to credit captures,
+    // so a player is paid exactly when their captures counted for the
+    // winning side; un-teamed/spectator clients map to 0 and never
+    // match. Losers get nothing here and nothing is taken back: kill
+    // earnings already granted stay (no clawback). Each winner gets a
+    // private System-tab line via rpg_qmsg plus an N_RPG_EMBERS sync.
+    static void bg_grantwin(int winnerteam)
+    {
+        if(winnerteam < 1 || winnerteam > 2) return; // draw or invalid: no grant
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(!ci || ci->state.ai.type != ai::AI_TYPE_NONE) continue; // bots bank nothing
+            if(ctfteamflag(ci->team) != winnerteam) continue; // winning team only
+            if(!ci->name[0]) continue;
+            int newtotal = rpg::addembers(ci->name, 100);
+            if(newtotal >= 0)
+            {
+                sendf(ci->clientnum, 1, "ri2", N_RPG_EMBERS, newtotal);
+                rpg_qmsg(ci, "+100 Embers (battleground victory bonus).");
+                conoutf("rpg: battleground win: +100 Embers to '%s' (total %d, team %d)", ci->name, newtotal, winnerteam);
+            }
+            else conoutf("rpg: WARNING battleground win grant FAILED for '%s' (+100 Embers, team %d) - addembers returned %d (character row missing?)", ci->name, winnerteam, newtotal);
+        }
+    }
+
     void checkintermission(bool fromwin = false)
     {
         if(gamemillis >= gamelimit && !interm)
@@ -2714,17 +2752,21 @@ namespace server
             // Battlegrounds (v0.1.40): 30s scoreboard, not 40s. The
             // timer-end winner (most captures; tie = draw) announces
             // here; capture wins announce in ctfmode::scoreflag, so
-            // fromwin skips the second announcement.
+            // fromwin skips the second announcement. The win grant
+            // runs on BOTH paths (it is not conditioned on fromwin):
+            // for a capture win the totalscore comparison already
+            // names the capturing team, since it just hit 3.
             if(m_ctf && rpg::mapactive(smapname))
             {
                 interm = gamemillis + 30000;
+                int s1 = ctfmode.totalscore(1), s2 = ctfmode.totalscore(2);
                 if(!fromwin)
                 {
-                    int s1 = ctfmode.totalscore(1), s2 = ctfmode.totalscore(2);
                     if(s1 > s2) sendservmsg("Blue team wins the battleground!");
                     else if(s2 > s1) sendservmsg("Red team wins the battleground!");
                     else sendservmsg("The battleground ends in a draw!");
                 }
+                if(rpg::connected()) bg_grantwin(s1 > s2 ? 1 : (s2 > s1 ? 2 : 0));
             }
 
             if(intermissionstats)
@@ -2805,6 +2847,33 @@ namespace server
             if(newdmg != damage) conoutf("rpg: armor reduces %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
             damage = newdmg;
         }
+        // --- RPG: PvP gear (Oct 31, SPEC: pvpreduce vs PLAYER damage only) ---
+        // SEPARATE block from the monster-armor block above, on purpose: that
+        // block's gate is monster-attacker-only (actor AI_TYPE_MONSTER), so
+        // player-vs-player damage never reaches it, and this block never
+        // touches monster damage. Attacker identity comes from the dodamage
+        // parameters: actor is the attacking clientinfo (ability casts pass
+        // cq/caster, projectiles pass the caster, gun shots pass ci), and
+        // ai.type is the engine's trichotomy (ai.h: NONE = human player,
+        // BOT = AI player, MONSTER = mob). Battleground bots count as
+        // player-side here: they are the PvP opponents in the MVP (they
+        // cast RPG abilities like players, carry normal player names, and
+        // are replaced by real players as online play builds), so excluding
+        // them would make the gear do nothing in the only battleground
+        // games that exist yet. MONSTER attackers fail this gate and keep
+        // the byte-identical computation in the block above. NULL actors
+        // (e.g. orphaned DoT ticks) also fail, failing closed to old
+        // behavior. RPG-map gate (mapactive) keeps FPS modes untouched.
+        // Formula (see rpg::stat_mitigatepvp): armor mitigation first,
+        // then the target's summed PvP percent off the mitigated value.
+        if(damage > 0 && rpg::connected() && target && (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
+           actor && actor != target && (actor->state.ai.type == ai::AI_TYPE_NONE || actor->state.ai.type == ai::AI_TYPE_BOT) &&
+           rpg::mapactive(smapname))
+        {
+            int newdmg = rpg::stat_mitigatepvp(damage, rpg::armorvalue(target->name), rpg::pvpreducevalue(target->name));
+            if(newdmg != damage) conoutf("rpg: pvp gear reduces %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
+            damage = newdmg;
+        }
         // survival damage upgrade: bought damage levels scale a human's outgoing damage (dmsp only)
         if(actor && actor!=target && m_dmsp && actor->state.ai.type==ai::AI_TYPE_NONE && actor->dmgmult > 100)
             damage = damage*actor->dmgmult/100;
@@ -2865,7 +2934,7 @@ namespace server
                     // N_RPG_HPMAX and refreshes its stat cache via rpg_syncinv.
                     if(rpg::mapactive(smapname))
                     {
-                        int maxhp = rpg::stat_maxhp(rpg_newlevel, rpg::buffbonus(actor->name, rpg::ATTR_VITALITY) + rpg::gearbonus(actor->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+                        int maxhp = rpg::stat_maxhp(rpg_newlevel, rpg::buffbonus(actor->name, rpg::ATTR_VITALITY) + rpg::gearbonus(actor->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(actor->name); // Phase 2: Vitality buff
                         if(actor->state.health > maxhp) actor->state.health = maxhp;
                         actor->state.maxhealth = maxhp;
                         sendf(actor->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -2983,6 +3052,44 @@ namespace server
                         }
                     }
                 }
+            }
+            // --- Battlegrounds: Embers kill reward (Nov 1, locked rates) ---
+            // +10 Embers to the KILLER on a battleground kill. Gate is the
+            // battleground itself: CTF mode (gamemode 7) on a battleground
+            // map (mapactive covers ctf_obelisk_b1), so RPG-map monster
+            // kills, FPS modes and the RPG world never reach it. GAME
+            // TIME ONLY (Nov 1, anti-exploit): bg_match_active &&
+            // !bg_start_active && interm <= 0 — kills during the 10s
+            // start countdown or the 30s scoreboard window pay nothing,
+            // same condition bg_botcast uses, so nobody farms the
+            // countdown or scoreboard. Killer
+            // ONLY: actor must be a distinct human player (AI_TYPE_NONE),
+            // the victim a player-side client (human or bot, never a
+            // monster), and the kill must not be a teamkill (isteam
+            // fails it). No party/assist split: the quest block above
+            // shares credit with party members, but Embers deliberately
+            // do not — assist credit is UNDECIDED, so assists earn
+            // nothing. A human killing a bot earns +10; a bot killer
+            // banks nothing (bots get an RPG character for casting but
+            // have no persistent character to bank Embers in). Write
+            // via addembers (same pattern as the coin grant above) and
+            // re-sync N_RPG_EMBERS so the Blasque shop display updates;
+            // the earn line goes to the killer only via rpg_qmsg (the
+            // private System-tab channel, N_RPG_QMSG), not a broadcast.
+            if(rpg::connected() && m_ctf && rpg::mapactive(smapname) &&
+               bg_match_active && !bg_start_active && interm <= 0 &&
+               actor && actor != target && actor->state.ai.type == ai::AI_TYPE_NONE &&
+               (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
+               !isteam(actor->team, target->team) && actor->name[0])
+            {
+                int newtotal = rpg::addembers(actor->name, 10);
+                if(newtotal >= 0)
+                {
+                    sendf(actor->clientnum, 1, "ri2", N_RPG_EMBERS, newtotal);
+                    rpg_qmsg(actor, "+10 Embers (battleground kill).");
+                    conoutf("rpg: battleground kill: +10 Embers to '%s' (total %d, victim '%s')", actor->name, newtotal, target->name);
+                }
+                else conoutf("rpg: WARNING battleground kill grant FAILED for '%s' (+10 Embers, victim '%s') - addembers returned %d (character row missing?)", actor->name, target->name, newtotal);
             }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
@@ -3139,7 +3246,7 @@ namespace server
         sendservmsgf("\f2%s \f7reached RPG level \f2%d!", cq->name, newlevel);
         if(rpg::mapactive(smapname))
         {
-            int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY)); // Phase 2: Vitality buff
+            int maxhp = rpg::stat_maxhp(newlevel, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(cq->name); // Phase 2: Vitality buff
             if(cq->state.health > maxhp) cq->state.health = maxhp;
             cq->state.maxhealth = maxhp;
             sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
@@ -3697,9 +3804,17 @@ namespace server
         // signal makes a marker mismatch unable to silently kill the
         // shop again. Quest NPCs (type questgiver, *_main dialogue)
         // match neither signal and flow to dialogue as before.
-        if(!strcmp(nd->dialogue, "vendor_main") || !strcmp(nd->type, "vendor"))
+        // PvP vendor (Oct 31): Blasque's dialogue "vendor_pvp" routes
+        // here too, and the reply carries WHICH vendor (0 = Glimmer,
+        // 1 = Blasque) so the client opens the right shop menu. The
+        // vendor id is derived from the dialogue key OR the stable npc
+        // id, never from position: Glimmer keeps vendor 0 and her
+        // existing menu exactly. N_RPG_VENDOR payload grows token+int
+        // (msgsizes 1 -> 2); client and server ship in one build.
+        if(!strcmp(nd->dialogue, "vendor_main") || !strcmp(nd->dialogue, "vendor_pvp") || !strcmp(nd->type, "vendor"))
         {
-            conoutf("rpg: talk: opening vendor GUI for npc '%s'", nd->id[0] ? nd->id : "?");
+            int vendorid = (!strcmp(nd->dialogue, "vendor_pvp") || !strcmp(nd->id, "blasque")) ? 1 : 0;
+            conoutf("rpg: talk: opening vendor GUI for npc '%s' (vendor %d)", nd->id[0] ? nd->id : "?", vendorid);
             // v0.1.30 ROOT CAUSE: this was sendf(..., "r", N_RPG_VENDOR).
             // In sendf, 'r' is the reliable flag, not a format code, so
             // "r" alone consumed NO vararg and sent an EMPTY packet:
@@ -3707,7 +3822,9 @@ namespace server
             // ran, and F looked dead with no error anywhere. Every
             // other server send uses "ri..." so the message type is
             // the first int in the packet. Vendor now does the same.
-            sendf(cq->clientnum, 1, "ri", N_RPG_VENDOR);
+            // PvP vendor (Oct 31): the vendor id rides along (0 Glimmer,
+            // 1 Blasque); see the branch comment above.
+            sendf(cq->clientnum, 1, "rii", N_RPG_VENDOR, vendorid);
             return;
         }
         const rpg::dlggraph *g = rpg::questgraph(nd->dialogue);
@@ -4632,7 +4749,8 @@ namespace server
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // Ability damage derives from attributes (automatic growth from level).
         // Melee: ability base + weapon + Strength (Power Strike's base is 35,
-        // the basic swing's is 0 - CLEANUP item 8). Spell: 50 + 2*Knowledge.
+        // the basic swing's is 0 - CLEANUP item 8). Spell: base + weapon +
+        // 2*Knowledge. Arrow: base + weapon + 2*Dexterity.
         // RPG maps only.
         // Melee abilities can crit: the SERVER rolls (never the client) and the
         // crit is announced in the cast message so it is harness-observable.
@@ -4641,14 +4759,14 @@ namespace server
         if(rpg::mapactive(smapname))
         {
             if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::effectiveattr(cq->name, level, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
-            // Spell damage: ability base + 2xKnowledge. (stat_sparkbolt() is
+            // Spell damage: ability base + weapon + 2xKnowledge. (stat_sparkbolt() is
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
-            // Arrow Shot (physical pierce): base + 2xDexterity instead.
+            // Arrow Shot (physical pierce): base + weapon + 2xDexterity instead.
             // Venom Shot (poison arrow, v0.1.8): same Dex scaling -- it's
             // an arrow, not a spell.
-            else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_DEXTERITY);
-            else castdmg = ab.damage + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_KNOWLEDGE);
+            else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + rpg::weapondamage(cq->name) + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_DEXTERITY);
+            else castdmg = ab.damage + rpg::weapondamage(cq->name) + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_KNOWLEDGE);
             if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level, rpg::gearbonus(cq->name, rpg::ATTR_DEXTERITY) + rpg::buffbonus(cq->name, rpg::ATTR_DEXTERITY)))))
             {
                 crit = true;
@@ -4745,6 +4863,9 @@ namespace server
         // v0.1.25: "ri2" (type + payload int) - the old "ri" dropped the payload,
         // so the client always read 0 and inventory showed 0c (v0.1.24 item 2).
         sendf(cq->clientnum, 1, "ri2", N_RPG_GOLD, rpg::getcopper(cq->name));
+        // PvP currency (Oct 31): Embers sync on the same pattern, as its
+        // own message (never folded into copper). Blasque's shop reads it.
+        sendf(cq->clientnum, 1, "ri2", N_RPG_EMBERS, rpg::getembers(cq->name));
         rpg_syncquest(cq); // quest chain v1: tracker + radar stay in sync
         rpg_syncclan(cq); // clan system v1: membership sync
     }
@@ -4823,7 +4944,7 @@ namespace server
                 int lvl = 1, xp = 0;
                 if(rpg::getstats(cq->name, lvl, xp))
                 {
-                    int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY));
+                    int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(cq->name);
                     cq->state.maxhealth = maxhp; // cap rises; current HP unchanged (no silent heal)
                     sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp);
                 }
@@ -4876,6 +4997,45 @@ namespace server
         if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Unknown item."); return; }
         const rpg::itemdef &d = rpg::item(id);
         if(d.slot == rpg::SLOT_NONE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That cannot be bought."); return; }
+        // PvP shop (Oct 31, Blasque): items with an emberprice are sold
+        // for Embers ONLY, never copper — their copper value is 0 by
+        // spec, so falling through to the copper path below would refuse
+        // them as priceless. This branch runs BEFORE the copper path.
+        // CLASS GATE (server-side, fail closed): the item's pvpclass
+        // must match the buyer's class via rpg::classforname (archetype
+        // first, model-dir fallback, same posture as the Oct 29 weapon
+        // equip-gating in rpg::equipitem). UI hiding in Blasque's menu
+        // is display only; a forged rpgbuy for another class's item
+        // still dies here, with no item and no charge. Unknown class,
+        // missing pvpclass, or a mismatch all refuse.
+        if(d.emberprice > 0)
+        {
+            char cls[32];
+            if(!d.pvpclass || !d.pvpclass[0] || !rpg::classforname(cq->name, cls, sizeof(cls)) || strcmp(cls, d.pvpclass))
+            {
+                rpg_qmsg(cq, "That is not for your class.");
+                conoutf("rpg: pvp buy refused: '%s' (%s) tried %s (pvpclass %s)", cq->name, cls[0] ? cls : "unknown", rpg::itemname(id), d.pvpclass ? d.pvpclass : "(none)");
+                return;
+            }
+            if(!rpg::spendembers(cq->name, d.emberprice))
+            {
+                defformatstring(msg)("\f2Not enough Embers (need %d).", d.emberprice);
+                rpg_qmsg(cq, msg);
+                return;
+            }
+            if(!rpg::additem(cq->name, itemid, 1))
+            {
+                // Refund on failure (should not happen for known items).
+                rpg::addembers(cq->name, d.emberprice);
+                sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Purchase failed.");
+                return;
+            }
+            defformatstring(msg)("\f2%s \f7bought for %d Embers.", rpg::itemname(id), d.emberprice);
+            sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            conoutf("rpg: '%s' buys %s for %d Embers", cq->name, rpg::itemname(id), d.emberprice);
+            rpg_syncinv(cq);
+            return;
+        }
         int price = d.value;
         if(price <= 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2That has no price."); return; }
         if(!rpg::spendcopper(cq->name, price))
@@ -5474,7 +5634,7 @@ namespace server
                             int lvl = 1, xp = 0;
                             if(rpg::getstats(cq->name, lvl, xp))
                             {
-                                int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY));
+                                int maxhp = rpg::stat_maxhp(lvl, rpg::buffbonus(cq->name, rpg::ATTR_VITALITY) + rpg::gearbonus(cq->name, rpg::ATTR_VITALITY)) + rpg::maxhpbonusvalue(cq->name);
                                 if(cq->state.health > maxhp) { cq->state.health = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HP, cq->state.health); conoutf("rpg: '%s' vitality expiry clamped HP to %d", cq->name, maxhp); }
                                 if(cq->state.maxhealth != maxhp) { cq->state.maxhealth = maxhp; sendf(cq->clientnum, 1, "ri2", N_RPG_HPMAX, maxhp); }
                             }

@@ -66,6 +66,15 @@ namespace rpg
     int addcopper(const char *name, int amount);  // returns new total, -1 when unknown
     bool spendcopper(const char *name, int amount); // false when insufficient
     int sellprice(int itemidx);                   // value / SELL_DIVISOR, 0 when invalid
+    // --- PvP currency (Oct 31): Embers, mirroring copper ---
+    // Per-character balance (characters.embers); spent at Blasque only.
+    int getembers(const char *name);              // total Embers, -1 when unknown
+    int addembers(const char *name, int amount);  // returns new total, -1 when unknown
+    bool spendembers(const char *name, int amount); // false when insufficient
+    // --- class derivation for the PvP shop purchase gate (Oct 31) ---
+    // Same derivation as the weapon equip gate (archetype first, model-dir
+    // fallback); false on unknown class, and the caller fails closed.
+    bool classforname(const char *name, char *out, int max);
 
     // --- ability layer v1 (milestone step 3): session state, server-authoritative ---
     // Mana and cooldowns live only for connected characters (cleared on
@@ -174,6 +183,7 @@ namespace rpg
     // into the client too, so the GUI/HUD read these. Never authoritative.
     void setvwep(int clientnum, const char *path);   // "" clears the override
     const char *vwepfor(int clientnum);               // NULL = use the model's default vwep
+    bool vwep_has_pvpglow(const char *path);          // client: true when the vwep path is a PvP weapon (data/rpg/pvpglow.cfg)
     void setmana(int mana, int maxmana);
     bool getclientmana(int &mana, int &maxmana);
     void setcooldown(int ability, int waitms, int now);
@@ -184,6 +194,8 @@ namespace rpg
     // Client copper cache (from N_RPG_GOLD, never authoritative).
     void setclientcopper(int copper);
     int getclientcopper(); // total copper, 0 when unset
+    void setclientembers(int embers);
+    int getclientembers(); // total Embers, 0 when unset (Blasque shop display)
     void setclientxp(int xp); // TEST-ONLY: set client XP for HUD verification
     void setloot(int idx, int item, float x, float y, float z);
     void removeloot(int idx);

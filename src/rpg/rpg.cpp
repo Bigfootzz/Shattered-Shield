@@ -47,6 +47,7 @@ namespace rpg
         int level;
         int xp;
         int copper; // total copper (100c = 1s, 100s = 1g)
+        int embers; // PvP currency (Oct 31): spent at Blasque, never copper
         int mana;
         int lastcast[ABILITY_COUNT]; // millis of last successful cast per ability
         int lastregen;               // millis of last regen tick (<0 = not started)
@@ -137,6 +138,7 @@ namespace rpg
                 "level INTEGER NOT NULL DEFAULT 1,"
                 "xp INTEGER NOT NULL DEFAULT 0,"
                 "copper INTEGER NOT NULL DEFAULT 0,"
+                "embers INTEGER NOT NULL DEFAULT 0,"
                 "map TEXT NOT NULL DEFAULT '',"
                 "posx REAL NOT NULL DEFAULT 0, posy REAL NOT NULL DEFAULT 0, posz REAL NOT NULL DEFAULT 0,"
                 "yaw REAL NOT NULL DEFAULT 0,"
@@ -147,6 +149,8 @@ namespace rpg
         // v0.1.23 migration: existing DBs lack the copper column. ALTER fails
         // harmlessly (logged once) when the column already exists (new DBs).
         { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN copper INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
+        // PvP currency (Oct 31): same migration pattern for embers.
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN embers INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
         // --- inventory & equipment v1 (milestone step 4) ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_inventory("
                 "name TEXT NOT NULL,"
@@ -262,6 +266,8 @@ namespace rpg
 
     // v0.1.23 currency: forward declaration (loadcopper defined below, used by onconnect).
     static bool loadcopper(const char *name, int &copper);
+    // PvP currency (Oct 31): same forward declaration for loadembers.
+    static bool loadembers(const char *name, int &embers);
 
     bool onconnect(const char *name)
     {
@@ -294,6 +300,9 @@ namespace rpg
         // STARTING_COPPER via the createchar INSERT; old chars load saved
         // value, 0 when the column is missing/empty).
         { int c = 0; cc.copper = loadcopper(name, c) ? c : 0; }
+        // PvP currency (Oct 31): Embers load the same way (fresh chars 0;
+        // the earn path — battleground kills/wins — is a separate piece).
+        { int e = 0; cc.embers = loadembers(name, e) ? e : 0; }
         initcaststate(cc, level, -1); // mana full, abilities ready; regen starts on first tick
         initinv(cc);
         cache[std::string(name)] = cc;
@@ -567,6 +576,67 @@ namespace rpg
         addcopper(name, -amount);
         return true;
     }
+
+    // --- PvP currency (Oct 31): Embers, mirroring copper exactly ---
+    // Per-character balance in characters.embers (CREATE TABLE for new
+    // DBs + ALTER migration for existing ones, same as copper).
+    // Write-through via the session cache; never charged as copper.
+    static bool loadembers(const char *name, int &embers)
+    {
+        if(!db || !name || !name[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT embers FROM characters WHERE name=?1", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+        bool found = sqlite3_step(st) == SQLITE_ROW;
+        if(found) embers = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+        return found;
+    }
+    static void saveembers(const char *name, int embers)
+    {
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE characters SET embers=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(st, 1, embers);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+    int getembers(const char *name)
+    {
+        if(!db || !name || !name[0]) return -1;
+        cachedchar *cc = findcached(name);
+        if(cc) return cc->embers;
+        int embers = 0;
+        return loadembers(name, embers) ? embers : -1;
+    }
+    int addembers(const char *name, int amount)
+    {
+        if(!db || !name || !name[0]) return -1;
+        cachedchar *cc = findcached(name);
+        if(!cc)
+        {
+            int embers = 0;
+            if(!loadembers(name, embers)) return -1;
+            cachedchar tmp; tmp.level = 1; tmp.xp = 0; tmp.copper = 0; tmp.embers = embers;
+            initinv(tmp);
+            cc = &cache.insert(std::make_pair(std::string(name), tmp)).first->second;
+        }
+        cc->embers += amount;
+        if(cc->embers < 0) cc->embers = 0;
+        saveembers(name, cc->embers);
+        return cc->embers;
+    }
+    bool spendembers(const char *name, int amount)
+    {
+        if(amount < 0) return false;
+        int cur = getembers(name);
+        if(cur < 0 || cur < amount) return false;
+        addembers(name, -amount);
+        return true;
+    }
     int sellprice(int itemidx)
     {
         if(itemidx < 0 || itemidx >= itemcount()) return 0;
@@ -806,6 +876,17 @@ namespace rpg
         else if(classmatch(raw, "magi") || classmatch(raw, "wizard") || classmatch(raw, "sorceress")) copystring(out, "Magi", max);
         else return false;
         return true;
+    }
+
+    // Public accessor for the static classfor above (Oct 31, PvP shop):
+    // the server's purchase handler needs the same derivation the
+    // equip gate uses. Named classforname because a non-static
+    // `classfor` would collide with the static one in this file.
+    // Archetype first, model-dir fallback; false on unknown class,
+    // and the caller must then fail closed.
+    bool classforname(const char *name, char *out, int max)
+    {
+        return classfor(name, out, max);
     }
 
     // Class weapon mapping (Ed, Oct 29): Warrior = maces, axes, swords;
@@ -1159,6 +1240,42 @@ namespace rpg
         return it == vwepmap.end() ? NULL : it->second.c_str();
     }
 
+    // --- PvP weapon glow registry (Oct 31, Ed's call: ALL PvP weapons share
+    // ONE signature glow so players recognize PvP gear from afar). ---
+    // The client only ever learns the equipped vwep PATH (N_RPG_VWEP),
+    // never the item id, so the glow decision is a path membership test
+    // against data/rpg/pvpglow.cfg — no protocol change, no server change.
+    // Opt-in for a new PvP weapon = one `pvpglow "path"` line in that file
+    // PLUS a tag_tip joint authored at the weapon tip at conversion time.
+    static std::vector<std::string> pvpglowpaths;
+    static bool pvpglowloaded = false;
+    static bool pvpglowlinehandler(const char *cmd, int argc, const char *argv[], std::string &err)
+    {
+        if(!cmd || strcmp(cmd, "pvpglow") || argc != 1)
+        {
+            err = "pvpglow.cfg: expected `pvpglow \"vwep/path\"` lines only";
+            return false;
+        }
+        if(argv[0] && argv[0][0]) pvpglowpaths.push_back(argv[0]);
+        return true;
+    }
+    static void loadpvpglow()
+    {
+        if(pvpglowloaded) return;
+        pvpglowloaded = true;
+        if(!contentfileexists("data/rpg/pvpglow.cfg")) return; // no PvP weapons yet: glow off
+        std::string err;
+        if(!parsecontentfile("data/rpg/pvpglow.cfg", pvpglowlinehandler, err))
+            conoutf(CON_ERROR, "rpg: pvpglow.cfg rejected (%s) - PvP glow disabled", err.c_str());
+    }
+    bool vwep_has_pvpglow(const char *path)
+    {
+        if(!path || !path[0]) return false;
+        loadpvpglow();
+        for(size_t i = 0; i < pvpglowpaths.size(); i++) if(pvpglowpaths[i] == path) return true;
+        return false;
+    }
+
     void setmana(int mana, int maxmana)
     {
         initclient();
@@ -1190,11 +1307,14 @@ namespace rpg
 
     static int cllevel = 1, clxp = 0;
     static int clcopper = 0; // client copper cache (from N_RPG_GOLD)
+    static int clembers = 0; // client Embers cache (from N_RPG_EMBERS, Oct 31)
 
     // TEST-ONLY: set client-side XP directly for HUD verification screenshots
     void setclientxp(int xp) { initclient(); clxp = xp; }
     void setclientcopper(int copper) { initclient(); clcopper = copper; }
     int getclientcopper() { initclient(); return clcopper; }
+    void setclientembers(int embers) { initclient(); clembers = embers; }
+    int getclientembers() { initclient(); return clembers; }
     bool getclientstats(int &level, int &xp)
     {
         initclient();
