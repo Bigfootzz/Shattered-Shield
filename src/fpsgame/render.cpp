@@ -96,6 +96,15 @@ namespace game
         // Magi cape variant (Nov 1): the Magi models wear a variant
         // re-baked in Magi neck-local space (same colors), so warm it too.
         preloadmodel("playermodels/attachments/cape_magi");
+        // PvP skull pauldron (Nov 2): 6 attach models (male/female/magi x
+        // left/right), baked in shoulder-tag-local space. Warm them here
+        // like the cape, so the first rendered frame doesn't hitch.
+        preloadmodel("playermodels/attachments/skull_male_l");
+        preloadmodel("playermodels/attachments/skull_male_r");
+        preloadmodel("playermodels/attachments/skull_female_l");
+        preloadmodel("playermodels/attachments/skull_female_r");
+        preloadmodel("playermodels/attachments/skull_magi_l");
+        preloadmodel("playermodels/attachments/skull_magi_r");
         loopi(NUMPLAYERMODELS)
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
@@ -226,7 +235,7 @@ namespace game
             hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
-        modelattach a[7]; // 6 entries max (weapon, tip, powerup, shield, cape, muzzle) + terminator
+        modelattach a[9]; // 8 entries max (weapon, tip, powerup, shield, cape, pauldron_l, pauldron_r, muzzle) + terminator
         // v0.1.16: Revelade FPS vweps removed (Ed). Vweps organized by class:
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
@@ -284,6 +293,30 @@ namespace game
         // mdl.ffa is the model path (identical across team skins).
         bool magicape = !strcmp(mdl.ffa, "playermodels/wizard_male") || !strcmp(mdl.ffa, "playermodels/sorceress_female");
         a[ai++] = modelattach("tag_cape", magicape ? "playermodels/attachments/cape_magi" : "playermodels/attachments/cape");
+        // --- PvP skull pauldron (Nov 2): one design, three bakes — the
+        // skull + 2 spikes, baked in shoulder-tag-local space (see
+        // packages/models/playermodels/attachments/skull_*/iqm.cfg).
+        // Tags are defined with IDENTITY offset in each player model's
+        // iqm.cfg (upperarm_l/r on the ranger/warrior rig, UpperArm.L/R
+        // on the Magi rig); any offset would shift the skull off the
+        // shoulder. Variants by model (mdl.ffa, like the cape): Magi
+        // wear the 0.7 variant (lifted +4, shifted 1.5 toward the
+        // fingers, fitting the robe at 12.2% buried); female ranger/
+        // warrior wear the 0.9 variant; male ranger/warrior wear the
+        // full-size variant. Default anim (-1): the skull has no
+        // frames, so it renders in bind pose at the animated shoulder
+        // tags — the same static-attach pattern as the cape/bow vwep.
+        // Still ungated on purpose: no skull ownership system exists
+        // yet (like the cape); the old pads are hidden by zeroing
+        // their triangle counts in each char.iqm. Fail-safe: link()
+        // returns false when a tag is missing (infected / zombie
+        // models carry no such tags) and the entry is skipped with
+        // the body still rendering; a missing skull file is skipped
+        // the same way by rendermodel.
+        bool magiskull = !strcmp(mdl.ffa, "playermodels/wizard_male") || !strcmp(mdl.ffa, "playermodels/sorceress_female");
+        bool femskull = !strcmp(mdl.ffa, "playermodels/ranger_female") || !strcmp(mdl.ffa, "playermodels/warrior_female");
+        a[ai++] = modelattach("tag_pauldron_l", magiskull ? "playermodels/attachments/skull_magi_l" : (femskull ? "playermodels/attachments/skull_female_l" : "playermodels/attachments/skull_male_l"));
+        a[ai++] = modelattach("tag_pauldron_r", magiskull ? "playermodels/attachments/skull_magi_r" : (femskull ? "playermodels/attachments/skull_female_r" : "playermodels/attachments/skull_male_r"));
         if(d->state==CS_ALIVE)
         {
             if((testquad || d->quadmillis) && mdl.quad)
