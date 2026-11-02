@@ -169,6 +169,13 @@ namespace rpg
                 "state INTEGER NOT NULL DEFAULT 0,"
                 "kills INTEGER NOT NULL DEFAULT 0,"
                 "PRIMARY KEY(name, quest))");
+        // --- Call to Arms (Nov 1): per-mode battleground wins, additive ---
+        // One row per (character, mode) won while a BGWINALL quest is active.
+        // No migration: CREATE TABLE IF NOT EXISTS is harmless on existing DBs.
+        execsql("CREATE TABLE IF NOT EXISTS rpg_bgmodewins("
+                "name TEXT NOT NULL,"
+                "mode TEXT NOT NULL,"
+                "PRIMARY KEY(name, mode))");
         // --- quest engine v2: repeatables (fetch template), additive ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_repeatables("
                 "name TEXT NOT NULL,"
@@ -1587,6 +1594,58 @@ namespace rpg
         questsave(name, qid);
         // Repeatable turn-in: setting the stage back to 0 stamps the cooldown.
         if(stage == 0 && qd->repeatsec > 0) repeatablesetcooldown(name, qid);
+        // Call to Arms turn-in consumption: a BGWINALL quest reset to 0 drops
+        // its mode records, so a repeated attempt starts clean. (Stale rows
+        // between turn-in and re-accept are invisible anyway: questprogress
+        // returns 0/0 when the stage is 0 or finalstage.)
+        if(stage == 0)
+        {
+            loopi(qd->nstages) if(qd->stages[i].objtype == QOBJ_BGWINALL)
+            {
+                bgclearmodewins(name);
+                break;
+            }
+        }
+    }
+
+    // --- Call to Arms mode-win rows (see rpg.h) ---
+    void bgrecordmodewin(const char *name, const char *mode)
+    {
+        if(!db || !name || !name[0] || !mode || !mode[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO rpg_bgmodewins(name, mode) VALUES(?1, ?2)", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, mode, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
+
+    int bgmodewincount(const char *name)
+    {
+        if(!db || !name || !name[0]) return 0;
+        sqlite3_stmt *st = NULL;
+        int n = 0;
+        if(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM rpg_bgmodewins WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            if(sqlite3_step(st) == SQLITE_ROW) n = sqlite3_column_int(st, 0);
+            sqlite3_finalize(st);
+        }
+        return n;
+    }
+
+    void bgclearmodewins(const char *name)
+    {
+        if(!db || !name || !name[0]) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "DELETE FROM rpg_bgmodewins WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
     }
 
     void questaddprogress(const char *name, int qid, int n)
@@ -1597,7 +1656,9 @@ namespace rpg
         std::map<int, qrow>::iterator it = m.find(qid);
         if(it == m.end()) return;
         const queststage *qs = queststageof(qd, it->second.state);
-        if(!qs || qs->objtype != QOBJ_KILL) return; // kill stages only
+        // Kill-like stages share the kills counter: monster kills (KILL),
+        // battleground kills (BGKILL), battleground wins (BGWIN, count 1).
+        if(!qs || (qs->objtype != QOBJ_KILL && qs->objtype != QOBJ_BGKILL && qs->objtype != QOBJ_BGWIN)) return;
         it->second.kills += n;
         questsave(name, qid);
     }
@@ -1617,6 +1678,9 @@ namespace rpg
         const queststage *qs = queststageof(qd, queststate(name, qid));
         if(!qs) return;
         if(qs->objtype == QOBJ_KILL) { have = questkills(name, qid); need = qs->objcount; }
+        else if(qs->objtype == QOBJ_BGKILL) { have = questkills(name, qid); need = qs->objcount; }
+        else if(qs->objtype == QOBJ_BGWIN) { have = questkills(name, qid); need = qs->objcount; }
+        else if(qs->objtype == QOBJ_BGWINALL) { have = bgmodewincount(name); need = qs->objcount; }
         else if(qs->objtype == QOBJ_FETCH)
         {
             char item[64]; int amount = 0;
@@ -1807,6 +1871,62 @@ namespace rpg
             if(!strcmp(qs->objarg, "champion")) clearchampioncn(); // champion dead; stop tracking
             if(n < maxcounted) counted[n] = qd->qid;
             n++;
+        }
+        return n;
+    }
+
+    // --- Call to Arms battleground hooks (see rpg.h) ---
+    // Deliberately separate from questonkill: questonkill is monster-gated
+    // (returns 0 when !ismonster) and RPG-map-scoped, so it can never see
+    // battleground player kills. The caller gates on game time, human actor,
+    // and enemy/winning-team exactly like the Embers grants; these functions
+    // only decide WHICH active quests the event counts toward.
+    int questonbgkill(const char *name, int *counted, int maxcounted)
+    {
+        int n = 0;
+        if(!name || !name[0] || !counted || maxcounted <= 0) return 0;
+        int nq = questdefcount();
+        loopi(nq)
+        {
+            const questdef *qd = questdefbyindex(i);
+            const queststage *qs = queststageof(qd, queststate(name, qd->qid));
+            if(!qs || qs->objtype != QOBJ_BGKILL) continue;
+            questaddprogress(name, qd->qid, 1);
+            if(n < maxcounted) counted[n] = qd->qid;
+            n++;
+        }
+        return n;
+    }
+
+    int questonbgwin(const char *name, const char *mode, int *counted, int maxcounted)
+    {
+        int n = 0;
+        if(!name || !name[0] || !mode || !mode[0] || !counted || maxcounted <= 0) return 0;
+        int nq = questdefcount();
+        loopi(nq)
+        {
+            const questdef *qd = questdefbyindex(i);
+            const queststage *qs = queststageof(qd, queststate(name, qd->qid));
+            if(!qs) continue;
+            if(qs->objtype == QOBJ_BGWIN)
+            {
+                // "any" matches every mode; otherwise the won mode must match.
+                if(strcmp(qs->objarg, "any") && strcmp(qs->objarg, mode)) continue;
+                questaddprogress(name, qd->qid, 1);
+                if(n < maxcounted) counted[n] = qd->qid;
+                n++;
+            }
+            else if(qs->objtype == QOBJ_BGWINALL)
+            {
+                // Only a NEW mode for this character counts as progress.
+                int before = bgmodewincount(name);
+                bgrecordmodewin(name, mode);
+                if(bgmodewincount(name) > before)
+                {
+                    if(n < maxcounted) counted[n] = qd->qid;
+                    n++;
+                }
+            }
         }
         return n;
     }
@@ -2350,6 +2470,12 @@ namespace rpg
                 if(it->second.objtext[0]) copystring(obj, it->second.objtext, sizeof(obj));
                 else if(qs && qs->objtype == QOBJ_KILL)
                     formatstring(obj)("%d/%d slain", it->second.kills, qs->objcount);
+                else if(qs && qs->objtype == QOBJ_BGKILL)
+                    formatstring(obj)("%d/%d enemies defeated", it->second.kills, it->second.need);
+                else if(qs && qs->objtype == QOBJ_BGWIN)
+                    formatstring(obj)("%d/%d battleground wins", it->second.kills, it->second.need);
+                else if(qs && qs->objtype == QOBJ_BGWINALL)
+                    formatstring(obj)("%d/%d modes won", it->second.kills, it->second.need);
                 char desc[512];
                 formatstring(desc)("%s%s%s", qs ? qs->journal : "",
                     obj[0] ? " [" : "", obj[0] ? obj : "");

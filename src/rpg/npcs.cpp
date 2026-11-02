@@ -25,7 +25,13 @@ namespace rpg
     static char loaded_map[128] = "";
     static bool from_file = false;
 
-    // ---- fallback table: pre-Phase-1 NPCS[] contents, verbatim ----
+    // ---- fallback table: pre-Phase-1 NPCS[] contents, verbatim, PLUS the
+    // Call to Arms board (Nov 1, NOT verbatim - deliberate). Quest giver
+    // ids resolve at quest-parse time against this table when the map's
+    // NPC file is missing/invalid; without a board entry here, a broken
+    // rpg_01 NPC file would fail "board" resolution and disable ALL quest
+    // content. The board row uses the live mount position (rpg_01 north
+    // wall), so fallback behavior matches the file.
     static const npcdef FALLBACK_NPCS[] =
     {
         { "maren", "Elder Maren", "npcs/female_peasant_static", 2228.0f, 1980.0f, 2116.0f, 135.0f, "maren_main", "questgiver" },
@@ -33,6 +39,7 @@ namespace rpg
         { "corvin", "Corvin", "npcs/male_peasant_static", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main", "questgiver" },
         { "glimmer", "Glimmer", "npcs/imp_vendor", 3030.0f, 2590.0f, 2116.0f, 180.0f, "vendor_main", "vendor" },
         { "blasque", "Blasque", "npcs/imp_vendor_gold_staff", 1753.0f, 2029.0f, 2148.0f, 263.0f, "vendor_pvp", "vendor" },
+        { "board", "Call to Arms", "objects/notice_board", 1778.0f, 2052.0f, 2182.0f, 0.0f, "board_main", "questgiver" },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_NPCS)/sizeof(FALLBACK_NPCS[0]);
 

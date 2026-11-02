@@ -280,19 +280,29 @@ namespace rpg
     // node, sends node text + response buttons; the client sends back only a
     // button index. Conditions/actions are the CLOSED vocabularies below -
     // dialogue data can never execute arbitrary script.
-    enum { QOBJ_NONE = 0, QOBJ_KILL, QOBJ_FETCH, QOBJ_TALK };
+    // Battleground objectives (Call to Arms, Nov 1): BGKILL counts enemy
+    // combatants felled in battlegrounds (game time only, killer only);
+    // BGWIN counts battleground wins (objarg "any" = any mode, else a mode
+    // key such as "ctf"); BGWINALL counts DISTINCT modes won (objcount =
+    // modes required). BGKILL/BGWIN progress reuses the rpg_quests.kills
+    // column (semantically "stage progress" for kill-like objectives, NOT
+    // a monster-kill count) so no schema change is needed; BGWINALL
+    // progress lives in rpg_bgmodewins rows (see bgrecordmodewin).
+    enum { QOBJ_NONE = 0, QOBJ_KILL, QOBJ_FETCH, QOBJ_TALK,
+           QOBJ_BGKILL, QOBJ_BGWIN, QOBJ_BGWINALL };
     struct queststage
     {
         int stage;            // stage number (>= 1)
         int objtype;          // QOBJ_*
         char objarg[64];      // kill: monster class ("any"/"champion"/"imp"...);
-                              // fetch: unused (roll from fetch pool); talk: npc id
-        int objcount;         // kill/fetch count
+                              // fetch: unused (roll from fetch pool); talk: npc id;
+                              // bgwin: mode key ("any" = any mode, else "ctf"/"koth"/"tff")
+        int objcount;         // kill/fetch/bgkill count; bgwinmodes = modes required
         char journal[256];    // journal line for this stage
     };
     struct questdef
     {
-        int qid;              // permanent append-only id (1..3 Maren, 4 relay, 5 errand, 6 fetch)
+        int qid;              // permanent append-only id (1..3 Maren, 4 relay, 5 errand, 6 fetch, 9..11 Call to Arms)
         char key[64];         // "cull_the_imps"
         char name[96];        // "Cull the Imps"
         int giver;            // npc index (resolved from ss_quest_giver id)
@@ -373,13 +383,22 @@ namespace rpg
     // Stages are integers: 0 = never started (no row yet), 1..N in progress,
     // finalstage = done. questsetstage upserts and resets progress; write-through.
     int queststate(const char *name, int qid);          // stage, 0 when never started
-    int questkills(const char *name, int qid);          // progress counter for kill stages
+    int questkills(const char *name, int qid);          // progress counter for kill-like stages
     void questsetstage(const char *name, int qid, int stage);
-    void questaddprogress(const char *name, int qid, int n = 1); // kill stages only
+    void questaddprogress(const char *name, int qid, int n = 1); // kill-like stages (KILL/BGKILL/BGWIN)
     bool questiscomplete(const char *name, int qid);    // stage == finalstage
-    // Objective bookkeeping for sync/display. have/need: kill -> kills/count;
+    // Objective bookkeeping for sync/display. have/need: kill/bgkill -> kills/count;
+    // bgwin -> wins/1; bgwinmodes -> distinct modes won/modes required;
     // fetch -> min(have,amount)/amount; talk/none -> 0/0.
     void questprogress(const char *name, int qid, int &have, int &need);
+    // Battleground mode wins (Call to Arms quest 9): one row per (character,
+    // mode) won while the quest is active. INSERT OR IGNORE (a repeat win in
+    // the same mode adds nothing). Rows are cleared when the quest's stage
+    // is set to 0 (turn-in consumption), so a repeated quest starts clean.
+    // Direct SQL (a character holds at most a few mode rows; no cache lifecycle).
+    void bgrecordmodewin(const char *name, const char *mode);
+    int bgmodewincount(const char *name);
+    void bgclearmodewins(const char *name);
     // Server-evaluated condition (needs character state). Client never evaluates.
     bool dlgcondmet(const char *name, const dlgcond &c);
     // Called from the server kill path for every monster kill by a player.
@@ -390,6 +409,17 @@ namespace rpg
     // qids to `counted` (up to maxcounted) and returns how many counted.
     int questonkill(const char *name, const char *victimclass, int targetclientnum,
                     bool ismonster, int *counted, int maxcounted);
+    // Called from the server battleground paths (NOT questonkill, which is
+    // monster-gated and RPG-map-scoped). questonbgkill counts one enemy
+    // combatant toward EVERY active BGKILL quest. questonbgwin counts a win
+    // toward EVERY active BGWIN quest whose objarg is "any" or the won mode,
+    // and records the mode toward EVERY active BGWINALL quest (only when the
+    // mode is new for that character). Both append counted qids (up to
+    // maxcounted) and return how many counted. Killer/winner only: NO party
+    // sharing (mirrors the Embers grants, which pay the killer/winner only);
+    // the caller gates on game time, human actor, and enemy/winning-team.
+    int questonbgkill(const char *name, int *counted, int maxcounted);
+    int questonbgwin(const char *name, const char *mode, int *counted, int maxcounted);
     // --- crafting recipes (Phase 1, Oct 27): per-character discovered
     // recipes, additive table rpg_recipes. One row per (character, recipe
     // key); the key is the canonical ingredient key from crafting.h, so a

@@ -2724,6 +2724,13 @@ namespace server
     static void bg_grantwin(int winnerteam)
     {
         if(winnerteam < 1 || winnerteam > 2) return; // draw or invalid: no grant
+        // Call to Arms win recording (Nov 1): rides the same once-per-game
+        // funnel as the Embers win grant (checkintermission's !interm guard),
+        // so a win can never double-record. Mode key: CTF is gamemode 7
+        // today; when KOTH/TFF land, their intermission paths call this same
+        // funnel and this mapping grows ("koth"/"tff") — a win with an
+        // unknown mode records no quest progress (never a wrong mode).
+        const char *mode = m_ctf ? "ctf" : NULL;
         loopv(clients)
         {
             clientinfo *ci = clients[i];
@@ -2738,6 +2745,41 @@ namespace server
                 conoutf("rpg: battleground win: +100 Embers to '%s' (total %d, team %d)", ci->name, newtotal, winnerteam);
             }
             else conoutf("rpg: WARNING battleground win grant FAILED for '%s' (+100 Embers, team %d) - addembers returned %d (character row missing?)", ci->name, winnerteam, newtotal);
+            // Call to Arms: quest wins record ONLY for humans on the winning
+            // team (same loop, same filters as the Embers grant). Wins with
+            // no active BGWIN/BGWINALL quest record nothing — progress
+            // counts while the quest is active, like kill quests.
+            if(rpg::connected() && mode)
+            {
+                int counted[8];
+                int ncounted = rpg::questonbgwin(ci->name, mode, counted, 8);
+                if(ncounted > 0)
+                {
+                    loopi(ncounted)
+                    {
+                        const rpg::questdef *qqd = rpg::questdefbyid(counted[i]);
+                        if(!qqd) continue;
+                        int have = 0, need = 0;
+                        rpg::questprogress(ci->name, counted[i], have, need);
+                        if(have >= need && need > 0) rpg_qmsg(ci, "Objective complete - return to the Call to Arms board.");
+                        else
+                        {
+                            const rpg::queststage *qs = rpg::queststageof(qqd, rpg::queststate(ci->name, counted[i]));
+                            if(qs && qs->objtype == rpg::QOBJ_BGWINALL)
+                            {
+                                defformatstring(qprog)("%s: %d/%d modes won.", qqd->name, have, need);
+                                rpg_qmsg(ci, qprog);
+                            }
+                            else
+                            {
+                                defformatstring(qprog)("%s: %d/%d battleground wins.", qqd->name, have, need);
+                                rpg_qmsg(ci, qprog);
+                            }
+                        }
+                    }
+                    rpg_syncquest(ci);
+                }
+            }
         }
     }
 
@@ -3091,6 +3133,40 @@ namespace server
                 }
                 else conoutf("rpg: WARNING battleground kill grant FAILED for '%s' (+10 Embers, victim '%s') - addembers returned %d (character row missing?)", actor->name, target->name, newtotal);
             }
+            // --- Call to Arms: battleground kill quest progress (Nov 1) ---
+            // Same EXACT gate as the Embers kill grant above (game time only,
+            // human killer, player-side victim, no teamkills), so quest
+            // progress can never pay where Embers do not. Killer ONLY, no
+            // party sharing — a deliberate mirror of the Embers grant, not
+            // the monster-kill block's party credit (Ed can override).
+            // questonbgkill is separate from questonkill because questonkill
+            // is monster-gated and never runs for player kills.
+            if(rpg::connected() && m_ctf && rpg::mapactive(smapname) &&
+               bg_match_active && !bg_start_active && interm <= 0 &&
+               actor && actor != target && actor->state.ai.type == ai::AI_TYPE_NONE &&
+               (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
+               !isteam(actor->team, target->team) && actor->name[0])
+            {
+                int counted[8];
+                int ncounted = rpg::questonbgkill(actor->name, counted, 8);
+                if(ncounted > 0)
+                {
+                    loopi(ncounted)
+                    {
+                        const rpg::questdef *qqd = rpg::questdefbyid(counted[i]);
+                        if(!qqd) continue;
+                        int have = 0, need = 0;
+                        rpg::questprogress(actor->name, counted[i], have, need);
+                        if(have >= need && need > 0) rpg_qmsg(actor, "Objective complete - return to the Call to Arms board.");
+                        else
+                        {
+                            defformatstring(qprog)("%s: %d/%d enemies defeated.", qqd->name, have, need);
+                            rpg_qmsg(actor, qprog);
+                        }
+                    }
+                    rpg_syncquest(actor);
+                }
+            }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
             {
@@ -3267,6 +3343,25 @@ namespace server
             int have = 0, need = 0;
             rpg::questprogress(name, qid, have, need);
             formatstring(out)("%d/%d slain", have, need);
+        }
+        // Call to Arms tracker/journal text (Nov 1).
+        else if(qs->objtype == rpg::QOBJ_BGKILL)
+        {
+            int have = 0, need = 0;
+            rpg::questprogress(name, qid, have, need);
+            formatstring(out)("%d/%d enemies defeated", have, need);
+        }
+        else if(qs->objtype == rpg::QOBJ_BGWIN)
+        {
+            int have = 0, need = 0;
+            rpg::questprogress(name, qid, have, need);
+            formatstring(out)("%d/%d battleground wins", have, need);
+        }
+        else if(qs->objtype == rpg::QOBJ_BGWINALL)
+        {
+            int have = 0, need = 0;
+            rpg::questprogress(name, qid, have, need);
+            formatstring(out)("%d/%d modes won", have, need);
         }
         else if(qs->objtype == rpg::QOBJ_FETCH)
         {

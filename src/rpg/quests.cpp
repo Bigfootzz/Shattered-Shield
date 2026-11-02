@@ -192,6 +192,30 @@ namespace rpg
                 st.objtype = QOBJ_TALK; copystring(st.objarg, argv[1], sizeof(st.objarg));
                 return true;
             }
+            // Call to Arms battleground objectives (Nov 1):
+            //   bgkill <count>    - fell <count> enemy combatants in battlegrounds
+            //   bgwin <mode>      - win a battleground ("any" = any mode, else "ctf"/"koth"/"tff")
+            //   bgwinmodes <count>- win <count> DISTINCT modes (tracked in rpg_bgmodewins)
+            if(!strcmp(argv[0], "bgkill") && argc == 2)
+            {
+                st.objtype = QOBJ_BGKILL;
+                st.objcount = atoi(argv[1]);
+                if(st.objcount < 1) QERR("bgkill count must be >= 1");
+                return true;
+            }
+            if(!strcmp(argv[0], "bgwin") && argc == 2)
+            {
+                st.objtype = QOBJ_BGWIN; copystring(st.objarg, argv[1], sizeof(st.objarg));
+                st.objcount = 1;
+                return true;
+            }
+            if(!strcmp(argv[0], "bgwinmodes") && argc == 2)
+            {
+                st.objtype = QOBJ_BGWINALL;
+                st.objcount = atoi(argv[1]);
+                if(st.objcount < 1) QERR("bgwinmodes count must be >= 1");
+                return true;
+            }
             if(!strcmp(argv[0], "none") && argc == 1) { st.objtype = QOBJ_NONE; return true; }
             QERR("bad ss_objective");
         }
@@ -565,7 +589,8 @@ namespace rpg
                 int st = queststate(name, c.qid);
                 const queststage *qs = queststageof(qd, st);
                 if(!qs || st <= 0 || st == qd->finalstage) return false;
-                if(qs->objtype == QOBJ_KILL)
+                if(qs->objtype == QOBJ_KILL || qs->objtype == QOBJ_BGKILL ||
+                   qs->objtype == QOBJ_BGWIN || qs->objtype == QOBJ_BGWINALL)
                 {
                     questprogress(name, c.qid, have, need);
                     return have >= need && need > 0;
@@ -609,7 +634,8 @@ namespace rpg
                     formatstring(target)("%d", ra);
                 }
             }
-            else if(qs && qs->objtype == QOBJ_KILL)
+            else if(qs && (qs->objtype == QOBJ_KILL || qs->objtype == QOBJ_BGKILL ||
+                            qs->objtype == QOBJ_BGWIN || qs->objtype == QOBJ_BGWINALL))
             {
                 questprogress(name, qid, have, need);
                 formatstring(progress)("%d", have);
