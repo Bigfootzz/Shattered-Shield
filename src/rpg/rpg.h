@@ -432,6 +432,7 @@ namespace rpg
     // Lists up to max characters (name, level, archetype, model). Returns count.
     // Opens its own SQLite handle; safe to call from the main menu.
     int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max);
+    bool charexists(const char *name); // true if a character row with this name exists
     bool chararchetype(const char *name, char *out, int max); // archetype for one character ("" if unknown)
     bool charmodel(const char *name, char *out, int max); // model dir for one character ("" if unknown)
     bool charcreate(const char *name, const char *archetype, const char *model); // false if name taken or 3+ chars

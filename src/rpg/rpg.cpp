@@ -2031,6 +2031,26 @@ namespace rpg
             if(!strcmp(name, charlist_botnames[i])) return true;
         return false;
     }
+    // Does a character row with this name exist? Used by bg_fillbots:
+    // a bot must never share a name with an existing row, or it would
+    // inherit that character (and re-archetype it to Magi), and the
+    // queue-end cleanup below would then delete a real character.
+    bool charexists(const char *name)
+    {
+        if(!name || !name[0]) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        sqlite3_stmt *st = NULL;
+        bool found = false;
+        if(sqlite3_prepare_v2(cdb, "SELECT 1 FROM characters WHERE name=?1 LIMIT 1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            if(sqlite3_step(st) == SQLITE_ROW) found = true;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return found;
+    }
     int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max)
     {
         if(max <= 0) return 0;
@@ -2135,12 +2155,20 @@ namespace rpg
         if(!name || !name[0] || strlen(name) > 32) return false;
         sqlite3 *cdb = chardb_open();
         if(!cdb) return false;
-        // enforce 3-slot cap
+        // Enforce the 3-slot cap on REAL characters only (test-fixes
+        // follow-up, Nov 3, Ed: bot rows consumed the cap). Bot rows are
+        // real rows in this table, so the old COUNT(*) blocked creation
+        // whenever any bot rows existed, even when select showed empty
+        // slots. Same pool filter as charlist, so the two agree.
         sqlite3_stmt *st = NULL;
         int count = 0;
-        if(sqlite3_prepare_v2(cdb, "SELECT COUNT(*) FROM characters", -1, &st, NULL) == SQLITE_OK)
+        if(sqlite3_prepare_v2(cdb, "SELECT name FROM characters", -1, &st, NULL) == SQLITE_OK)
         {
-            if(sqlite3_step(st) == SQLITE_ROW) count = sqlite3_column_int(st, 0);
+            while(sqlite3_step(st) == SQLITE_ROW)
+            {
+                const char *nm = (const char *)sqlite3_column_text(st, 0);
+                if(!charlist_isbot(nm)) count++;
+            }
             sqlite3_finalize(st);
         }
         if(count >= 3) { sqlite3_close(cdb); return false; }

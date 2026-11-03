@@ -3358,10 +3358,23 @@ namespace server
     static const char *bg_botnames[] = { "Aldric", "Brenna", "Cedric", "Delia", "Edric", "Fenna", "Gareth", "Helene", "Ivo", "Janna", "Kellan", "Lira" };
     static void bg_deletebots()
     {
+        // Queue-end cleanup (test-fixes follow-up, Nov 3, Ed: bot rows
+        // accumulated forever). Each bot's character rows are deleted
+        // here, so a run leaves no residue. SAFE only because bg_fillbots
+        // below never picks a name that already has a row: every row
+        // deleted here was created by this fill, never a real character.
+        // Legacy rows from before this guard stay (hidden by the select
+        // filter); removing them is a separate one-time step.
         loopvrev(bg_bots)
         {
             clientinfo *bi = getinfo(bg_bots[i]);
-            if(bi) aiman::deleteai(bi);
+            if(bi)
+            {
+                string botname;
+                copystring(botname, bi->name);
+                aiman::deleteai(bi);
+                if(rpg::connected()) rpg::chardelete(botname);
+            }
         }
         bg_bots.shrink(0);
     }
@@ -3378,6 +3391,13 @@ namespace server
             {
                 bool used = false;
                 loopv(clients) if(!strcmp(clients[i]->name, bg_botnames[k])) { used = true; break; }
+                // Never reuse a name that already has a character row:
+                // the bot would inherit that character (and re-archetype
+                // it to Magi), and bg_deletebots would then delete it.
+                // This also means pre-guard legacy bot rows are skipped
+                // (they stay hidden by the select filter), shrinking the
+                // usable pool by that count until a one-time cleanup.
+                if(!used && rpg::connected() && rpg::charexists(bg_botnames[k])) used = true;
                 if(!used) { name = bg_botnames[k]; break; }
             }
             if(!name) break; // name pool exhausted
