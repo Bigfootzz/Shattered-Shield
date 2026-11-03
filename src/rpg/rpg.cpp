@@ -2022,6 +2022,15 @@ namespace rpg
         if(sqlite3_open(p, &cdb) != SQLITE_OK) { if(cdb) sqlite3_close(cdb); return NULL; }
         return cdb;
     }
+    // Bot-name pool for the charlist filter (must match server.cpp bg_botnames).
+    static const char *charlist_botnames[] = { "Aldric", "Brenna", "Cedric", "Delia", "Edric", "Fenna", "Gareth", "Helene", "Ivo", "Janna", "Kellan", "Lira" };
+    static bool charlist_isbot(const char *name)
+    {
+        if(!name) return false;
+        loopi(sizeof(charlist_botnames)/sizeof(charlist_botnames[0]))
+            if(!strcmp(name, charlist_botnames[i])) return true;
+        return false;
+    }
     int charlist(char names[][64], int *levels, char archetypes[][32], char models[][64], int max)
     {
         if(max <= 0) return 0;
@@ -2029,12 +2038,22 @@ namespace rpg
         if(!cdb) return 0;
         sqlite3_stmt *st = NULL;
         int n = 0;
-        if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance FROM characters ORDER BY last_seen DESC LIMIT ?", -1, &st, NULL) == SQLITE_OK)
+        // v0.1.42-test-fixes (Nov 3, Ed: Aldric/Brenna bot rows reappeared
+        // in character select): battleground bots get real character rows
+        // via onconnect (server.cpp bg_fillbots) and bg_deletebots never
+        // removes them, so they persist and select lists them. Filter the
+        // bot name pool out here at the DB level, not the GUI: the old
+        // LIMIT let bot rows displace real characters. Pool must match
+        // server.cpp bg_botnames exactly. Edge: a real player character
+        // sharing a pool name is hidden too (no bot flag in the schema);
+        // that needs a bot column, not a wider filter.
+        if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance FROM characters ORDER BY last_seen DESC", -1, &st, NULL) == SQLITE_OK)
         {
-            sqlite3_bind_int(st, 1, max);
             while(n < max && sqlite3_step(st) == SQLITE_ROW)
             {
-                copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+                const char *nm = (const char *)sqlite3_column_text(st, 0);
+                if(charlist_isbot(nm)) continue;
+                copystring(names[n], nm, 64);
                 if(levels) levels[n] = sqlite3_column_int(st, 1);
                 if(archetypes) copystring(archetypes[n], (const char *)sqlite3_column_text(st, 2), 32);
                 if(models) copystring(models[n], (const char *)sqlite3_column_text(st, 3), 64);

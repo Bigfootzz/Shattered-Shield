@@ -2069,21 +2069,6 @@ namespace game
         draw_text(str, left, top);
         settextscale(save);
     }
-    // v0.1.42-test-hud-cleanup (Nov 3, Ed: target name + globe numerals
-    // unreadable, thin text over bright world/fills): semi-transparent
-    // plate behind a centered HUD string, sized from its TRUE measured
-    // extent (same idiom as the quest tracker plate). Call BEFORE the
-    // matching rpg_hudtextc; measures with the CURRENT font, so it never
-    // changes the text's font, only adds contrast behind it.
-    static void rpg_textplate(const char *str, float cx, float cy, float pxh)
-    {
-        float save = gtextscale;
-        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
-        settextscale(pxh/baseh);
-        float wpx = text_widthf(str);
-        settextscale(save);
-        rpg_solidquad(cx - wpx/2 - pxh*0.4f, cy - pxh/2 - pxh*0.25f, wpx + pxh*0.8f, pxh + pxh*0.5f, 0.0f, 0.0f, 0.0f, 0.72f);
-    }
     static void rpg_hudtextc(const char *str, float cx, float cy, float pxh)
     {
         // v0.1.30: true centering by measured width. The old strlen*0.5
@@ -2097,6 +2082,23 @@ namespace game
         float wpx = text_widthf(str);
         settextscale(save);
         rpg_hudtext(str, int(cx - wpx/2), int(cy - pxh/2), pxh);
+    }
+
+    // v0.1.42-test-fixes (Nov 3, Ed: the hud-cleanup plates look terrible
+    // as boxes on round globes and over the sky): same centered text,
+    // but contrast comes from the engine's own TEXT_SHADOW (black copy
+    // at -2,-2, then the normal white copy) instead of a drawn plate.
+    // Same idiom the battleground queue overlay already uses; the
+    // 3-arg draw_text defaults to white, so this renders exactly like
+    // rpg_hudtextc plus the shadow.
+    static void rpg_hudtextshadow(const char *str, float cx, float cy, float pxh)
+    {
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        float wpx = text_widthf(str);
+        draw_text(str, int(cx - wpx/2), int(cy - pxh/2), 255, 255, 255, 255, TEXT_SHADOW, -1, -1);
+        settextscale(save);
     }
 
     // v0.1.42 (tester feedback, Nov 1): clickable action bar. Hit-rects in
@@ -2209,14 +2211,12 @@ namespace game
         // (no font lines in the v0.1.25->v0.1.26 diff); 16% was simply
         // still too big, so this goes visibly smaller, not sideways.)
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
-        rpg_textplate(hps, xx + osz/2, xy + osz/2, osz*0.12f);
-        rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.12f);
+        rpg_hudtextshadow(hps, xx + osz/2, xy + osz/2, osz*0.12f);
 
         // v0.1.17: mana numerals on the mana globe (Ed: mana has no text)
         // v0.1.27: same 16% -> 12% reduction as health, above.
         defformatstring(mps)("%d/%d", mana, maxmana);
-        rpg_textplate(mps, ox + osz/2, oy + osz/2, osz*0.12f);
-        rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.12f);
+        rpg_hudtextshadow(mps, ox + osz/2, oy + osz/2, osz*0.12f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
         // User design change Oct 19: center bar is XP (was health); fills toward level-up.
@@ -2685,14 +2685,12 @@ namespace game
             rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
             rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
             rpg_solidquad(bx, by, bw, bh, 0.95f, 0.75f, 0.25f, 1.0f); // NPC gold, full
-            rpg_textplate(nd->name, cx, 76, 40.0f);
-            rpg_hudtextc(nd->name, cx, 76, 40.0f);
+            rpg_hudtextshadow(nd->name, cx, 76, 40.0f);
             // v0.1.25: prompt is distance-aware (same 16u horizontal range
             // as the server talk check) so it never promises F-talk that
             // will fail with a System-tab-only message.
             float hdist = player1 ? vec(player1->o.x, player1->o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) : 0.0f;
-            rpg_textplate(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
-            rpg_hudtextc(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
+            rpg_hudtextshadow(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
             return;
         }
         int cn = rpg::selectedtarget();
@@ -2715,8 +2713,7 @@ namespace game
         rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
         rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
         if(hpf > 0) rpg_solidquad(bx, by, bw*hpf, bh, fr, fg, fb, 1.0f);
-        rpg_textplate(d->name, cx, 76, 40.0f);
-        rpg_hudtextc(d->name, cx, 76, 40.0f);
+        rpg_hudtextshadow(d->name, cx, 76, 40.0f);
     }
 
     // Quest tracker (quest chain v1): current quest name + objective progress,
@@ -2732,16 +2729,19 @@ namespace game
     //   ring center (0.4952, 0.4856), terrain window ELLIPSE rx 0.3110, ry 0.3046
     //   clock inset center x 0.4992, text at 0.0862, inset height 0.1116 (unchanged)
     //   circles (center frac, dark-diameter frac):
-    //     char  lower-left          (0.1559, 0.7843) 0.1435
-    //     bag   lower-right         (0.8373, 0.7843) 0.1435
+    //     char  lower-left          (0.1499, 0.7658) 0.1435  // edge-fit refit, test-fixes
+    //     bag   lower-right         (0.8405, 0.7678) 0.1435  // edge-fit refit, test-fixes
     //     (Nov 3 HUD cleanup: char/bag centers corrected from the shipped
     //     radar_frame.png art itself — dark-disc centroids measured
     //     (195,984)/(1050,984) vs the old (193,991)/(1053,991); the icons
     //     sat ~1.4 screen px low in their painted circles at 1080p.)
-    //     craft bottom-center-right (0.6467, 0.8940) 0.1435
+    //     (v0.1.42-test-fixes: edge-fit on the ring outer edges supersedes
+    //     the dark-disc centroids above; the disc method was biased by ring
+    //     shading, which is why the first correction fell short.)
+    //     craft bottom-center-right (0.6480, 0.9040) 0.1435  // edge-fit refit, test-fixes
     //     social bottom-center-left (0.3469, 0.8963) 0.1435 (EMPTY)
-    //     zoom+ upper-right small   (0.8134, 0.2177) 0.0877
-    //     zoom- upper-right small   (0.8589, 0.3014) 0.0877
+    //     zoom+ upper-right small   (0.8153, 0.2184) 0.0877  // edge-fit refit, test-fixes
+    //     zoom- upper-right small   (0.8655, 0.2921) 0.0877  // edge-fit refit, test-fixes
     //   bottom assembly's outer bottom: 0.9928
     // The composite scale is UNCHANGED (comp = s*0.39/0.2935, the old
     // window radius kept as the scale anchor), so the buff row, quest
@@ -3631,11 +3631,11 @@ namespace game
         // upper-right sockets are the zoom buttons (glyphs baked into
         // the art): their hit-rects use the same 0.82x convention.
         {
-            float chx = compx + 0.1559f*comp, chy = compy + 0.7843f*comp, chz = 0.82f*0.1435f*comp;
-            float bgx = compx + 0.8373f*comp, bgy = compy + 0.7843f*comp, bgz = 0.82f*0.1435f*comp;
-            float crx = compx + 0.6467f*comp, cry = compy + 0.8940f*comp, crz = 0.82f*0.1435f*comp;
-            float zpx = compx + 0.8134f*comp, zpy = compy + 0.2177f*comp, zpz = 0.82f*0.0877f*comp;
-            float zmx = compx + 0.8589f*comp, zmy = compy + 0.3014f*comp, zmz = 0.82f*0.0877f*comp;
+            float chx = compx + 0.1499f*comp, chy = compy + 0.7658f*comp, chz = 0.82f*0.1435f*comp;
+            float bgx = compx + 0.8405f*comp, bgy = compy + 0.7678f*comp, bgz = 0.82f*0.1435f*comp;
+            float crx = compx + 0.6480f*comp, cry = compy + 0.9040f*comp, crz = 0.82f*0.1435f*comp;
+            float zpx = compx + 0.8153f*comp, zpy = compy + 0.2184f*comp, zpz = 0.82f*0.0877f*comp;
+            float zmx = compx + 0.8655f*comp, zmy = compy + 0.2921f*comp, zmz = 0.82f*0.0877f*comp;
             rpg_radar_char_rect[0] = chx - chz*0.5f; rpg_radar_char_rect[1] = chy - chz*0.5f;
             rpg_radar_char_rect[2] = chx + chz*0.5f; rpg_radar_char_rect[3] = chy + chz*0.5f;
             rpg_radar_bag_rect[0] = bgx - bgz*0.5f; rpg_radar_bag_rect[1] = bgy - bgz*0.5f;
