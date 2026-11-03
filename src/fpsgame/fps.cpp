@@ -1482,6 +1482,24 @@ namespace game
         else glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     }
 
+    // HUD scale (WoW-style UI Scale, user call Nov 3): one factor for the
+    // whole HUD pass. The HUD is drawn in a virtual space hudV units tall
+    // (matrix glScalef(h/hudV) in gameplayhud); 1800 is today's virtual
+    // height, i.e. factor 1.0. hudscale is the player's percent (Video
+    // tab slider); hudscale_custom records whether they ever moved it.
+    // Untouched, the factor follows the pixel-perfect formula
+    // 768/screenHeight, clamped to [0.50, 1.0]: at 1080p that is 0.711
+    // (~29% smaller linearly than today). The 0.50 floor keeps HUD text
+    // readable (1440p pixel-perfect 0.533 is reachable; 4K's 0.356 is
+    // not, by design: at 0.356 the ~12px slot keys would render ~4px).
+    VARP(hudscale, 50, 100, 150);
+    VARP(hudscale_custom, 0, 0, 1);
+    static float hudscaleformula(int h) { return h > 0 ? clamp(768.0f/float(h), 0.50f, 1.0f) : 1.0f; }
+    float hudscalefactor(int h) { return hudscale_custom ? hudscale/100.0f : hudscaleformula(h); }
+    float hudvirtualheight(int h) { return 1800.0f/hudscalefactor(h); }
+    ICOMMAND(resethudscale, "", (), { hudscale = int(hudscaleformula(scr_h)*100.0f + 0.5f); hudscale_custom = 0; });
+    ICOMMAND(synchudscale, "", (), { if(!hudscale_custom) hudscale = int(hudscaleformula(scr_h)*100.0f + 0.5f); });
+
     float abovegameplayhud(int w, int h)
     {
         switch(hudplayer()->state)
@@ -1561,7 +1579,7 @@ namespace game
             hudevents.shrink(0);
             return;
         }
-        float rw = ((float)w / ((float)h/1800.f)) /*, rh = 1800*/;
+        float rw = ((float)w / ((float)h/hudvirtualheight(h))) /*, rh = hudV*/;
         float iw = rw+512.f, ix = 256;
 
         loopi(hudevents.length())
@@ -1684,7 +1702,7 @@ namespace game
     int lastslot = -1, flip[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     void drawammohud(fpsent *d, int w, int h)
     {
-        float rw = ((float)w / ((float)h/1800.f)), rh = 1800, sz = HICON_SIZE;
+        float rw = ((float)w / ((float)h/hudvirtualheight(h))), rh = hudvirtualheight(h), sz = HICON_SIZE;
         glColor4f(1.f, 1.f, 1.f, 1.f);
 
         // draw ammo bar
@@ -1808,7 +1826,7 @@ namespace game
         if (!gunwaitft) gunwaitft = textureload("data/hud/gunwait_filled.png", 0, true, false);
         int size = 128*gunwaitft_scale;
 
-        float rw = ((float)w / ((float)h/1800.f)), rh = 1800;
+        float rw = ((float)w / ((float)h/hudvirtualheight(h))), rh = hudvirtualheight(h);
         float scale = a_scale * 1.6;
         float x = (rw/scale)/2.f+100, y = (rh-size*2.f)/(scale*2.f);
 
@@ -1849,7 +1867,7 @@ namespace game
         settextscale(0.6);
 
         int numplayers = min(sg->players.length(), 9);
-        int x = 1800*w/h - 500, y = 540;
+        int x = int(hudvirtualheight(h)*w/h) - 500, y = 540;
         
         string bufs[numplayers];
 
@@ -2051,6 +2069,21 @@ namespace game
         draw_text(str, left, top);
         settextscale(save);
     }
+    // v0.1.42-test-hud-cleanup (Nov 3, Ed: target name + globe numerals
+    // unreadable, thin text over bright world/fills): semi-transparent
+    // plate behind a centered HUD string, sized from its TRUE measured
+    // extent (same idiom as the quest tracker plate). Call BEFORE the
+    // matching rpg_hudtextc; measures with the CURRENT font, so it never
+    // changes the text's font, only adds contrast behind it.
+    static void rpg_textplate(const char *str, float cx, float cy, float pxh)
+    {
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        float wpx = text_widthf(str);
+        settextscale(save);
+        rpg_solidquad(cx - wpx/2 - pxh*0.4f, cy - pxh/2 - pxh*0.25f, wpx + pxh*0.8f, pxh + pxh*0.5f, 0.0f, 0.0f, 0.0f, 0.72f);
+    }
     static void rpg_hudtextc(const char *str, float cx, float cy, float pxh)
     {
         // v0.1.30: true centering by measured width. The old strlen*0.5
@@ -2067,7 +2100,7 @@ namespace game
     }
 
     // v0.1.42 (tester feedback, Nov 1): clickable action bar. Hit-rects in
-    // virtual coords (1800-tall space), written by drawrpghud each frame it
+    // virtual coords (hudV-tall space), written by drawrpghud each frame it
     // draws and cleared (-1) at entry, so stale rects never eat clicks.
     // Only slots holding an ability get a rect (empty kit frames stay
     // click-through to the world pick, as before). rpg_hotbarclick is
@@ -2114,9 +2147,9 @@ namespace game
             // g3d deathgui on top of the HUD pass).
             if(d->state == CS_DEAD)
             {
-                float X = w*1800.0f/h;
+                float X = w*hudvirtualheight(h)/h;
                 Texture *vig = textureload("data/hud/death_vignette.png", 3);
-                if(vig) { glBindTexture(GL_TEXTURE_2D, vig->id); rpg_drawtexuv(0, 0, X, 1800, 0, 0, 1, 1); }
+                if(vig) { glBindTexture(GL_TEXTURE_2D, vig->id); rpg_drawtexuv(0, 0, X, hudvirtualheight(h), 0, 0, 1, 1); }
             }
             return;
         }
@@ -2142,10 +2175,10 @@ namespace game
         hpf = clamp(hpf, 0.0f, 1.0f);
         mpf = clamp(mpf, 0.0f, 1.0f);
 
-        float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
+        float X = w*hudvirtualheight(h)/h;   // virtual width (hudV = virtual height)
         float sw = 1500.0f;                  // strip width (native art is 1024x156)
         float sh = sw*156.0f/1024.0f;
-        float sx = (X - sw)/2, sy = 1800.0f - sh - 24.0f;
+        float sx = (X - sw)/2, sy = hudvirtualheight(h) - sh - 24.0f;
         float s = sw/1024.0f;                // native-art -> virtual scale
 
         // Orb fills draw FIRST, generously sized, then the strip frame draws
@@ -2176,11 +2209,13 @@ namespace game
         // (no font lines in the v0.1.25->v0.1.26 diff); 16% was simply
         // still too big, so this goes visibly smaller, not sideways.)
         defformatstring(hps)("%d/%d", d->health, d->maxhealth);
+        rpg_textplate(hps, xx + osz/2, xy + osz/2, osz*0.12f);
         rpg_hudtextc(hps, xx + osz/2, xy + osz/2, osz*0.12f);
 
         // v0.1.17: mana numerals on the mana globe (Ed: mana has no text)
         // v0.1.27: same 16% -> 12% reduction as health, above.
         defformatstring(mps)("%d/%d", mana, maxmana);
+        rpg_textplate(mps, ox + osz/2, oy + osz/2, osz*0.12f);
         rpg_hudtextc(mps, ox + osz/2, oy + osz/2, osz*0.12f);
 
         // experience bar (middle thin recess), native x 153-870, y 28-48
@@ -2261,7 +2296,7 @@ namespace game
         // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
         // what the ability does. Same pattern as character page tooltip: hover
         // shows info, click still activates. Tooltip appears above the slot.
-        // Uses g3d_cursorpos (0-1 range) converted to virtual coords (X, 1800).
+        // Uses g3d_cursorpos (0-1 range) converted to virtual coords (X, hudV).
         {
             // NB: g3d_cursorpos lives in global namespace (3dgui.cpp, declared
             // in iengine.h). A local extern here would resolve to game:: and
@@ -2278,7 +2313,7 @@ namespace game
             // For now, show tooltip whenever cursor is over a slot - the
             // cursor is only visible when GUI is open or in RPG mode
             float vx = cx * X;
-            float vy = cy * 1800.0f;
+            float vy = cy * hudvirtualheight(h);
             int hoverSlot = -1;
             int hoverAid = -1;
             loopi(10)
@@ -2511,7 +2546,7 @@ namespace game
         // the HUD strip keeps the GUI font.
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made chat text invisible in v0.1.23
-        float X = w*1800.0f/h;               // virtual width (1800 = virtual height)
+        float X = w*hudvirtualheight(h)/h;   // virtual width (hudV = virtual height)
         // strip right edge, same geometry as drawrpghud (sw=1500 centered)
         float stripr = (X + 1500.0f)/2;
         float bw = min(704.0f, X - stripr - 48.0f);
@@ -2524,7 +2559,7 @@ namespace game
         bool inputopen = consoleinputisbox();
         float fieldh = inputopen ? 61.6f : 0.0f;
         float bh = tabh + pad + nlines*lineh + pad + fieldh;
-        float by1 = 1800.0f - 24.0f, by0 = by1 - bh;
+        float by1 = hudvirtualheight(h) - 24.0f, by0 = by1 - bh;
         float msgby1 = by1 - fieldh; // message area bottom (above the field)
 
         // black transparent plate behind the chat area (readability backing
@@ -2605,7 +2640,7 @@ namespace game
         extern bool rpg_rmbsteering(); // client.cpp: hide the cursor while right-drag steering
         if(rpg_rmbsteering()) return;
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h);
-        float vscale = 1800.0f/h;
+        float vscale = hudvirtualheight(h)/h;
         float sz = 64.0f*vscale;
         // hotspot: the arrow tip sits at the cell CENTER (32,32) in the 64px art
         // (measured on default/attack/glove textures); the old (8,8) value was the
@@ -2637,7 +2672,7 @@ namespace game
     void drawrpgtarget(int w, int h)
     {
         if(!rpg::mapactive(getclientmap())) return;
-        float X = w*1800.0f/h;
+        float X = w*hudvirtualheight(h)/h;
         float cx = X/2;
         // NPC selection (quest chain v1): name + full gold bar + talk hint.
         // NPCs are static data, not entities, so there is no clientnum to resolve.
@@ -2650,11 +2685,13 @@ namespace game
             rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
             rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
             rpg_solidquad(bx, by, bw, bh, 0.95f, 0.75f, 0.25f, 1.0f); // NPC gold, full
+            rpg_textplate(nd->name, cx, 76, 40.0f);
             rpg_hudtextc(nd->name, cx, 76, 40.0f);
             // v0.1.25: prompt is distance-aware (same 16u horizontal range
             // as the server talk check) so it never promises F-talk that
             // will fail with a System-tab-only message.
             float hdist = player1 ? vec(player1->o.x, player1->o.y, 0.0f).dist(vec(nd->x, nd->y, 0.0f)) : 0.0f;
+            rpg_textplate(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
             rpg_hudtextc(hdist <= 16.0f ? "Press F to talk" : "Move closer to talk", cx, 148, 26.0f);
             return;
         }
@@ -2678,6 +2715,7 @@ namespace game
         rpg_solidquad(bx - 2, by - 2, bw + 4, bh + 4, 0.0f, 0.0f, 0.0f, 0.75f);
         rpg_solidquad(bx, by, bw, bh, 0.10f, 0.08f, 0.08f, 0.85f);
         if(hpf > 0) rpg_solidquad(bx, by, bw*hpf, bh, fr, fg, fb, 1.0f);
+        rpg_textplate(d->name, cx, 76, 40.0f);
         rpg_hudtextc(d->name, cx, 76, 40.0f);
     }
 
@@ -2694,8 +2732,12 @@ namespace game
     //   ring center (0.4952, 0.4856), terrain window ELLIPSE rx 0.3110, ry 0.3046
     //   clock inset center x 0.4992, text at 0.0862, inset height 0.1116 (unchanged)
     //   circles (center frac, dark-diameter frac):
-    //     char  lower-left          (0.1539, 0.7903) 0.1435
-    //     bag   lower-right         (0.8397, 0.7903) 0.1435
+    //     char  lower-left          (0.1559, 0.7843) 0.1435
+    //     bag   lower-right         (0.8373, 0.7843) 0.1435
+    //     (Nov 3 HUD cleanup: char/bag centers corrected from the shipped
+    //     radar_frame.png art itself — dark-disc centroids measured
+    //     (195,984)/(1050,984) vs the old (193,991)/(1053,991); the icons
+    //     sat ~1.4 screen px low in their painted circles at 1080p.)
     //     craft bottom-center-right (0.6467, 0.8940) 0.1435
     //     social bottom-center-left (0.3469, 0.8963) 0.1435 (EMPTY)
     //     zoom+ upper-right small   (0.8134, 0.2177) 0.0877
@@ -2714,7 +2756,7 @@ namespace game
     // clips off the top of the screen.
     static void rpg_mmgeom(int w, int h, float &s, float &compx, float &compy, float &comp, float &ringcx, float &ringcy, float &mapx, float &mapy)
     {
-        float X = w*1800.0f/h;
+        float X = w*hudvirtualheight(h)/h;
         s = 427.0f; // int(1800/4*0.95f) since v0.1.31, unchanged
         comp = s*0.39f/0.2935f;
         compx = X - s/20 - comp;
@@ -2741,7 +2783,7 @@ namespace game
         if(!qd || !qd->name[0]) return;
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
-        float X = w*1800.0f/h;
+        float X = w*hudvirtualheight(h)/h;
         // Ed's frame art (Oct 28): shared composite geometry from
         // rpg_mmgeom (above). The plate's right edge stays at the
         // composite's right edge (rx+rs = X - s/20, unchanged), and
@@ -2791,7 +2833,7 @@ namespace game
             {
                 int guts = (d==player1)? d->guts: lastguts;
                 defformatstring(gutss)("\f1Guts: \f3%d", guts);
-                draw_text(gutss, w*1800/h - 420, 1350);
+                draw_text(gutss, w*hudvirtualheight(h)/h - 420, 1350);
 
                 if (guts != lastguts)
                 {
@@ -2802,7 +2844,7 @@ namespace game
                 if (lastgutschange && lastmillis-lastgutschangemillis<2550)
                 {
                     formatstring(gutss)(lastgutschange>0? "\fg+%d": "\fe%d", lastgutschange);
-                    draw_text(gutss, w*1800/h - 262, 1300, 255, 255, 255, 255-((lastmillis-lastgutschangemillis)/10));
+                    draw_text(gutss, w*hudvirtualheight(h)/h - 262, 1300, 255, 255, 255, 255-((lastmillis-lastgutschangemillis)/10));
                 }
 
                 lastguts = guts;
@@ -2815,7 +2857,7 @@ namespace game
             if(shopopen())
             {
                 defformatstring(shoptext)("SHOP: %ds", (shopend-lastmillis+999)/1000);
-                draw_text(shoptext, w*1800/h - 262, 150, 255, 220, 80);
+                draw_text(shoptext, w*hudvirtualheight(h)/h - 262, 150, 255, 220, 80);
             }
             // RPG: no center crosshair on RPG maps - the free cursor is the pointer there.
             if(!d->isInfected() && !rpg::mapactive(getclientmap())) drawcrosshairhud(d, w, h);
@@ -3047,7 +3089,7 @@ namespace game
         int numgroups = groupplayers();
         if(numgroups < 2) return;
         
-        float screenhalf = (1800*w/h)/2.f, pad = 10, barw = 1536*scorebarsize, barh = 128*scorebarsize, barx = screenhalf-barw/2, bary = pad, blend = 1.f,
+        float screenhalf = (hudvirtualheight(h)*w/h)/2.f, pad = 10, barw = 1536*scorebarsize, barh = 128*scorebarsize, barx = screenhalf-barw/2, bary = pad, blend = 1.f,
             iconw = 88*scorebarsize, icony = bary+(barh-iconw)/2, icongap = 4*scorebarsize, ioverw = 384*scorebarsize, ioverx = screenhalf-ioverw/2,
             wingbgw = 576*scorebarsize, textlogow = 486*scorebarsize, centeroverw = 192*scorebarsize, centeroverx = screenhalf-centeroverw/2,
             textscale = scorebarsize/0.75f;
@@ -3151,7 +3193,7 @@ namespace game
             blendin = (timemillis < fadeinmillis+dispwait ? (timemillis-dispwait)/float(fadeinmillis) : 1.f),
             blendout = timemillis < admillis ? 1.f : (timemillis > admillis+shiftmillis/2.f ? 0.f : 1.f-((timemillis-admillis)/float(shiftmillis/2.f))),
             scale = timemillis > timeframe ? 0.f : (timemillis < admillis ? 1.f : 1.f-((timemillis-admillis)/float(shiftmillis))),
-            logow = 192*scorebarsize, logoh = 64*scorebarsize, gamelogoy = bary+((1800/3.f)*scale), gamelogoh = logoh+logoh*scale,
+            logow = 192*scorebarsize, logoh = 64*scorebarsize, gamelogoy = bary+((hudvirtualheight(h)/3.f)*scale), gamelogoh = logoh+logoh*scale,
             gamelogox = centeroverx-(logow/2)*scale, gamelogow = logow+logow*scale;
 
         if(blendout != 0)
@@ -3201,7 +3243,7 @@ namespace game
     void drawradarfull(fpsent *d, int w, int h)
     {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        int s = 1800/4, x = 1800*w/h - s - s/10, y = s/10;
+        int s = 1800/4, x = int(hudvirtualheight(h)*w/h) - s - s/10, y = s/10;
         glColor4f(1, 1, 1, minimapalpha);
         if(minimapalpha >= 1) glDisable(GL_BLEND);
         bindminimap();
@@ -3325,7 +3367,7 @@ namespace game
     }
 
     // v0.1.25 (item 4): WoW-style radar icons. Hit-rects in virtual coords
-    // (1800-tall space), written by drawrpgradar each frame it draws and
+    // (hudV-tall space), written by drawrpgradar each frame it draws and
     // cleared (-1) when it does not, so stale rects never eat clicks.
     // rpg_radariconclick is called from rpg_doclick (client.cpp) before the
     // world pick, mirroring the chat-tab click routing.
@@ -3446,7 +3488,7 @@ namespace game
             extern bool rpg_rmbsteering();
             if(editmode || g3d_gui2dopen() || rpg_rmbsteering()) return;
             float pcx = 0, pcy = 0; rpg::cursorget(pcx, pcy);
-            float vscale = 1800.0f/h;
+            float vscale = hudvirtualheight(h)/h;
             float vx = pcx*vscale, vy = pcy*vscale;
             int hover = -1;
             loopi(n)
@@ -3465,7 +3507,7 @@ namespace game
             float wpx = text_widthf(tstr);
             settextscale(save);
             float tw = wpx + tpad*2, th = tpxh + tpad*2;
-            float X = w*1800.0f/h;
+            float X = w*hudvirtualheight(h)/h;
             float tx = startx + hover*(B + igap) + B*0.5f - tw*0.5f;
             if(tx < 10) tx = 10;
             if(tx + tw > X - 10) tx = X - 10 - tw;
@@ -3589,8 +3631,8 @@ namespace game
         // upper-right sockets are the zoom buttons (glyphs baked into
         // the art): their hit-rects use the same 0.82x convention.
         {
-            float chx = compx + 0.1539f*comp, chy = compy + 0.7903f*comp, chz = 0.82f*0.1435f*comp;
-            float bgx = compx + 0.8397f*comp, bgy = compy + 0.7903f*comp, bgz = 0.82f*0.1435f*comp;
+            float chx = compx + 0.1559f*comp, chy = compy + 0.7843f*comp, chz = 0.82f*0.1435f*comp;
+            float bgx = compx + 0.8373f*comp, bgy = compy + 0.7843f*comp, bgz = 0.82f*0.1435f*comp;
             float crx = compx + 0.6467f*comp, cry = compy + 0.8940f*comp, crz = 0.82f*0.1435f*comp;
             float zpx = compx + 0.8134f*comp, zpy = compy + 0.2177f*comp, zpz = 0.82f*0.0877f*comp;
             float zmx = compx + 0.8589f*comp, zmy = compy + 0.3014f*comp, zmz = 0.82f*0.0877f*comp;
@@ -3639,7 +3681,7 @@ namespace game
             char tbuf[16] = "12:00 AM";
             if(lt) strftime(tbuf, sizeof(tbuf), "%I:%M %p", lt);
             float cpxh = 0.68f*0.1116f*comp;
-            float coff = 0.5f*1800.0f/h; // half a screen pixel each side
+            float coff = 0.5f*hudvirtualheight(h)/h; // half a screen pixel each side
             rpg_hudtextc(tbuf, compx + 0.4992f*comp - coff, compy + 0.0862f*comp, cpxh);
             rpg_hudtextc(tbuf, compx + 0.4992f*comp + coff, compy + 0.0862f*comp, cpxh);
         }
@@ -3674,8 +3716,8 @@ namespace game
     VARP(showtimers, 0, 1, 1);
     void drawtimers(fpsent *d, int w, int h)
     {
-        float cs = 0.06f*1800*w/h, blend = 1;
-        int rs = 1800/4, cx = 1800*w/h-(needminimap(!d->isInfected()) ? rs+cs/2 : 0)-rs/10, cy = cs+rs/10;
+        float cs = 0.06f*hudvirtualheight(h)*w/h, blend = 1;
+        int rs = 1800/4, cx = int(hudvirtualheight(h)*w/h)-(needminimap(!d->isInfected()) ? rs+cs/2 : 0)-rs/10, cy = cs+rs/10;
         vec colour(colorteam[dteamnum(d)][0], colorteam[dteamnum(d)][1], colorteam[dteamnum(d)][2]);
         if(m_timed)
         {
@@ -3715,7 +3757,7 @@ namespace game
     void drawctfbanners(fpsent *d, int w, int h)
     {
         if(!m_ctf || !rpg::mapactive(getclientmap())) return;
-        float X = w*1800.0f/h;
+        float X = w*hudvirtualheight(h)/h;
         float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
         float barw = min(1536.0f, 2.0f*(compx - X/2.0f) - 40.0f);
@@ -3765,7 +3807,7 @@ namespace game
 
     // Battleground queue Cancel button (v0.1.41, Ed's pick Oct 31):
     // fixed geometry in the overlay's virtual space (y down from top,
-    // X = w*1800/h wide, same space as the title/mode/time lines).
+    // X = w*hudV/h wide, same space as the title/mode/time lines).
     // 320 wide comfortably holds "CANCEL" at default 0.8 with padding
     // (worst-case cap advances bound it under 240); 80 tall gives the
     // 57-tall label room to breathe. Top at 240 = one overlay
@@ -3796,10 +3838,10 @@ namespace game
         int ww = 0, hh = 0;
         if(screen) SDL_GetWindowSize(screen, &ww, &hh);
         if(!ww || !hh) return false;
-        float X = ww*1800.0f/hh;
+        float X = ww*hudvirtualheight(hh)/hh;
         float bx, by, bw, bh;
         bgcancelrect(X, bx, by, bw, bh);
-        float vx = mx*1800.0f/hh, vy = my*1800.0f/hh;
+        float vx = mx*hudvirtualheight(hh)/hh, vy = my*hudvirtualheight(hh)/hh;
         if(vx < bx || vx > bx+bw || vy < by || vy > by+bh) return false;
         bgqueue_cancel_sent = true;
         bgqueue_until = 0; bgqueue_mode = 0;
@@ -3819,7 +3861,7 @@ namespace game
         }
 
         glPushMatrix();
-        glScalef(h/1800.0f, h/1800.0f, 1);
+        glScalef(h/hudvirtualheight(h), h/hudvirtualheight(h), 1);
 
         if(player1->state==CS_SPECTATOR)
         {
@@ -3830,8 +3872,8 @@ namespace game
             fpsent *f = followingplayer();
             text_bounds(f ? colorname(f) : " ", fw, fh);
             fh = max(fh, ph);
-            draw_text("SPECTATOR", w*1800/h - tw - pw, 1200 - th - fh);
-            if(f) draw_text(colorname(f), w*1800/h - fw - pw, 1200 - fh);
+            draw_text("SPECTATOR", w*hudvirtualheight(h)/h - tw - pw, 1200 - th - fh);
+            if(f) draw_text(colorname(f), w*hudvirtualheight(h)/h - fw - pw, 1200 - fh);
         }
 
         // RPG: the mode score bar is FPS furniture; hidden on RPG maps only.
@@ -3856,7 +3898,7 @@ namespace game
             // frame; the else-branch below restores on queue end.
             if(grabinput) { grabinput = false; inputgrab(false); }
             bgqueue_cursorfreed = true;
-            float X = w*1800.0f/h;
+            float X = w*hudvirtualheight(h)/h;
             int secs = (bgqueue_until - lastmillis + 999)/1000;
             // v0.1.41 prep (Ed, Oct 31): the overlay reads as off-center in
             // game photos. The centering math itself is sound (TEXT_CENTER_UP
@@ -3912,10 +3954,10 @@ namespace game
         }
         if(bgstart_until > lastmillis)
         {
-            float X = w*1800.0f/h;
+            float X = w*hudvirtualheight(h)/h;
             int secs = (bgstart_until - lastmillis + 999)/1000;
             pushfont(); setfont("digit_white"); settextscale(2.5f);
-            draw_textx("MATCH STARTS IN %d", X/2.0f, 900, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs);
+            draw_textx("MATCH STARTS IN %d", X/2.0f, hudvirtualheight(h)*0.5f, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs);
             settextscale(1.f); popfont();
         }
 
