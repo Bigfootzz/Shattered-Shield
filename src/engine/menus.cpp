@@ -213,6 +213,16 @@ void togglegui(const char *name)
 }
 ///RR
 
+// Is the named 2D GUI currently open? (Nov 3, Ed: vendor/dialogue
+// auto-close gates on the window itself, never on a possibly stale
+// open flag, so Esc/X closes can never make it close another window.)
+bool guishowing(const char *name)
+{
+    if(!name) return false;
+    loopv(guistack) if(guistack[i]->name && !strcmp(guistack[i]->name, name)) return true;
+    return false;
+}
+
 int cleargui(int n)
 {
     int clear = guistack.length();

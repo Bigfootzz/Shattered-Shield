@@ -631,6 +631,7 @@ extern bool limitsky();
 extern void g3d_render();
 extern bool g3d_windowhit(bool on, bool act);
 extern bool g3d_gui2dopen();
+extern bool guishowing(const char *name); // menus.cpp: named 2D GUI open?
 
 // menus
 extern int mainmenu;

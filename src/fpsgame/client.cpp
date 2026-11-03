@@ -623,6 +623,7 @@ namespace game
     static string rpg_dlg_resps[4];
     static int rpg_dlg_nresp = 0;
     static bool rpg_dlg_open = false;
+    static int rpg_dlg_npcidx = -1; // dialogue anchor for walk-away auto-close (index into rpg::npcat)
     static void rpg_dlg_wrap(const char *text)
     {
         rpg_dlg_lines.clear();
@@ -877,6 +878,30 @@ namespace game
             }
         }
         if((!rpg_testforce && !rpg::mapactive(getclientmap())) || !player1) return;
+        // Walk-away auto-close (Nov 3, Ed): a vendor or dialogue window
+        // closes when the player walks past talk range (16u horizontal)
+        // from its NPC. Gated on the window actually being open
+        // (guishowing), never on a flag alone, so a stale flag after an
+        // Esc/X close can never close another window. Each close mirrors
+        // its manual button: dialogue notifies the server (RESPOND -1)
+        // and pops one window; vendor resets at-vendor and clears all.
+        if(player1->state == CS_ALIVE)
+        {
+            const rpg::npcdef *anchor = NULL;
+            bool closedlg = false, closevendor = false;
+            if(rpg_dlg_open && rpg_dlg_npcidx >= 0 && guishowing("rpgdialog")) { anchor = rpg::npcat(rpg_dlg_npcidx); closedlg = anchor != NULL; }
+            else if(guishowing("rpgvendor_pvp")) { anchor = rpg::npcat(rpg::npcindexbyid("blasque")); closevendor = anchor != NULL; }
+            else if(guishowing("rpgvendor")) { anchor = rpg::npcat(rpg::npcindexbyid("glimmer")); closevendor = anchor != NULL; }
+            if(anchor)
+            {
+                float dx = player1->o.x - anchor->x, dy = player1->o.y - anchor->y;
+                if(dx*dx + dy*dy > 16.0f*16.0f)
+                {
+                    if(closedlg) { addmsg(N_RPG_RESPOND, "ri", -1); rpg_dlg_open = false; rpg_dlg_npcidx = -1; cleargui(1); }
+                    else if(closevendor) { executestr("rpg_atvendor = 0"); cleargui(0); } // 0 = whole stack, like the bare Close Shop button
+                }
+            }
+        }
         updateprojectilefx(); // projectile spell visuals (no-op when none)
         int w, h; rpg_screenwh(w, h);
         if(w <= 0 || h <= 0) return;
@@ -3657,10 +3682,19 @@ namespace game
                     // server closed the dialogue
                     if(rpg_dlg_open) cleargui(1);
                     rpg_dlg_open = false;
+                    rpg_dlg_npcidx = -1;
                 }
                 else
                 {
                     copystring(rpg_dlg_npc, npcname);
+                    // anchor by server-sent display name; -1 (no auto-close)
+                    // if it matches no NPC def
+                    rpg_dlg_npcidx = -1;
+                    loopi(rpg::npccount())
+                    {
+                        const rpg::npcdef *nd = rpg::npcat(i);
+                        if(nd && !strcmp(nd->name, npcname)) { rpg_dlg_npcidx = i; break; }
+                    }
                     rpg_dlg_wrap(text);
                     rpg_dlg_nresp = min(nresp, 4);
                     loopi(rpg_dlg_nresp) copystring(rpg_dlg_resps[i], rs[i]);
