@@ -2667,6 +2667,38 @@ namespace game
     // NAME on one clean line, a HEALTH BAR directly under it. The cramped
     // kit frame and the overlapping numeric HP text are gone. Compact,
     // top center, RPG maps only. Same name+bar treatment for any target
+    // HUD notice (Nov 3, Ed: Insufficient Funds + craft failures need a
+    // visible signal, not just a System-tab/in-window line): big red text
+    // centered under the target area, fading out over 3 seconds. Set by
+    // rpg_shownotice (N_RPG_NOTICE handler + craft-failure results in
+    // client.cpp). Drawn from the HUD pass, so it shows while shop/craft
+    // windows are open; y 192 sits above the centered shop window.
+    static string rpg_noticestr;
+    static int rpg_noticetime = 0;
+    void rpg_shownotice(const char *str)
+    {
+        if(!str || !str[0]) return;
+        copystring(rpg_noticestr, str, sizeof(rpg_noticestr));
+        rpg_noticetime = lastmillis;
+    }
+    void drawrpgnotice(int w, int h)
+    {
+        if(!rpg_noticestr[0] || !rpg_noticetime) return;
+        int elapsed = lastmillis - rpg_noticetime;
+        if(elapsed < 0 || elapsed >= 3000) { if(elapsed >= 3000) rpg_noticestr[0] = '\0'; return; }
+        float X = w*hudvirtualheight(h)/h;
+        float pxh = 48.0f; // large within reason: bigger than the 40 target name
+        pushfont(); setfont("digital"); // digital has the full charset; digit_white is digits-only
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        float wpx = text_widthf(rpg_noticestr);
+        int alpha = int(255*(1.0f - float(elapsed)/3000.0f));
+        draw_text(rpg_noticestr, int(X/2 - wpx/2), int(192 - pxh/2), 255, 0, 0, alpha, TEXT_SHADOW, -1, -1);
+        settextscale(save);
+        popfont();
+    }
+
     // type; the bar color follows the target (hostile red, NPC gold,
     // player green).
     void drawrpgtarget(int w, int h)
@@ -3972,6 +4004,7 @@ namespace game
         {
             if(d->state!=CS_SPECTATOR) drawhudicons(d, w, h);
             if(d->state!=CS_SPECTATOR) drawrpghud(d, w, h);
+            if(d->state!=CS_SPECTATOR) drawrpgnotice(w, h);
             if(d->state!=CS_SPECTATOR) drawrpgchat(d, w, h);
             if(d->state!=CS_SPECTATOR) { drawrpgtarget(w, h); drawrpgquest(w, h); drawrpgcursor(w, h); }
             if(cmode) cmode->drawhud(d, w, h);

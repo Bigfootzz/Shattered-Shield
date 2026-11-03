@@ -5041,6 +5041,7 @@ namespace server
             {
                 defformatstring(msg)("\f2Not enough Embers (need %d).", d.emberprice);
                 rpg_qmsg(cq, msg);
+                sendf(cq->clientnum, 1, "ris", N_RPG_NOTICE, "Insufficient Funds");
                 return;
             }
             if(!rpg::additem(cq->name, itemid, 1))
@@ -5062,6 +5063,7 @@ namespace server
         {
             defformatstring(msg)("\f2Not enough copper (need %d).", price);
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
+            sendf(cq->clientnum, 1, "ris", N_RPG_NOTICE, "Insufficient Funds");
             return;
         }
         if(!rpg::additem(cq->name, itemid, 1))

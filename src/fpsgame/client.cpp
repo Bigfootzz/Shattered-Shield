@@ -318,6 +318,7 @@ namespace game
     // Plain function (not inline in the ICOMMAND): the macro parser splits on bare
     // commas, so multi-declaration bodies live here instead.
     bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
+    float hudvirtualheight(int h); // fps.cpp: shared HUD virtual height (HUD scale)
     bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
     bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
     static bool rpg_isdlgo(); // defined below (dialogue-open gate, mirrors the key binds)
@@ -333,17 +334,17 @@ namespace game
         float cx = 0; float cy = 0;
         rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
         // chat box tabs eat their own clicks (the rest of the box is click-through)
-        if(rpg_chattabclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        if(rpg_chattabclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
         // v0.1.25: radar buttons eat LEFT clicks only (right-click stays attack;
         // same tab-click pattern as the chat tabs, but left-gated)
-        if(button == 0 && rpg_radariconclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        if(button == 0 && rpg_radariconclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
         // v0.1.42: action bar slots eat LEFT clicks only, same pattern. The
         // dialogue gate mirrors the number-key binds (rpgdlgo -> rpgrespond):
         // while a dialogue panel is open, keys answer it instead of casting,
         // so clicks must not cast either. In practice the dialogue GUI owns
         // the mouse while open, so this gate is defensive; without it a
         // bar click during dialogue would cast where key 1-5 would answer.
-        if(!rpg_isdlgo() && button == 0 && rpg_hotbarclick(cx*1800.0f/h, cy*1800.0f/h)) return;
+        if(!rpg_isdlgo() && button == 0 && rpg_hotbarclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
@@ -785,7 +786,7 @@ namespace game
         int w = 0; int h = 0; rpg_screenwh(w, h);
         if(h <= 0) { conoutf("rpgtesttabclick: no window"); return; }
         float cx = (r[0] + r[2])*0.5f; float cy = (r[1] + r[3])*0.5f; // virtual center
-        float sx = cx*h/1800.0f; float sy = cy*h/1800.0f;             // -> screen px
+        float sx = cx*h/hudvirtualheight(h); float sy = cy*h/hudvirtualheight(h); // -> screen px
         rpg::cursorset(sx, sy);
         rpg_doclick(0);
         int after = rpg_chattabval();
@@ -3383,6 +3384,12 @@ namespace game
                 rpg::setclientembers(getint(p));
                 break;
             }
+            case N_RPG_NOTICE: // HUD notice (Insufficient Funds): big red fading text under the target area
+            {
+                string msg; getstring(msg, p);
+                game::rpg_shownotice(msg);
+                break;
+            }
             case N_RPG_VENDOR: // v0.1.23: open vendor GUI (fresh inv sync first)
             {
                 addmsg(N_RPG_INVL, "r");
@@ -3599,6 +3606,10 @@ namespace game
                 rpg_craftresultok = ok;
                 copystring(rpg_craftresult, msg, sizeof(string));
                 rpg_craftresultset = true;
+                // HUD notice for failures only (Nov 3, Ed: no easy way to
+                // tell a craft failed): the specific server line, big and
+                // red under the target area. Success stays in-window only.
+                if(!ok) game::rpg_shownotice(msg);
                 // v0.1.37 (Ed): the feed line for a successful craft comes
                 // from the server's rpg_qmsg path (rpg_craftresult sends the
                 // same line as N_RPG_QMSG, which the client prints as
