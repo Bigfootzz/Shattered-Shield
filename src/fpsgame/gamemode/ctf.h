@@ -406,12 +406,12 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         sendf(-1, 1, "rii9", N_SCOREFLAG, ci->clientnum, relay, relay >= 0 ? ++flags[relay].version : -1, goal, ++flags[goal].version, flags[goal].spawnindex, team, score, ci->state.flags);
         // Battlegrounds (v0.1.40): first to 3 captures wins on
         // battleground maps (stock FLAGLIMIT 10 everywhere else).
-        // Team 1 = Blue, team 2 = Red (TEAM_0 blue text, TEAM_1 red).
+        // Team 1 = Wolf, team 2 = Raven (TEAM_0 blue text, TEAM_1 red).
         int winlimit = (m_ctf && rpg::mapactive(smapname)) ? 3 : FLAGLIMIT;
         if(score >= winlimit)
         {
             if(m_ctf && rpg::mapactive(smapname))
-                sendservmsgf("%s team wins the battleground!", team == 1 ? "Blue" : "Red");
+                sendservmsgf("%s team wins the battleground!", team == 1 ? "Wolf" : "Raven");
             startintermission();
         }
     }

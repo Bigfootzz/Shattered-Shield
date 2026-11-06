@@ -183,6 +183,8 @@ enum
     M_ONETEAM    = 1<<23,
     M_JUGGERNAUT = 1<<24,
     M_RPG        = 1<<25,
+    M_KOTH       = 1<<26, // Shattered Shield battlegrounds (Nov 6): King of the Hill
+    M_TFF        = 1<<27, // Shattered Shield battlegrounds (Nov 6): Team Free-For-All
 };
 
 struct Mutator
@@ -202,6 +204,8 @@ const static Mutator mutators[] =
     {M_CAPTURE,     "\fbCapture: "      "\fr .\n"},
     {M_REGEN,       "\fbRegen: "        "\fr .\n"},
     {M_CTF,         "\fbCTF: "          "\frBring the enemies' flag to your base to score points.\n"},
+    {M_KOTH,        "\fbKing of the Hill: " "\frHold the points to earn time. First to 4 minutes wins.\n"},
+    {M_TFF,         "\fbTeam Free-For-All: " "\frKills and captured points score. First to 1000 wins.\n"},
     {M_PROTECT,     "\fbProtect: "      "\frTouch the enemies' flag to score points.\n"},
     {M_HOLD,        "\fbHold: "         "\frHold the flag for 10 seconds to score for your team.\n"},
     {M_EDIT,        "\fbCoop-edit: "    "\frEdit maps with other players.\n"},
@@ -236,7 +240,7 @@ struct GameMode
 enum
 {
     MIN_GAMEMODE = -3,
-    MAX_GAMEMODE = 16
+    MAX_GAMEMODE = 18
 };
 
 const static GameMode gameModes[] =
@@ -261,6 +265,8 @@ const static GameMode gameModes[] =
     {14,    M_SURVIVAL | M_ONETEAM | M_OVERTIME,                    "survival",             "survival",     NULL },
     {15,    M_NOITEMS | M_EFFICIENCY | M_CTF | M_HOLD | M_TEAM,     "efficiency hold",      "effichold",    NULL },
     {16,    M_RPG,                                                "RPG",                  "rpg",          NULL },
+    {17,    M_TEAM | M_KOTH,                                      "koth",                 "koth",         NULL },
+    {18,    M_TEAM | M_TFF,                                       "tff",                  "tff",          NULL },
 };
 
 #define RR_NUM_GAMEMODE (sizeof(gameModes)/sizeof(GameMode))
@@ -339,6 +345,15 @@ inline const GameMode *getGameModeS(const char *shortName)
 #define m_capture      (m_check(gamemode, M_CAPTURE))
 #define m_regencapture (m_checkall(gamemode, M_CAPTURE | M_REGEN))
 #define m_ctf          (m_check(gamemode, M_CTF))
+#define m_koth         (m_check(gamemode, M_KOTH))
+#define m_tff          (m_check(gamemode, M_TFF))
+// Shattered Shield battleground mode ids (Nov 6): 7 CTF, 17 KOTH, 18 TFF.
+// The queue/load/score flows key off these ids, not the M_CTF flag, so
+// the stock CTF variants (8-11, 15) never enter the battleground flow.
+#define BG_MODE_CTF 7
+#define BG_MODE_KOTH 17
+#define BG_MODE_TFF 18
+inline bool bg_isbgmode(int mode) { return mode == BG_MODE_CTF || mode == BG_MODE_KOTH || mode == BG_MODE_TFF; }
 #define m_protect      (m_checkall(gamemode, M_CTF | M_PROTECT))
 #define m_hold         (m_checkall(gamemode, M_CTF | M_HOLD))
 #define m_infection    (m_check(gamemode, M_INFECTION))
@@ -731,6 +746,7 @@ enum
     N_RPG_FLOATDMG, // s->c: floating damage number (damage, x, y, z as DMF ints) -- to the attacker only
     N_RPG_EMBERS, // s->c: Embers sync (total Embers int) — Oct 31, Blasque shop
     N_RPG_NOTICE, // s->c: HUD notice (string) — appended last so no existing wire value moves
+    N_BG_POINT,   // s->c: battleground point state (mode, score1, score2, point idx, owner, capteam, cap progress 0..1000) — Nov 6, KOTH/TFF
     NUMSV
 };
 
@@ -769,7 +785,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0, N_BG_POINT, 8,
     -1
 };
 
@@ -780,7 +796,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
 #define RR_MASTER_PORT 16962
 #define RR_MASTER_HOST "rr.master.theintercooler.com"
 
-#define PROTOCOL_VERSION 267            // bump when protocol changes
+#define PROTOCOL_VERSION 268            // bump when protocol changes (268: N_BG_POINT, Nov 6)
 #define DEMO_VERSION 1                  // bump when demo format changes
 #define DEMO_MAGIC "REVREV_DEMO"
 
@@ -1300,6 +1316,18 @@ namespace game
     extern int bgqueue_until, bgqueue_mode, bgstart_until, bgprevmode;
     extern bool bgqueue_cancel_sent; // Cancel sent for the current queue (blocks double-sends; re-armed by N_BG_QUEUE)
     extern string bgprevmap;
+    // Battlegrounds KOTH/TFF point state (Nov 6): synced from the server
+    // via N_BG_POINT. Team scores are the mode score (KOTH hold seconds,
+    // TFF points); index 0 = team 1 (Blue/Wolf), 1 = team 2 (Red/Raven).
+    // capprog is per-mille of the point's capture time (0..1000).
+    // Defined in client.cpp; the server never references these.
+    struct bgpointinfo { int owner, capteam, capprog; }; // owner/capteam: 0 neutral, 1 Blue, 2 Red
+    extern int bg_point_mode;
+    extern int bg_team_score[2];
+    extern int bg_npoints;
+    extern bgpointinfo bg_points[8];
+    extern const char *bg_point_name(int idx);
+    extern int bg_team_score_for(const char *team); // mode team score, or -1 when no point-mode state
     extern void drawprogress(int x, int y, float start, float length, float size, bool left, bool sec, bool millis = false, const vec &colour = vec(1, 1, 1), float fade = 1, float skew = 1, float textscale = 1, const char *text = NULL, ...) PRINTFARGS(13, 14);
 
 

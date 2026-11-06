@@ -3897,6 +3897,75 @@ namespace game
         }
     }
 
+    // Battlegrounds KOTH/TFF banners (Nov 6): same top band as the CTF
+    // banner (vacant FPS scorebar band on RPG maps), driven by the
+    // N_BG_POINT state in client.cpp — no new protocol beyond that
+    // message. Team numbers are the mode score: KOTH hold time as
+    // m:ss, TFF points. The chip row under the band names every live
+    // point in its owner's colour (blue Wolf / red Raven / grey
+    // neutral) and appends the live capture % while a team is taking
+    // a point it does not own. No state is kept here: a stale point
+    // table cannot draw, because the call site gates on the live mode.
+    void drawbgpointbanners(fpsent *d, int w, int h)
+    {
+        if(!(m_koth || m_tff) || !rpg::mapactive(getclientmap())) return;
+        float X = w*hudvirtualheight(h)/h;
+        float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
+        rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
+        float barw = min(1536.0f, 2.0f*(compx - X/2.0f) - 40.0f);
+        if(barw < 400) return; // too narrow to be useful; skip rather than overlap
+        float barh = 128.0f, barx = X/2.0f - barw/2.0f, bary = 10.0f;
+        float wingw = min(576.0f, barw*0.375f);
+        Texture *t = textureload("data/hud/scorebar.png", 3);
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        glColor4f(1.f, 1.f, 1.f, 1.f);
+        drawtexture(barx, bary, barw, barh);
+        t = textureload("data/hud/scorebar_wingacc.png", 3);
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        glColor4f(colorteam[0][0], colorteam[0][1], colorteam[0][2], 1.f);
+        drawtexture(barx, bary, wingw, barh);
+        glColor4f(colorteam[1][0], colorteam[1][1], colorteam[1][2], 1.f);
+        drawtexture(barx+barw, bary, -wingw, barh);
+        int secs = maplimit > 0 ? max(maplimit-lastmillis, 0)/1000 : -1;
+        pushfont(); setfont("default"); settextscale(0.7f);
+        draw_textx(m_koth ? "KING OF THE HILL" : "TEAM FREE-FOR-ALL", X/2.0f, bary+40, 255, 255, 255, 255, TEXT_CENTER_UP);
+        settextscale(1.f); popfont();
+        pushfont(); setfont("digit_white"); settextscale(1.4f);
+        if(secs >= 0) draw_textx("%d:%02d", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs/60, secs%60);
+        else draw_textx("--:--", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP);
+        settextscale(1.f); popfont();
+        pushfont(); setfont("digit_white"); settextscale(1.5f);
+        if(m_koth)
+        {
+            draw_textx("%d:%02d", barx+wingw/2, bary+70, colorteam[0][0]*255.f, colorteam[0][1]*255.f, colorteam[0][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, bg_team_score[0]/60, bg_team_score[0]%60);
+            draw_textx("%d:%02d", barx+barw-wingw/2, bary+70, colorteam[1][0]*255.f, colorteam[1][1]*255.f, colorteam[1][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, bg_team_score[1]/60, bg_team_score[1]%60);
+        }
+        else
+        {
+            draw_textx("%d", barx+wingw/2, bary+70, colorteam[0][0]*255.f, colorteam[0][1]*255.f, colorteam[0][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, bg_team_score[0]);
+            draw_textx("%d", barx+barw-wingw/2, bary+70, colorteam[1][0]*255.f, colorteam[1][1]*255.f, colorteam[1][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, bg_team_score[1]);
+        }
+        settextscale(1.f); popfont();
+        // Point chips: one slot per live point, centred in its slot.
+        if(bg_npoints > 0)
+        {
+            pushfont(); setfont("default"); settextscale(0.55f);
+            loopi(bg_npoints)
+            {
+                const bgpointinfo &pt = bg_points[i];
+                float cx = barx + barw*(i+0.5f)/bg_npoints;
+                int r = 160, g = 160, b = 160;
+                if(pt.owner == 1) { r = colorteam[0][0]*255.f; g = colorteam[0][1]*255.f; b = colorteam[0][2]*255.f; }
+                else if(pt.owner == 2) { r = colorteam[1][0]*255.f; g = colorteam[1][1]*255.f; b = colorteam[1][2]*255.f; }
+                string chiptxt;
+                if(pt.capteam >= 1 && pt.capteam <= 2 && pt.capteam != pt.owner) formatstring(chiptxt)("%s %d%%", bg_point_name(i), pt.capprog/10);
+                else copystring(chiptxt, bg_point_name(i));
+                draw_textx(chiptxt, cx, bary+barh+8, r, g, b, 255, TEXT_CENTER_UP);
+            }
+            settextscale(1.f); popfont();
+        }
+    }
+
     // Battleground queue Cancel button (v0.1.41, Ed's pick Oct 31):
     // fixed geometry in the overlay's virtual space (y down from top,
     // X = w*hudV/h wide, same space as the title/mode/time lines).
@@ -3944,9 +4013,9 @@ namespace game
 
     ICOMMAND(bgleave, "", (), {
         // Leave-match trigger (BG cluster, Nov 3): bound to L. Only opens
-        // the confirm dialog during a battleground match (m_ctf); outside
-        // a match it is a no-op with a console note.
-        if(m_ctf) executestr("showgui bgleaveconfirm");
+        // the confirm dialog during a battleground match (any BG mode);
+        // outside a match it is a no-op with a console note.
+        if(m_ctf || m_koth || m_tff) executestr("showgui bgleaveconfirm");
         else conoutf("Not in a battleground.");
     });
     ICOMMAND(bgleaveconfirm, "", (), {
@@ -3992,6 +4061,12 @@ namespace game
         // suppressed there, so the two never double-draw).
         if(m_ctf && rpg::mapactive(getclientmap())) drawctfbanners(d, w, h);
 
+        // Battlegrounds (Nov 6): KOTH/TFF banners in the same band. Same
+        // geometry as the CTF banner; the team numbers are the mode score
+        // (KOTH hold time as m:ss, TFF points), and a chip row under the
+        // band shows every point's owner colour plus live capture %.
+        if((m_koth || m_tff) && rpg::mapactive(getclientmap())) drawbgpointbanners(d, w, h);
+
         // Battlegrounds (v0.1.40): queue + start countdowns. The queue
         // shows on the RPG map (top-center is free there: no banners
         // in RPG mode); the start countdown is big center-screen over
@@ -4025,7 +4100,7 @@ namespace game
             draw_textx("BATTLEGROUND QUEUE", X/2.0f, 60, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
             settextscale(1.f); popfont();
             pushfont(); setfont("default"); settextscale(0.8f);
-            draw_textx(bgqueue_mode == 7 ? "CAPTURE THE FLAG" : "BATTLEGROUND", X/2.0f, 120, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
+            draw_textx(bgqueue_mode == 7 ? "CAPTURE THE FLAG" : bgqueue_mode == 17 ? "KING OF THE HILL" : bgqueue_mode == 18 ? "TEAM FREE-FOR-ALL" : "BATTLEGROUND", X/2.0f, 120, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
             settextscale(1.f); popfont();
             pushfont(); setfont("digit_white"); settextscale(1.2f);
             draw_textx("%d:%02d", X/2.0f, 180, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW, -1, -1, secs/60, secs%60);

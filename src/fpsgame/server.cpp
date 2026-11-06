@@ -58,10 +58,25 @@ namespace server
     static vector<int> bg_queue_members; // clientnums
     static bool bg_botfilled = false;    // BOTS SLICE hook point
     static vector<int> bg_bots;          // clientnums of battleground bots (Slice 3)
-    VAR(bg_bot_teamsize, 1, 3, 8);       // players per team a full game targets (provisional: Ed has not set team size yet)
+    VAR(bg_bot_teamsize, 1, 10, 10);      // players per team a full game targets (10v10 standard, Ed Nov 6)
     static bool bg_match_active = false; // a match is running
     static void bg_deletebots(); // defined with bg_fillbots below; changemap() calls it
     static void bg_grantwin(int winnerteam); // Embers win reward, defined above checkintermission
+    // --- Battlegrounds: KOTH/TFF capture points (Nov 6) ---
+    // Shared state + prototypes. The point tables and logic live with
+    // the point system below (before bg_queue_join); they are declared
+    // here because checkintermission, changemap and the kill handler
+    // (all above that block) use them.
+    static int bg_hold_ms[2] = { 0, 0 }; // KOTH: accumulated hold time per team (ms)
+    static int bg_score[2] = { 0, 0 };   // TFF: points per team
+    static int bg_winner = 0;            // set by bg_win, read by checkintermission
+    static int bg_point_team_score(int mode, int team); // KOTH hold seconds / TFF points
+    static void bg_points_reset(int mode, const char *map);
+    static void bg_win(int team);
+    static void bg_points_sync(bool force = false);
+    static const char *bg_teamname(int team); // "Wolf"/"Raven", defined with the point system below
+    static const int BG_TFF_KILL_POINTS = 14; // locked scoring (Ed, Nov 6)
+    static const int BG_TFF_WIN_POINTS = 1000;
     static bool bg_match_starting = false; // changemap issued, awaiting load
     static bool bg_start_active = false; // 10s start countdown running
     static int bg_start_until = 0;       // totalmillis deadline
@@ -2457,13 +2472,16 @@ namespace server
     void changemap(const char *s, int mode)
     {
         // Battlegrounds (v0.1.40): leaving a battleground (any map/mode
-        // other than CTF on a battleground map) ends match state. The
-        // match changemap itself (krpg, 7) keeps it; the return
-        // changemap (rpg_01, 16) clears it (already cleared by the
-        // intermission hook; idempotent here).
-        if(!(mode == 7 && rpg::mapactive(s)))
+        // other than a battleground mode on a battleground map) ends
+        // match state. The match changemap itself (mode 7/17/18 on its
+        // map) keeps it; the return changemap (rpg_01, 16) clears it
+        // (already cleared by the intermission hook; idempotent here).
+        // Point state clears with the match so a later manual load of
+        // the map never shows stale owners/scores.
+        if(!(bg_isbgmode(mode) && rpg::mapactive(s)))
         {
             bg_match_active = false;
+            bg_points_reset(0, s);
             bg_deletebots(); // bots never follow players back to the RPG world
         }
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
@@ -2485,7 +2503,7 @@ namespace server
         // by resetai). Re-point bg_bots at the re-added bots so the
         // return changemap deletes the right ones; without this the
         // stale list misses the match bots entirely.
-        if(mode == 7 && rpg::mapactive(s))
+        if(bg_isbgmode(mode) && rpg::mapactive(s))
         {
             bg_bots.setsize(0);
             loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_BOT) bg_bots.add(clients[i]->clientnum);
@@ -2714,7 +2732,7 @@ namespace server
     // and a timer-end win reaches it directly (fromwin=false). The
     // enclosing `!interm` guard makes it once-per-game: the first call
     // sets interm, so later captures/ticks cannot re-enter. Winner is
-    // the totalscore comparison (team 1 = Blue, team 2 = Red); a draw
+    // the totalscore comparison (team 1 = Wolf, team 2 = Raven); a draw
     // grants nothing. Human-only: bots are filtered by AI_TYPE_NONE
     // (they bank nothing, no persistent character). Team match uses
     // ctfteamflag, the same mapping scoreflag uses to credit captures,
@@ -2779,24 +2797,40 @@ namespace server
             changegamespeed(100);
             interm = gamemillis + 40000;
             // Battlegrounds (v0.1.40): 30s scoreboard, not 40s. The
-            // timer-end winner (most captures; tie = draw) announces
-            // here; capture wins announce in ctfmode::scoreflag, so
-            // fromwin skips the second announcement. The win grant
-            // runs on BOTH paths (it is not conditioned on fromwin):
-            // for a capture win the totalscore comparison already
-            // names the capturing team, since it just hit 3.
-            if(m_ctf && rpg::mapactive(smapname))
+            // timer-end winner announces here; objective wins announce
+            // at the win itself (ctfmode::scoreflag for CTF, bg_win for
+            // KOTH/TFF), so fromwin skips the second announcement. The
+            // win grant runs on BOTH paths (it is not conditioned on
+            // fromwin): for an objective win the score comparison
+            // already names the winning team, since it just hit the
+            // target; for a timer-end win it names the higher score.
+            // All modes announce Wolf/Raven wins (Ed, Nov 6).
+            if((m_ctf || m_koth || m_tff) && rpg::mapactive(smapname))
             {
                 interm = gamemillis + 30000;
-                int s1 = ctfmode.totalscore(1), s2 = ctfmode.totalscore(2);
+                int s1 = 0, s2 = 0, winner = 0;
+                if(m_ctf) { s1 = ctfmode.totalscore(1); s2 = ctfmode.totalscore(2); }
+                else { s1 = bg_point_team_score(gamemode, 1); s2 = bg_point_team_score(gamemode, 2); }
+                // CTF objective wins never set bg_winner (only bg_win
+                // does, KOTH/TFF), so for CTF the winner comes from
+                // the score comparison on BOTH paths: the team that
+                // just hit 3 captures has the higher score. (Nov 6:
+                // the KOTH/TFF rewrite read bg_winner unconditionally
+                // here and silently dropped the +100 Embers grant on
+                // CTF 3-capture wins.)
+                if(fromwin && (m_koth || m_tff)) winner = bg_winner;
+                else winner = s1 > s2 ? 1 : (s2 > s1 ? 2 : 0);
                 if(!fromwin)
                 {
-                    if(s1 > s2) sendservmsg("Blue team wins the battleground!");
-                    else if(s2 > s1) sendservmsg("Red team wins the battleground!");
+                    // Timer-end winner (Ed, Nov 6): highest score wins
+                    // in EVERY battleground — captures for CTF, hold
+                    // seconds for KOTH, points for TFF.
+                    if(winner == 1) sendservmsgf("%s team wins the battleground!", bg_teamname(1));
+                    else if(winner == 2) sendservmsgf("%s team wins the battleground!", bg_teamname(2));
                     else sendservmsg("The battleground ends in a draw!");
                 }
                 if(rpg::connected()) bg_pending_bank();
-                if(rpg::connected()) bg_grantwin(s1 > s2 ? 1 : (s2 > s1 ? 2 : 0));
+                if(rpg::connected()) bg_grantwin(winner);
             }
 
             if(intermissionstats)
@@ -3085,14 +3119,14 @@ namespace server
             }
             // --- Battlegrounds: Embers kill reward (Nov 1, locked rates) ---
             // +10 Embers to the KILLER on a battleground kill. Gate is the
-            // battleground itself: CTF mode (gamemode 7) on a battleground
-            // map (mapactive covers ctf_twinkeeps_b1), so RPG-map monster
-            // kills, FPS modes and the RPG world never reach it. GAME
-            // TIME ONLY (Nov 1, anti-exploit): bg_match_active &&
-            // !bg_start_active && interm <= 0 — kills during the 10s
-            // start countdown or the 30s scoreboard window pay nothing,
-            // same condition bg_botcast uses, so nobody farms the
-            // countdown or scoreboard. Killer
+            // battleground itself: any battleground mode (7/17/18) on a
+            // battleground map (mapactive covers all three maps), so
+            // RPG-map monster kills, FPS modes and the RPG world never
+            // reach it. GAME TIME ONLY (Nov 1, anti-exploit):
+            // bg_match_active && !bg_start_active && interm <= 0 — kills
+            // during the 10s start countdown or the 30s scoreboard
+            // window pay nothing, same condition bg_botcast uses, so
+            // nobody farms the countdown or scoreboard. Killer
             // ONLY: actor must be a distinct human player (AI_TYPE_NONE),
             // the victim a player-side client (human or bot, never a
             // monster), and the kill must not be a teamkill (isteam
@@ -3106,7 +3140,7 @@ namespace server
             // re-sync N_RPG_EMBERS so the Blasque shop display updates;
             // the earn line goes to the killer only via rpg_qmsg (the
             // private System-tab channel, N_RPG_QMSG), not a broadcast.
-            if(rpg::connected() && m_ctf && rpg::mapactive(smapname) &&
+            if(rpg::connected() && (m_ctf || m_koth || m_tff) && rpg::mapactive(smapname) &&
                bg_match_active && !bg_start_active && interm <= 0 &&
                actor && actor != target && actor->state.ai.type == ai::AI_TYPE_NONE &&
                (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
@@ -3119,6 +3153,28 @@ namespace server
                 bg_pending[actor->name] += 10;
                 rpg_qmsg(actor, "+10 Embers (pending — banked at scoreboard).");
                 conoutf("rpg: battleground kill: +10 Embers pending to '%s' (victim '%s')", actor->name, target->name);
+            }
+            // --- Battlegrounds: TFF kill points (Nov 6, locked scoring) ---
+            // +14 points to the killer's TEAM on a game-time TFF kill.
+            // Same gate as the Embers block above, except bots count:
+            // a bot's kill scores for its team (bots are team members;
+            // human-only would starve bot-heavy matches of kill
+            // points). KOTH kills score nothing — hold time is the game.
+            // No message per kill (the HUD banner carries the score).
+            if(gamemode == BG_MODE_TFF && bg_match_active && !bg_start_active && interm <= 0 &&
+               actor && actor != target &&
+               (actor->state.ai.type == ai::AI_TYPE_NONE || actor->state.ai.type == ai::AI_TYPE_BOT) &&
+               (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
+               !isteam(actor->team, target->team))
+            {
+                int kteam = ctfteamflag(actor->team);
+                if(kteam >= 1 && kteam <= 2)
+                {
+                    bg_score[kteam-1] += BG_TFF_KILL_POINTS;
+                    conoutf("bg: TFF kill: +%d to %s team (TFF %d/%d)", BG_TFF_KILL_POINTS, bg_teamname(kteam), bg_score[0], bg_score[1]);
+                    if(bg_score[kteam-1] >= BG_TFF_WIN_POINTS) bg_win(kteam);
+                    else bg_points_sync();
+                }
             }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
@@ -3207,7 +3263,7 @@ namespace server
         // Battlegrounds (v0.1.40): on a battleground map, enemy-team
         // players are valid targets (PvP); everywhere else abilities hit
         // monsters only. Teammates and spectators are never valid.
-        bool bg_pvp = rpg::mapactive(smapname) && m_ctf;
+        bool bg_pvp = rpg::mapactive(smapname) && (m_ctf || m_koth || m_tff);
         if(advisory >= 0)
         {
             clientinfo *t = NULL;
@@ -3490,10 +3546,309 @@ namespace server
         conoutf("bg: '%s' left the battleground (pending Embers forfeited)", cq->name);
     }
 
+    // --- Battlegrounds: KOTH/TFF capture points (Nov 6) ---
+    // Server-authoritative point logic. CTF keeps its flag entities;
+    // KOTH/TFF maps carry NO flag/base entities, so points are defined
+    // here as code-side coordinates taken from the validated map layouts
+    // (not trusted from the task brief — verified against the generator
+    // sources: koth-riverbend generate/validate scripts, crater
+    // generate_crater_battlefield.js). Coordinates are the point MARKER
+    // positions: Riverbend centre (2048,2048) is the island plateau
+    // centre (the task brief's 1856,2048 is a lamp, not the point);
+    // Raven pit is (2464,2688), the 180-degree mirror of Wolf pit
+    // (1632,1408) — the brief's (2368,2720) is a lamp. Crater
+    // secondaries are the platform centres at 2208.
+    // Presence: alive players within radius horizontally and within
+    // +/-48u vertically of the point height (pit rims are +64 above
+    // the pit floor and the field is -64 below the island court, so
+    // rim/field players cannot capture from outside the point).
+    // Capture (NEUTRALIZE-THEN-CAP, Ed Nov 6 11:12): taking an
+    // ENEMY-held point is two stages — hold alone for the full capture
+    // time to strip it to neutral, then hold alone for another full
+    // capture time to own it (enemy point = 2x time, neutral = 1x).
+    // One team present alone progresses toward that team; both present
+    // = contested (progress holds); as soon as no member of the
+    // progressing team remains on the point (died or left), its
+    // progress resets to zero immediately — if it was neutralizing,
+    // the original owner KEEPS the point (successful defence); if it
+    // was capturing a neutral point, the point stays neutral. All
+    // parties dead while neutral leaves it neutral. On capture the
+    // owner flips and an announcement goes out. KOTH earns hold time
+    // per owned point per second; TFF earns points per owned point per
+    // 10s. Win targets (Ed, Nov 6): KOTH 4 min accumulated hold time,
+    // TFF first to 1000 points or highest at the 10-min timer. KOTH
+    // ALL-HELD BONUS (confirmed by Ed, Nov 6 11:13): a team holding
+    // ALL live points wins at 3 min accumulated instead of 4.
+    // TFF KILL POINTS:
+    // +14 to the killer's TEAM on a game-time kill, bots included
+    // (bots are team members; human-only would starve bot-heavy
+    // matches of kill points) — the +10 Embers rule stays human-only.
+    struct bg_pointdef
+    {
+        const char *name;
+        float x, y, z, radius;
+        int capms;    // stand time to capture
+        int tickpts;  // TFF points per 10s held (0 = KOTH-style hold time)
+    };
+    static const bg_pointdef bg_koth_points[] =
+    {
+        { "Center",   2048, 2048, 2208,  96, 5000, 0 },
+        { "Wolf Pit", 1632, 1408, 2080, 128, 5000, 0 },
+        { "Raven Pit", 2464, 2688, 2080, 128, 5000, 0 },
+        // Bridges are future points 4/5 (Ed, Nov 6): INACTIVE until
+        // usage justifies them. Add entries here to activate.
+    };
+    static const bg_pointdef bg_tff_points[] =
+    {
+        { "Citadel",   2048, 2048, 2208, 160, 20000, 10 },
+        { "Southwest", 1344, 1344, 2208,  96, 12000, 5 },
+        { "Southeast", 2752, 1344, 2208,  96, 12000, 5 },
+        { "Northeast", 2752, 2752, 2208,  96, 12000, 5 },
+        { "Northwest", 1344, 2752, 2208,  96, 12000, 5 },
+    };
+    static const int BG_KOTH_WIN_MS = 240000;      // 4 minutes hold time
+    static const int BG_KOTH_WIN_ALL_MS = 180000;  // 3 minutes while holding all live points (bonus, confirmed by Ed Nov 6 11:13)
+    struct bg_pointstate
+    {
+        int owner;    // 0 neutral, 1 Blue/Wolf, 2 Red/Raven
+        int capteam;  // team currently progressing a capture (0 = none)
+        int capms;    // progress toward capteam (0..def.capms)
+        int earnms;   // TFF: ms of ownership banked toward the next 10s tick
+    };
+    static bg_pointstate bg_points[8];
+    static int bg_npoints = 0;
+    static int bg_points_lastms = 0;
+    static int bg_points_lastsync = 0;
+    static int bg_sync_owner[8], bg_sync_capteam[8], bg_sync_capprog[8], bg_sync_s1 = -1, bg_sync_s2 = -1;
+
+    static const char *bg_teamname(int team) { return team == 1 ? "Wolf" : "Raven"; }
+
+    static const bg_pointdef *bg_pointdefs(int mode, int &n)
+    {
+        if(mode == BG_MODE_KOTH) { n = sizeof(bg_koth_points)/sizeof(bg_koth_points[0]); return bg_koth_points; }
+        if(mode == BG_MODE_TFF) { n = sizeof(bg_tff_points)/sizeof(bg_tff_points[0]); return bg_tff_points; }
+        n = 0;
+        return NULL;
+    }
+
+    // Mode team score for the scoreboard/win comparison: KOTH hold
+    // seconds, TFF points. CTF keeps ctfmode.totalscore (callers branch).
+    static int bg_point_team_score(int mode, int team)
+    {
+        if(team < 1 || team > 2) return 0;
+        if(mode == BG_MODE_KOTH) return bg_hold_ms[team-1]/1000;
+        if(mode == BG_MODE_TFF) return bg_score[team-1];
+        return 0;
+    }
+
+    static void bg_points_sync(bool force)
+    {
+        if(!bg_match_active || bg_npoints <= 0) return;
+        int n = 0;
+        const bg_pointdef *defs = bg_pointdefs(gamemode, n);
+        if(!defs) return;
+        int s1 = bg_point_team_score(gamemode, 1), s2 = bg_point_team_score(gamemode, 2);
+        bool changed = force || s1 != bg_sync_s1 || s2 != bg_sync_s2 || totalmillis - bg_points_lastsync >= 1000;
+        loopi(bg_npoints)
+        {
+            int prog = bg_points[i].capteam ? min(bg_points[i].capms*1000/max(defs[i].capms, 1), 1000) : 0;
+            if(!changed && (bg_points[i].owner != bg_sync_owner[i] || bg_points[i].capteam != bg_sync_capteam[i] || prog/50 != bg_sync_capprog[i]/50)) changed = true;
+            if(changed)
+            {
+                sendf(-1, 1, "ri8", N_BG_POINT, gamemode, s1, s2, i, bg_points[i].owner, bg_points[i].capteam, prog);
+                bg_sync_owner[i] = bg_points[i].owner;
+                bg_sync_capteam[i] = bg_points[i].capteam;
+                bg_sync_capprog[i] = prog;
+            }
+        }
+        if(changed) { bg_sync_s1 = s1; bg_sync_s2 = s2; bg_points_lastsync = totalmillis; }
+    }
+
+    static void bg_points_reset(int mode, const char *map)
+    {
+        int n = 0;
+        const bg_pointdef *defs = bg_pointdefs(mode, n);
+        bg_npoints = defs ? n : 0;
+        loopi(8) { bg_points[i].owner = 0; bg_points[i].capteam = 0; bg_points[i].capms = 0; bg_points[i].earnms = 0; }
+        bg_hold_ms[0] = bg_hold_ms[1] = 0;
+        bg_score[0] = bg_score[1] = 0;
+        bg_winner = 0;
+        bg_points_lastms = totalmillis;
+        bg_sync_s1 = bg_sync_s2 = -1;
+        loopi(8) { bg_sync_owner[i] = bg_sync_capteam[i] = bg_sync_capprog[i] = -1; }
+        if(defs) conoutf("bg: points reset for mode %d on %s (%d points)", mode, map ? map : "?", bg_npoints);
+        bg_points_sync(true);
+    }
+
+    static bool bg_holdsall(int team)
+    {
+        if(bg_npoints <= 0 || team < 1 || team > 2) return false;
+        loopi(bg_npoints) if(bg_points[i].owner != team) return false;
+        return true;
+    }
+
+    static void bg_win(int team)
+    {
+        if(!bg_match_active || interm > 0 || team < 1 || team > 2) return;
+        bg_winner = team;
+        if(gamemode == BG_MODE_KOTH) sendservmsgf("%s team holds Riverbend!", bg_teamname(team));
+        else if(gamemode == BG_MODE_TFF) sendservmsgf("%s team wins Crater Battlefield!", bg_teamname(team));
+        else sendservmsgf("%s team wins the battleground!", bg_teamname(team));
+        conoutf("bg: %s team wins mode %d (KOTH hold %ds/%ds, TFF %d/%d)", bg_teamname(team), gamemode, bg_hold_ms[0]/1000, bg_hold_ms[1]/1000, bg_score[0], bg_score[1]);
+        startintermission();
+    }
+
+    static void bg_points_tick()
+    {
+        if(!bg_match_active || bg_npoints <= 0) return;
+        int n = 0;
+        const bg_pointdef *defs = bg_pointdefs(gamemode, n);
+        if(!defs || n != bg_npoints) return;
+        int dt = totalmillis - bg_points_lastms;
+        bg_points_lastms = totalmillis;
+        if(dt <= 0) return;
+        if(dt > 500) dt = 500; // hitch clamp: captures run slow, never fast-forward
+        loopi(bg_npoints)
+        {
+            const bg_pointdef &def = defs[i];
+            bg_pointstate &pt = bg_points[i];
+            int present[3] = { 0, 0, 0 };
+            loopvj(clients)
+            {
+                clientinfo *ci = clients[j];
+                if(!ci || ci->state.state != CS_ALIVE) continue;
+                int team = ctfteamflag(ci->team);
+                if(team < 1 || team > 2) continue;
+                vec delta(ci->state.o.x - def.x, ci->state.o.y - def.y, ci->state.o.z - def.z);
+                if(delta.x*delta.x + delta.y*delta.y > def.radius*def.radius) continue;
+                if(delta.z < -48 || delta.z > 48) continue;
+                present[team]++;
+            }
+            if(present[1] > 0 && present[2] == 0)
+            {
+                if(pt.capteam != 1) { pt.capteam = 1; pt.capms = 0; }
+                if(pt.owner != 1)
+                {
+                    pt.capms += dt;
+                    if(pt.capms >= def.capms)
+                    {
+                        if(pt.owner == 0)
+                        {
+                            pt.owner = 1; pt.capteam = 0; pt.capms = 0; pt.earnms = 0;
+                            sendservmsgf("Wolf captures the %s!", def.name);
+                            conoutf("bg: Wolf captures %s (mode %d)", def.name, gamemode);
+                        }
+                        else
+                        {
+                            // NEUTRALIZE-THEN-CAP stage 1 (Ed, Nov 6
+                            // 11:12): Wolf stripped Raven's point to
+                            // neutral. Wolf must now hold it alone for
+                            // another full capture time to own it, and
+                            // Raven can retake it while it stands
+                            // neutral. The point earns for nobody
+                            // while neutral.
+                            pt.owner = 0; pt.capteam = 0; pt.capms = 0; pt.earnms = 0;
+                            sendservmsgf("Wolf neutralizes the %s!", def.name);
+                            conoutf("bg: Wolf neutralizes %s (mode %d)", def.name, gamemode);
+                        }
+                    }
+                }
+                else { pt.capteam = 0; pt.capms = 0; }
+            }
+            else if(present[2] > 0 && present[1] == 0)
+            {
+                if(pt.capteam != 2) { pt.capteam = 2; pt.capms = 0; }
+                if(pt.owner != 2)
+                {
+                    pt.capms += dt;
+                    if(pt.capms >= def.capms)
+                    {
+                        if(pt.owner == 0)
+                        {
+                            pt.owner = 2; pt.capteam = 0; pt.capms = 0; pt.earnms = 0;
+                            sendservmsgf("Raven captures the %s!", def.name);
+                            conoutf("bg: Raven captures %s (mode %d)", def.name, gamemode);
+                        }
+                        else
+                        {
+                            // NEUTRALIZE-THEN-CAP stage 1 (Ed, Nov 6
+                            // 11:12): Raven stripped Wolf's point to
+                            // neutral. Raven must now hold it alone for
+                            // another full capture time to own it, and
+                            // Wolf can retake it while it stands
+                            // neutral. The point earns for nobody
+                            // while neutral.
+                            pt.owner = 0; pt.capteam = 0; pt.capms = 0; pt.earnms = 0;
+                            sendservmsgf("Raven neutralizes the %s!", def.name);
+                            conoutf("bg: Raven neutralizes %s (mode %d)", def.name, gamemode);
+                        }
+                    }
+                }
+                else { pt.capteam = 0; pt.capms = 0; }
+            }
+            else if(present[1] > 0 && present[2] > 0)
+            {
+                // contested: progress holds, nobody earns
+            }
+            else
+            {
+                // Wipe-reset (Ed, Nov 6): the team that was capturing
+                // or neutralizing has nobody left on the point (all
+                // died or walked off), so its progress resets to zero
+                // IMMEDIATELY instead of decaying gradually. If the
+                // point was neutral it stays neutral and earns for
+                // nobody; if it was owned by the other team, that team
+                // KEEPS ownership (a successful defence) and keeps
+                // earning. Only progress is wiped, never ownership.
+                if(pt.capteam != 0)
+                {
+                    conoutf("bg: capture of %s by %s wiped, progress reset (mode %d)", def.name, bg_teamname(pt.capteam), gamemode);
+                    pt.capms = 0; pt.capteam = 0;
+                }
+            }
+            // Hold earnings: each owned point earns for its owner.
+            if(pt.owner >= 1 && pt.owner <= 2)
+            {
+                if(gamemode == BG_MODE_KOTH) bg_hold_ms[pt.owner-1] += dt;
+                else if(gamemode == BG_MODE_TFF)
+                {
+                    pt.earnms += dt;
+                    if(pt.earnms >= 10000)
+                    {
+                        pt.earnms -= 10000;
+                        bg_score[pt.owner-1] += def.tickpts;
+                        conoutf("bg: %s earns +%d from %s (TFF %d/%d)", bg_teamname(pt.owner), def.tickpts, def.name, bg_score[0], bg_score[1]);
+                    }
+                }
+            }
+        }
+        // Win checks.
+        if(gamemode == BG_MODE_KOTH)
+        {
+            loopk(2)
+            {
+                int team = k+1;
+                int target = bg_holdsall(team) ? BG_KOTH_WIN_ALL_MS : BG_KOTH_WIN_MS;
+                if(bg_hold_ms[k] >= target) { bg_win(team); break; }
+            }
+        }
+        else if(gamemode == BG_MODE_TFF)
+        {
+            loopk(2) if(bg_score[k] >= BG_TFF_WIN_POINTS) { bg_win(k+1); break; }
+        }
+        bg_points_sync();
+    }
+
     static bool bg_queue_join(clientinfo *cq, const char *modestr)
     {
         if(!cq) return false;
-        if(strcmp(modestr, "ctf"))
+        // Queue mode rides in the dialogue action ("ctf"/"koth"/"tff").
+        // Anything else is refused with a SERVMSG, same as before.
+        int mode = 0;
+        if(!strcmp(modestr, "ctf")) mode = BG_MODE_CTF;
+        else if(!strcmp(modestr, "koth")) mode = BG_MODE_KOTH;
+        else if(!strcmp(modestr, "tff")) mode = BG_MODE_TFF;
+        if(!mode)
         {
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, "That battleground is not ready yet.");
             return false;
@@ -3503,7 +3858,7 @@ namespace server
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, "A battleground is already in progress. Talk to Lady Abbott when it ends.");
             return false;
         }
-        if(bg_queue_active && bg_queue_mode != 7)
+        if(bg_queue_active && bg_queue_mode != mode)
         {
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, "A queue is already forming for another battleground.");
             return false;
@@ -3511,7 +3866,7 @@ namespace server
         if(!bg_queue_active)
         {
             bg_queue_active = true;
-            bg_queue_mode = 7;
+            bg_queue_mode = mode;
             bg_queue_until = totalmillis + 45000;
             bg_botfilled = false;
             bg_queue_members.shrink(0);
@@ -3520,7 +3875,7 @@ namespace server
         bg_queue_members.add(cq->clientnum);
         int secs = (bg_queue_until - totalmillis + 999) / 1000;
         if(secs < 0) secs = 0;
-        sendf(cq->clientnum, 1, "ri3", N_BG_QUEUE, 7, secs);
+        sendf(cq->clientnum, 1, "ri3", N_BG_QUEUE, mode, secs);
         sendf(cq->clientnum, 1, "ris", N_SERVMSG, "You joined the battleground queue.");
         return true;
     }
@@ -3565,7 +3920,11 @@ namespace server
                 {
                     bg_queue_active = false;
                     bg_match_starting = true;
-                    changemap("ctf_twinkeeps_b1", 7);
+                    // Queue mode picks the map: CTF Twin Keeps, KOTH
+                    // Riverbend, TFF Crater Battlefield.
+                    if(bg_queue_mode == BG_MODE_KOTH) changemap("koth_riverbend_b1", BG_MODE_KOTH);
+                    else if(bg_queue_mode == BG_MODE_TFF) changemap("tff_craterbattlefield_b1", BG_MODE_TFF);
+                    else changemap("ctf_twinkeeps_b1", BG_MODE_CTF);
                 }
             }
         }
@@ -3574,6 +3933,10 @@ namespace server
             bg_start_active = false;
             pausegame(false);
         }
+        // KOTH/TFF points tick only while a match is live: same gate
+        // as the kill reward and bot casting (game time only — not the
+        // 10s start countdown, not the 30s scoreboard window).
+        if(bg_match_active && !bg_start_active && interm <= 0 && (m_koth || m_tff)) bg_points_tick();
     }
 
     // --- dialogue sessions ---
@@ -3743,8 +4106,8 @@ namespace server
             case rpg::ACT_BGQUEUE:
             {
                 // Battlegrounds (v0.1.40): Abbott's queue action. The
-                // mode rides in a.item ("ctf" today; anything else is
-                // refused by bg_queue_join with a SERVMSG).
+                // mode rides in a.item ("ctf"/"koth"/"tff"; anything
+                // else is refused by bg_queue_join with a SERVMSG).
                 return bg_queue_join(cq, a.item);
             }
             case rpg::ACT_GIVEFETCHXP:
@@ -5798,9 +6161,10 @@ namespace server
                 if(bg_match_starting)
                 {
                     bg_match_starting = false;
-                    if(m_ctf && rpg::mapactive(smapname))
+                    if(bg_isbgmode(gamemode) && rpg::mapactive(smapname))
                     {
                         bg_match_active = true;
+                        bg_points_reset(gamemode, smapname);
                         bg_start_active = true;
                         bg_start_until = totalmillis + 10000;
                         pausegame(true);

@@ -16,6 +16,7 @@ namespace game
     #include "gamemode/ctf.h"
     #include "gamemode/infection.h"
     #include "gamemode/dmsp.h"
+    #include "gamemode/bgpoints.h"
 
     clientmode *cmode = NULL;
     captureclientmode capturemode;
@@ -28,6 +29,7 @@ namespace game
     ctfclientmode ctfmode;
     infectionclientmode infectionmode;
     dmspclientmode dmspmode;
+    bgpointclientmode bgpointmode;
 
     void setclientmode()
     {
@@ -35,6 +37,7 @@ namespace game
         else if(m_ctf) cmode = &ctfmode;
         else if(m_infection) cmode = &infectionmode;
         else if(m_dmsp) cmode = &dmspmode;
+        else if(m_koth || m_tff) cmode = &bgpointmode;
         else cmode = NULL;
     }
 
@@ -1727,14 +1730,28 @@ namespace game
     bool getbgloadinfo(const char *&mapdisplay, const char *&modelabel, const char *&flavor)
     {
         if(!bgloading) return false;
-        // Battleground map display names (Ed's naming). Only Twin Keeps
-        // exists today; Frostgate Keep is a future KOTH map with no .ogz
-        // yet and is deliberately absent until it ships.
-        if(strcmp(incomingmapname, "ctf_twinkeeps_b1")) return false;
-        mapdisplay = "Twin Keeps";
-        // Only mode 7 (CTF) is used by the battleground flow today; the
-        // fallback covers any future battleground mode id.
-        modelabel = gamemode == 7 ? "Capture the Flag" : server::modename(gamemode);
+        // Battleground map display names (Ed's naming). Twin Keeps is the
+        // CTF map; Riverbend is the KOTH map; Crater Battlefield is the
+        // TFF map. ("Frostgate Keep" was the planned KOTH name; Ed chose
+        // Riverbend Nov 6, and the queue text was updated to match.)
+        if(!strcmp(incomingmapname, "ctf_twinkeeps_b1"))
+        {
+            mapdisplay = "Twin Keeps";
+            // Only mode 7 (CTF) is used by the battleground flow today; the
+            // fallback covers any future battleground mode id.
+            modelabel = gamemode == 7 ? "Capture the Flag" : server::modename(gamemode);
+        }
+        else if(!strcmp(incomingmapname, "koth_riverbend_b1"))
+        {
+            mapdisplay = "Riverbend";
+            modelabel = "King of the Hill";
+        }
+        else if(!strcmp(incomingmapname, "tff_craterbattlefield_b1"))
+        {
+            mapdisplay = "Crater Battlefield";
+            modelabel = "Team Free-For-All";
+        }
+        else return false;
         // Neutral prepare line: the Abbott flavor draft was never approved,
         // so no lore line is used here until Ed supplies one.
         flavor = "Prepare for battle.";
@@ -1769,9 +1786,12 @@ namespace game
         copystring(incomingmapname, name ? name : "");
         // Battlegrounds load screen (Oct 31): arm the dedicated screen for
         // this load only when it is a battleground match changemap (mode 7
-        // into Twin Keeps). Cleared after startgame() below; the m_demo
-        // early-return above never arms it.
-        bgloading = (mode == 7 && name && !strcmp(name, "ctf_twinkeeps_b1"));
+        // into Twin Keeps), or any non-edit load of Riverbend or Crater
+        // Battlefield — the KOTH/TFF flows arm on the map name, same as
+        // Riverbend did before the mode ids existed.
+        // Cleared after startgame() below; the m_demo early-return above
+        // never arms it.
+        bgloading = (mode == 7 && name && !strcmp(name, "ctf_twinkeeps_b1")) || (name && !strcmp(name, "koth_riverbend_b1") && !editmode) || (name && !strcmp(name, "tff_craterbattlefield_b1") && !editmode);
         // --- RPG: editor Phase 1 (Oct 24, 2026) ---
         // Load per-map NPCs BEFORE the preload loop below, so the loop
         // preloads the models for THIS map's NPC file, not the previous map's.
@@ -1857,6 +1877,8 @@ namespace game
     ICOMMANDS("m_capture", "i", (int *mode), { int gamemode = *mode; intret(m_capture); });
     ICOMMANDS("m_regencapture", "i", (int *mode), { int gamemode = *mode; intret(m_regencapture); });
     ICOMMANDS("m_ctf", "i", (int *mode), { int gamemode = *mode; intret(m_ctf); });
+    ICOMMANDS("m_koth", "i", (int *mode), { int gamemode = *mode; intret(m_koth); });
+    ICOMMANDS("m_tff", "i", (int *mode), { int gamemode = *mode; intret(m_tff); });
     ICOMMANDS("m_protect", "i", (int *mode), { int gamemode = *mode; intret(m_protect); });
     ICOMMANDS("m_hold", "i", (int *mode), { int gamemode = *mode; intret(m_hold); });
     ICOMMANDS("m_infection", "i", (int *mode), { int gamemode = *mode; intret(m_infection); });
@@ -2931,7 +2953,7 @@ namespace game
                 // her (player yaw = Abbott yaw + 180, the /GPS rule),
                 // so she can be talked to immediately. Consumed on
                 // first use so later respawns use normal spawns.
-                if(s == player1 && bgprevmode == 7 && (!strcmp(bgprevmap, "krpg") || !strcmp(bgprevmap, "ctf_twinkeeps_b1")) && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
+                if(s == player1 && (bgprevmode == 7 || bgprevmode == 17 || bgprevmode == 18) && (!strcmp(bgprevmap, "krpg") || !strcmp(bgprevmap, "ctf_twinkeeps_b1") || !strcmp(bgprevmap, "koth_riverbend_b1") || !strcmp(bgprevmap, "tff_craterbattlefield_b1")) && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
                 {
                     bgprevmap[0] = '\0'; bgprevmode = 0;
                     int ai = rpg::npcindexbyid("abbott");
@@ -3565,6 +3587,31 @@ namespace game
                 localdisconnect();
                 break;
             }
+            case N_BG_POINT:
+            {
+                // KOTH/TFF point state (Nov 6): one message per point.
+                // A mode change resets all points first, so a stale
+                // match can never bleed into the next one.
+                int mode = getint(p), s1 = getint(p), s2 = getint(p), idx = getint(p);
+                int owner = getint(p), capteam = getint(p), prog = getint(p);
+                if(mode != bg_point_mode)
+                {
+                    bg_point_mode = mode;
+                    bg_npoints = 0;
+                    loopi(8) { bg_points[i].owner = 0; bg_points[i].capteam = 0; bg_points[i].capprog = 0; }
+                    bg_team_score[0] = bg_team_score[1] = 0;
+                }
+                bg_team_score[0] = s1;
+                bg_team_score[1] = s2;
+                if(idx >= 0 && idx < 8)
+                {
+                    bg_points[idx].owner = owner;
+                    bg_points[idx].capteam = capteam;
+                    bg_points[idx].capprog = clamp(prog, 0, 1000);
+                    if(idx+1 > bg_npoints) bg_npoints = idx+1;
+                }
+                break;
+            }
             case N_RPG_FLOATDMG:
             {
                 int dmg = getint(p);
@@ -4129,6 +4176,31 @@ namespace game
         printf("\n");
     }
     
+    // Battlegrounds KOTH/TFF point state (Nov 6): server-synced via
+    // N_BG_POINT. The HUD banner (fps.cpp) and the scoreboard (via the
+    // bgpointmode clientmode) read these. Point names are client-side
+    // labels in the SAME order as the server's point tables — keep the
+    // two in step (server.cpp bg_koth_points / bg_tff_points).
+    int bg_point_mode = 0;
+    int bg_team_score[2] = { 0, 0 };
+    int bg_npoints = 0;
+    bgpointinfo bg_points[8] = {};
+    const char *bg_point_name(int idx)
+    {
+        static const char *kothnames[] = { "Center", "Wolf Pit", "Raven Pit" };
+        static const char *tffnames[] = { "Citadel", "Southwest", "Southeast", "Northeast", "Northwest" };
+        if(bg_point_mode == BG_MODE_KOTH && idx >= 0 && idx < 3) return kothnames[idx];
+        if(bg_point_mode == BG_MODE_TFF && idx >= 0 && idx < 5) return tffnames[idx];
+        return "?";
+    }
+    int bg_team_score_for(const char *team)
+    {
+        if(bg_point_mode != BG_MODE_KOTH && bg_point_mode != BG_MODE_TFF) return -1;
+        if(isteam(team, TEAM_0)) return bg_team_score[0];
+        if(isteam(team, TEAM_1)) return bg_team_score[1];
+        return -1;
+    }
+
     void parsepacketclient(int chan, packetbuf &p)   // processes any updates from the server
     {
         if(dbgnetworkclient) dumpReceivedPackage(-1, chan, p);
