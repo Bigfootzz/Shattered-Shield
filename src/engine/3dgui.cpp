@@ -8,6 +8,12 @@
 #include "textedit.h"
 #include "translate.h" //RR -> translatable guis
 
+// Shared HUD scale factor (Video tab slider), defined in fpsgame/fps.cpp
+// inside namespace game: the same factor the HUD pass uses, so menus and
+// HUD scale together. Declared here rather than via a header: the engine
+// has no fpsgame header dependency, and 3dgui builds client-only.
+namespace game { float hudscalefactor(int h); }
+
 static bool layoutpass, actionon = false;
 static int mousebuttons = 0;
 static struct gui *windowhit = NULL;
@@ -1056,7 +1062,15 @@ struct gui : g3d_gui
     {
         if(gui2d)
         {
-            initscale *= 0.025f;
+            // Menu windows scale with the HUD Scale factor (the same factor
+            // the HUD pass uses). start() runs in both passes every frame,
+            // so a slider drag or resolution change rescales open windows
+            // live, with no reopen needed. 2D only; 3D-attached world GUIs
+            // keep their own scale. Everything downstream (adjustscale fit
+            // and centering, draw matrix, hit test) derives from basescale,
+            // so clicks stay consistent with visuals with no hit-test
+            // logic changes.
+            initscale *= 0.025f * game::hudscalefactor(scr_h);
             if(allowinput) hascursor = true;
         }
         basescale = initscale;

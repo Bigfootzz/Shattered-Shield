@@ -99,7 +99,7 @@ namespace game
             // selectable models, and their first rendered frame then loaded
             // those bodies + vweps synchronously and froze the RPG world
             // for ~10s at fill time. On RPG maps (rpg_01, krpg,
-            // ctf_obelisk_b1 — the whole queue flow), warm all selectable
+            // ctf_twinkeeps_b1 — the whole queue flow), warm all selectable
             // models at world entry so the cost lands on the loading screen
             // (with progress) instead. FPS solo maps keep the old behavior.
             if(i != playermodel && ((!multiplayer(false) && !rpgmap) || forceplayermodels || (!mdl->selectable && !allplayermodels))) continue;

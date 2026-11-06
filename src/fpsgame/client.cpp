@@ -321,6 +321,7 @@ namespace game
     float hudvirtualheight(int h); // fps.cpp: shared HUD virtual height (HUD scale)
     bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
     bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
+    bool rpg_questcollapseclick(float vx, float vy); // fps.cpp: quest tracker collapse button (ported from .43)
     static bool rpg_isdlgo(); // defined below (dialogue-open gate, mirrors the key binds)
 
     static void rpg_doclick(int button)
@@ -345,6 +346,14 @@ namespace game
         // the mouse while open, so this gate is defensive; without it a
         // bar click during dialogue would cast where key 1-5 would answer.
         if(!rpg_isdlgo() && button == 0 && rpg_hotbarclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
+        // Quest tracker collapse button eats LEFT clicks only, same
+        // pattern as the radar/hotbar widgets, converted to hudV space
+        // like the rest of the click dispatch (ported from .43).
+        // Display-only toggle, so no dialogue gate (mirrors the radar
+        // icons, not the hotbar cast path): collapsing the tracker
+        // during dialogue is harmless, and in practice the dialogue
+        // GUI owns the mouse while open.
+        if(button == 0 && rpg_questcollapseclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         if(button == 1)
         {
@@ -1718,11 +1727,11 @@ namespace game
     bool getbgloadinfo(const char *&mapdisplay, const char *&modelabel, const char *&flavor)
     {
         if(!bgloading) return false;
-        // Battleground map display names (Ed's naming). Only Stormhold
+        // Battleground map display names (Ed's naming). Only Twin Keeps
         // exists today; Frostgate Keep is a future KOTH map with no .ogz
         // yet and is deliberately absent until it ships.
-        if(strcmp(incomingmapname, "ctf_obelisk_b1")) return false;
-        mapdisplay = "Stormhold";
+        if(strcmp(incomingmapname, "ctf_twinkeeps_b1")) return false;
+        mapdisplay = "Twin Keeps";
         // Only mode 7 (CTF) is used by the battleground flow today; the
         // fallback covers any future battleground mode id.
         modelabel = gamemode == 7 ? "Capture the Flag" : server::modename(gamemode);
@@ -1760,9 +1769,9 @@ namespace game
         copystring(incomingmapname, name ? name : "");
         // Battlegrounds load screen (Oct 31): arm the dedicated screen for
         // this load only when it is a battleground match changemap (mode 7
-        // into Stormhold). Cleared after startgame() below; the m_demo
+        // into Twin Keeps). Cleared after startgame() below; the m_demo
         // early-return above never arms it.
-        bgloading = (mode == 7 && name && !strcmp(name, "ctf_obelisk_b1"));
+        bgloading = (mode == 7 && name && !strcmp(name, "ctf_twinkeeps_b1"));
         // --- RPG: editor Phase 1 (Oct 24, 2026) ---
         // Load per-map NPCs BEFORE the preload loop below, so the loop
         // preloads the models for THIS map's NPC file, not the previous map's.
@@ -2922,7 +2931,7 @@ namespace game
                 // her (player yaw = Abbott yaw + 180, the /GPS rule),
                 // so she can be talked to immediately. Consumed on
                 // first use so later respawns use normal spawns.
-                if(s == player1 && bgprevmode == 7 && (!strcmp(bgprevmap, "krpg") || !strcmp(bgprevmap, "ctf_obelisk_b1")) && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
+                if(s == player1 && bgprevmode == 7 && (!strcmp(bgprevmap, "krpg") || !strcmp(bgprevmap, "ctf_twinkeeps_b1")) && gamemode == 16 && !strcmp(getclientmap(), "rpg_01"))
                 {
                     bgprevmap[0] = '\0'; bgprevmode = 0;
                     int ai = rpg::npcindexbyid("abbott");
@@ -3535,6 +3544,25 @@ namespace game
             {
                 int secs = getint(p);
                 bgstart_until = secs > 0 ? lastmillis + secs*1000 : 0;
+                break;
+            }
+            case N_BG_LEFT:
+            {
+                // Leave ack (BG cluster, Nov 3): the server discarded our
+                // pending tally; disconnect ourselves (voluntary leave,
+                // not a kick). The confirm dialog already warned about
+                // the forfeit. Disconnect during message processing has
+                // precedent (auth certificate handler).
+                // Leave fix (Ed, .46 notes): disconnect() alone is a
+                // no-op for local (RPG) clients, which have no ENet
+                // curpeer, so the .46 leave printed its message and
+                // stayed in the match. localdisconnect() removes the
+                // local engine client and calls gamedisconnect; it is
+                // a no-op when there is no local client, so calling
+                // both covers ENet and local play.
+                conoutf("You left the battleground.");
+                disconnect();
+                localdisconnect();
                 break;
             }
             case N_RPG_FLOATDMG:

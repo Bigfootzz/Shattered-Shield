@@ -162,6 +162,13 @@ extern float gtextscale;
 extern int hwtexsize, hwcubetexsize, hwmaxaniso, maxtexsize;
 
 extern Texture *textureload(const char *name, int clamp = 0, bool mipit = true, bool msg = true);
+// Parallel-decode staging (texture.cpp; decode runs on workers, GL upload
+// stays on the main thread): predecode a texture's image data without
+// uploading, stage it by key, take it back for upload, then drop leftovers.
+bool predecodetexture(ImageData &d, const char *name, int *compress);
+void addstagedtexture(const char *key, ImageData *img, int compress);
+ImageData *takestagedtexture(const char *key, int *compress);
+void endstagedtextures();
 extern int texalign(void *data, int w, int bpp);
 extern void cleanuptexture(Texture *t);
 extern void loadalphamask(Texture *t);

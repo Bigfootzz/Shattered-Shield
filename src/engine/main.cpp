@@ -970,6 +970,24 @@ void checkinput()
                 lasttype = event.type;
                 lastbut = event.button.button;
                 break;
+            case SDL_MOUSEWHEEL:
+                // Wheel zoom (Nov 3): SDL2 delivers the wheel ONLY as
+                // SDL_MOUSEWHEEL, never as a button event, so without
+                // this case a scroll notch fell through the switch
+                // unhandled and wheel zoom never fired. Route each
+                // notch through the stock MOUSE4/MOUSE5 binds so the
+                // existing universaldelta -> delta_game_0 ->
+                // followcamzoom chain runs unchanged (edit vs game
+                // and modifiers included). Wheel up (y>0) zooms in,
+                // wheel down zooms out; horizontal wheel ignored.
+                if(event.wheel.y != 0)
+                {
+                    int btn = event.wheel.y > 0 ? 4 : 5;
+                    int steps = event.wheel.y > 0 ? event.wheel.y : -event.wheel.y;
+                    if(steps > 10) steps = 10;
+                    for(int s = 0; s < steps; s++) { keypress(-btn, true, 0); keypress(-btn, false, 0); }
+                }
+                break;
         }
         input::processEvent(event);
     }

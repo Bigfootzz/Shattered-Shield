@@ -292,7 +292,11 @@ namespace ai
             }
             int count = 0;
             AI_MULTI_DISPATCH(ai->startThink());
-            loopv(players) if(players[i]->ai.local) getAiType(players[i])->think(players[i], ++count == iteration ? true : false);
+            loopv(players) if(players[i]->ai.local)
+            {
+                if(server::bg_bot_held(players[i]->clientnum)) { players[i]->stopmoving(); continue; }
+                getAiType(players[i])->think(players[i], ++count == iteration ? true : false);
+            }
             AI_MULTI_DISPATCH(ai->endThink());
             if(++iteration > count) iteration = 0;
         }

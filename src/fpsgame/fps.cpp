@@ -2806,26 +2806,55 @@ namespace game
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, x, y);
     }
 
+    // Multi-quest tracker (ported from .43): up to 4 tracked quests stacked
+    // down the right side, with a collapse button at the top of the box.
+    // Hit-rect in virtual coords (hudV-tall space, shared with the rest
+    // of the HUD), written by drawrpgquest each frame it draws and
+    // cleared (-1) at entry, so a stale rect never eats clicks — same
+    // pattern as the hotbar/radar rects. Collapse state is file-static
+    // (persists across frames and map changes within the session, like
+    // rpg_radarzoomidx); default is EXPANDED. No saved-settings persistence.
+    static float rpg_questcollapse_rect[4] = {-1, -1, -1, -1};
+    static bool rpg_questcollapsed = false;
+    bool rpg_questcollapseclick(float vx, float vy)
+    {
+        if(!rpg::mapactive(getclientmap())) return false;
+        if(rpg_questcollapse_rect[0] >= 0 && vx >= rpg_questcollapse_rect[0] && vx < rpg_questcollapse_rect[2] &&
+           vy >= rpg_questcollapse_rect[1] && vy < rpg_questcollapse_rect[3])
+        {
+            rpg_questcollapsed = !rpg_questcollapsed;
+            return true;
+        }
+        return false;
+    }
+
     void drawrpgquest(int w, int h)
     {
+        // Clear the collapse hit-rect FIRST, before any early return, so
+        // an off-map / spectator / no-quest frame never leaves a stale
+        // rect behind to eat clicks (hotbar pattern).
+        loopi(4) rpg_questcollapse_rect[i] = -1;
         if(!rpg::mapactive(getclientmap())) return;
-        int qid = 0, st = -1, kills = 0, need = 0;
-        if(!rpg::getclientquest(qid, st, kills, need)) return;
-        const rpg::questdef *qd = rpg::questdefbyid(qid);
-        if(!qd || !qd->name[0]) return;
+        // Multi-quest tracker: collect up to 4 in-progress quests
+        // (lowest-id first, same order as the old single-quest lookup).
+        // Show ONLY active ones (1-4 plates, never empty plates); draw
+        // nothing when none are active (old behavior).
+        int qids[4], sts[4], kills[4], needs[4];
+        int nq = rpg::getclientquests(qids, sts, kills, needs, 4);
+        if(nq <= 0) return;
         pushfont();
         setfont("digital"); // v0.1.24: digital has the full charset; digit_white is digits-only and made quest names invisible in v0.1.23
         float X = w*hudvirtualheight(h)/h;
         // Ed's frame art (Oct 28): shared composite geometry from
-        // rpg_mmgeom (above). The plate's right edge stays at the
+        // rpg_mmgeom (above). The plates' right edge stays at the
         // composite's right edge (rx+rs = X - s/20, unchanged), and
-        // its top drops below the bottom button circles (rim bottom
+        // the top drops below the bottom button circles (rim bottom
         // 0.9928 of the composite) plus one 24-unit gap — the old
         // position would sit on top of the circles.
         float s, compx, compy, comp, ringcx, ringcy, mapx, mapy;
         rpg_mmgeom(w, h, s, compx, compy, comp, ringcx, ringcy, mapx, mapy);
         int rs = int(s), rx = int(X - rs - rs/20);
-        float ty = compy + 0.9928f*comp + 24.0f;
+        float ty0 = compy + 0.9928f*comp + 24.0f;
         // v0.1.26 (item 2): measure the REAL drawn widths. The old code
         // estimated width as strlen*0.5*size, but the digital font is
         // proportional — wide glyphs (caps, M, etc.) run wider than
@@ -2835,23 +2864,54 @@ namespace game
         // text with 16px padding on each side.
         float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
         float saveScale = gtextscale;
-        settextscale(30.0f/baseh); float nmw = text_widthf(qd->name);
-        // quest engine v2: the server sends the objective display text
-        // (N_RPG_QTEXT); kill quests fall back to kills/need.
-        static string progbuf;
-        char objtext[160];
-        const char *prog = NULL;
-        if(rpg::getclientquesttext(qid, objtext, sizeof(objtext))) prog = objtext;
-        else { formatstring(progbuf)("%d/%d", kills, need); prog = progbuf; }
-        settextscale(26.0f/baseh); float pgw = text_widthf(prog);
+        // Collapse button: a 30x30 header button at the TOP of the
+        // tracker box, right edge flush with the plates' right edge
+        // (rx+rs). Its top sits exactly where the old single plate's
+        // top sat (ty0 - 10), which the Oct 28 geometry already proved
+        // clear of the bottom button circles; the plates shift down by
+        // button height + gap so the button never overlaps plate text.
+        // The button position depends only on the minimap geometry, so
+        // it is identical in expanded and collapsed states and the
+        // hit-test always matches what is drawn.
+        const float btn = 30.0f, btngap = 8.0f;
+        float bxl = rx + rs - btn, bxr = rx + rs;
+        float byt = ty0 - 10.0f, byb = byt + btn;
+        rpg_solidquad(bxl, byt, btn, btn, 0.0f, 0.0f, 0.0f, 0.72f);
+        rpg_chattextc(rpg_questcollapsed ? "+" : "-", bxl + btn/2, byt + btn/2, 26.0f, 1.0f, 1.0f, 1.0f);
+        rpg_questcollapse_rect[0] = bxl; rpg_questcollapse_rect[1] = byt;
+        rpg_questcollapse_rect[2] = bxr; rpg_questcollapse_rect[3] = byb;
+        if(!rpg_questcollapsed)
+        {
+            // Stacked plates, full row height (no compaction: 4 plates
+            // + gaps run ~410 units down the side in hudV-tall space,
+            // which Ed explicitly approved). Each plate reuses the old
+            // single-plate drawing (fonts, colors, padding, true-width
+            // measurement, right-alignment), shifted down per quest.
+            const float plateh = 38.0f + 26.0f + 20.0f, plategap = 12.0f;
+            loopi(nq)
+            {
+                const rpg::questdef *qd = rpg::questdefbyid(qids[i]);
+                if(!qd || !qd->name[0]) continue;
+                float ty = ty0 + btn + btngap + i*(plateh + plategap);
+                settextscale(30.0f/baseh); float nmw = text_widthf(qd->name);
+                // quest engine v2: the server sends the objective display text
+                // (N_RPG_QTEXT); kill quests fall back to kills/need.
+                string progbuf;
+                char objtext[160];
+                const char *prog = NULL;
+                if(rpg::getclientquesttext(qids[i], objtext, sizeof(objtext))) prog = objtext;
+                else { formatstring(progbuf)("%d/%d", kills[i], needs[i]); prog = progbuf; }
+                settextscale(26.0f/baseh); float pgw = text_widthf(prog);
+                // plate behind both lines (right-aligned pair ending at rx+rs),
+                // sized from the wider line's TRUE extent plus padding
+                float platew = max(nmw, pgw);
+                rpg_solidquad(rx + rs - platew - 16.0f, ty - 10.0f, platew + 32.0f,
+                              plateh, 0.0f, 0.0f, 0.0f, 0.72f);
+                rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
+                rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
+            }
+        }
         settextscale(saveScale);
-        // plate behind both lines (right-aligned pair ending at rx+rs),
-        // sized from the wider line's TRUE extent plus padding
-        float platew = max(nmw, pgw);
-        rpg_solidquad(rx + rs - platew - 16.0f, ty - 10.0f, platew + 32.0f,
-                      38.0f + 26.0f + 20.0f, 0.0f, 0.0f, 0.0f, 0.72f);
-        rpg_chattext(qd->name, int(rx + rs - nmw), int(ty), 30.0f, 1.0f, 0.78f, 0.42f);
-        rpg_chattext(prog, int(rx + rs - pgw), int(ty + 38.0f), 26.0f, 1.0f, 1.0f, 1.0f);
         popfont();
     }
 
@@ -3882,6 +3942,21 @@ namespace game
         return true;
     }
 
+    ICOMMAND(bgleave, "", (), {
+        // Leave-match trigger (BG cluster, Nov 3): bound to L. Only opens
+        // the confirm dialog during a battleground match (m_ctf); outside
+        // a match it is a no-op with a console note.
+        if(m_ctf) executestr("showgui bgleaveconfirm");
+        else conoutf("Not in a battleground.");
+    });
+    ICOMMAND(bgleaveconfirm, "", (), {
+        // Confirm dialog LEAVE button: send the leave request, close the
+        // dialog. The server discards our pending tally and acks with
+        // N_BG_LEFT, which disconnects us (voluntary leave, not a kick).
+        addmsg(N_BG_LEAVE, "r");
+        cleargui(1);
+    });
+
     void gameplayhud(int w, int h)
     {
         fpsent *d = hudplayer();
@@ -3943,9 +4018,9 @@ namespace game
             // its own centered line in the default font (visible), the time
             // stays in digit_white, and every line gets TEXT_SHADOW. Each
             // line is independently TEXT_CENTER_UP at X/2, so the block is
-            // centered by construction. (The start-countdown line below has
-            // the same digit_white letter-drop defect — "MATCH STARTS IN %d"
-            // renders as digits only — left untouched pending Ed's word.)
+            // centered by construction. (The start-countdown line below
+            // had the same digit_white letter-drop defect — fixed in
+            // the BG cluster by drawing it in the default font.)
             pushfont(); setfont("default"); settextscale(0.8f);
             draw_textx("BATTLEGROUND QUEUE", X/2.0f, 60, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
             settextscale(1.f); popfont();
@@ -3962,19 +4037,31 @@ namespace game
             // block runs: at changemap the overlay (and the button)
             // is gone, so there is no cancel affordance once the
             // match starts.
+            // Hover highlight (BG cluster, Nov 3): brighten the button
+            // while the free cursor sits over it, so the click target
+            // is unmistakable. Same mouse->virtual conversion as
+            // bgqueuecancelclick, using the draw block's own w/h.
             float bx, by, bw, bh;
             bgcancelrect(X, bx, by, bw, bh);
-            glDisable(GL_TEXTURE_2D);
-            glColor4f(1, 1, 1, 0.25f);
-            drawquad(bx, by, bw, bh, 0, 0, 1, 1, false, false);
-            glColor4f(0, 0, 0, 0.60f);
-            drawquad(bx+3, by+3, bw-6, bh-6, 0, 0, 1, 1, false, false);
-            glEnable(GL_TEXTURE_2D);
+            bool bgcancel_hover = false;
+            {
+                int hmx = 0, hmy = 0; SDL_GetMouseState(&hmx, &hmy);
+                float hvx = hmx*hudvirtualheight(h)/h, hvy = hmy*hudvirtualheight(h)/h;
+                bgcancel_hover = hvx >= bx && hvx <= bx+bw && hvy >= by && hvy <= by+bh;
+            }
+            // Solid quads via rpg_solidquad (BG cluster, Nov 3): the old
+            // glDisable + bare drawquad pair sampled the last-bound
+            // texture (digit_white, from the time line just above) and
+            // drew its atlas as the "glyph grid" under CANCEL instead
+            // of a solid box. Binding the 1x1 white texture makes the
+            // button a true solid box, and the hover brightening clean.
+            rpg_solidquad(bx, by, bw, bh, 1, 1, 1, bgcancel_hover ? 0.50f : 0.25f);
+            rpg_solidquad(bx+3, by+3, bw-6, bh-6, 0, 0, 0, bgcancel_hover ? 0.45f : 0.60f);
             glColor4f(1, 1, 1, 1);
             pushfont(); setfont("default"); settextscale(0.8f);
             int btw = 0, bth = 0;
             text_bounds("CANCEL", btw, bth);
-            draw_textx("CANCEL", X/2.0f, by + (bh - bth)/2.0f, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW);
+            draw_textx("CANCEL", X/2.0f, by + (bh + bth)/2.0f, 255, 255, 255, 255, TEXT_CENTER_UP|TEXT_SHADOW); // TEXT_CENTER_UP subtracts height, so the passed y is the text BOTTOM: (bh + bth)/2 centers it in the box (Ed, .46 note 1)
             settextscale(1.f); popfont();
         }
         else if(bgqueue_cursorfreed)
@@ -3988,7 +4075,7 @@ namespace game
         {
             float X = w*hudvirtualheight(h)/h;
             int secs = (bgstart_until - lastmillis + 999)/1000;
-            pushfont(); setfont("digit_white"); settextscale(2.5f);
+            pushfont(); setfont("default"); settextscale(2.5f);
             draw_textx("MATCH STARTS IN %d", X/2.0f, hudvirtualheight(h)*0.5f, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs);
             settextscale(1.f); popfont();
         }

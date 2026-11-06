@@ -37,6 +37,46 @@ namespace rpg
         /* 8 */ 3300,
         /* 9 */ 4600,
         /*10 */ 6200,
+        /*11 */ 7950,
+        /*12 */ 9900,
+        /*13 */ 12050,
+        /*14 */ 14400,
+        /*15 */ 17000,
+        /*16 */ 19850,
+        /*17 */ 23000,
+        /*18 */ 26450,
+        /*19 */ 30250,
+        /*20 */ 34450,
+        /*21 */ 39050,
+        /*22 */ 44100,
+        /*23 */ 49650,
+        /*24 */ 55750,
+        /*25 */ 62450,
+        /*26 */ 69800,
+        /*27 */ 77900,
+        /*28 */ 86800,
+        /*29 */ 96600,
+        /*30 */ 107400,
+        /*31 */ 119300,
+        /*32 */ 132400,
+        /*33 */ 146800,
+        /*34 */ 162650,
+        /*35 */ 180100,
+        /*36 */ 199300,
+        /*37 */ 220400,
+        /*38 */ 243600,
+        /*39 */ 269100,
+        /*40 */ 297150,
+        /*41 */ 328000,
+        /*42 */ 361950,
+        /*43 */ 399300,
+        /*44 */ 440400,
+        /*45 */ 485600,
+        /*46 */ 535300,
+        /*47 */ 589950,
+        /*48 */ 650050,
+        /*49 */ 716150,
+        /*50 */ 788850,
     };
 
     // in-memory view of currently connected characters (write-through to the DB)
@@ -735,12 +775,12 @@ namespace rpg
     // --- inventory & equipment v1 (milestone step 4) ---
     // The RPG layer (equipment effects, loot, abilities-as-RPG) lives on the
     // RPG maps only: rpg_01 is the world, krpg the battleground test map,
-    // ctf_obelisk_b1 the CTF castle map (Abbott's CTF queue retarget, v0.1.40).
+    // ctf_twinkeeps_b1 the CTF castle map (Abbott's CTF queue retarget, v0.1.40).
     // Everything else keeps pure FPS behavior.
     bool mapactive(const char *map)
     {
         if(!map || !map[0]) return false;
-        return !strcmp(map, "rpg_01") || !strcmp(map, "krpg") || !strcmp(map, "ctf_obelisk_b1");
+        return !strcmp(map, "rpg_01") || !strcmp(map, "krpg") || !strcmp(map, "ctf_twinkeeps_b1");
     }
 
     // Write the session cache's inventory + equipment rows for one character.
@@ -2271,6 +2311,30 @@ namespace rpg
             }
         }
         return false;
+    }
+    int getclientquests(int *qids, int *states, int *kills, int *needs, int max)
+    {
+        // Multi-quest tracker (Nov 1, ported from .43): the SAME in-progress rule as
+        // getclientquest, but collect up to max instead of returning the
+        // first. clquests is a std::map keyed by quest id, so iteration
+        // is lowest-id first — the same order the old single-quest
+        // lookup showed. Arrays are filled 0..n-1 only; n never exceeds
+        // max, so no overrun. getclientquest itself is untouched (NPC
+        // hover states and other single-quest uses keep calling it).
+        if(!qids || !states || !kills || !needs || max <= 0) return 0;
+        int n = 0;
+        for(std::map<int, clquest>::iterator it = clquests.begin(); it != clquests.end(); ++it)
+        {
+            const questdef *qd = questdefbyid(it->first);
+            if(!qd) continue;
+            if(it->second.state > 0 && it->second.state != qd->finalstage)
+            {
+                qids[n] = it->first; states[n] = it->second.state;
+                kills[n] = it->second.kills; needs[n] = it->second.need;
+                if(++n >= max) break;
+            }
+        }
+        return n;
     }
     bool getclientquesttext(int qid, char *buf, int buflen)
     {

@@ -496,7 +496,8 @@ namespace rpg
             d.emberprice = b.emberprice;
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
-            if(!findfile(d.icon, "e"))
+            // findfile "e" alone misses package files when no -k package dir is given (packagedirs empty); also try a direct existence check, like the path check above
+            if(!findfile(d.icon, "e") && !fileexists(d.icon, "r"))
                 conoutf("rpg: content: warning: icon '%s' for item '%s' not found", d.icon, d.id);
         }
         builtitems.clear();

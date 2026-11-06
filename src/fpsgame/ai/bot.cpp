@@ -1,5 +1,6 @@
 #include "game.h"
 #include "rpg/rpg.h"
+#include "rpg/abilities.h"
 
 namespace ai
 {
@@ -1035,12 +1036,19 @@ namespace ai
             }
         }
         
-        // Battlegrounds (v0.1.40, Slice 3): bots cast RPG abilities,
-        // never FPS guns, on battleground maps. Slice 3 bots are Magi:
-        // Spark Bolt (id 1, 120 range, instant) at the sighted enemy.
-        // The server re-validates everything (class, mana, cooldown,
-        // range, line of sight, enemy team), so this is only a trigger:
-        // a cast that would fail is dropped server-side. Throttled
+        // Battlegrounds (v0.1.40, Slice 3; class spells, Nov 3, Ed:
+        // each class casts its own spells, and bots must not all do
+        // the same thing): bots cast RPG abilities, never FPS guns,
+        // on battleground maps. The bot's RPG archetype (from its
+        // character row, set by bg_fillbots) picks the class list
+        // via rpg::classabilities, and the bot rotates through that
+        // list so Magi vary Spark/Arcane/Ice, Rangers vary Arrow/
+        // Venom, and Warriors vary Power Strike/Rend. Melee abilities
+        // only fire in melee range; at range a Warrior bot simply
+        // closes in (FPS AI movement) instead of casting. The server
+        // re-validates everything (class, mana, cooldown, range,
+        // line of sight, enemy team), so this is only a trigger: a
+        // cast that would fail is dropped server-side. Throttled
         // locally so one bot does not spam a message every think tick.
         void bg_botcast(fpsent *d)
         {
@@ -1048,9 +1056,25 @@ namespace ai
             if(lastmillis - ai->lastbgcast < 1500) return;
             fpsent *e = ai->enemy >= 0 ? getclient(ai->enemy) : NULL;
             if(!e || e->state != CS_ALIVE || isteam(d->team, e->team)) return;
-            if(e->o.squaredist(d->o) > 115*115) return; // Spark Bolt range 120, small margin
-            ai->lastbgcast = lastmillis;
-            addmsg(N_RPG_CAST, "rci3", d, 1, int(d->yaw), e->clientnum);
+            string arch;
+            const char *archname = "Magi";
+            if(rpg::chararchetype(d->name, arch, sizeof(arch)) && arch[0]) archname = arch;
+            int ids[4]; int n = rpg::classabilities(archname, ids, 4);
+            if(n <= 0) { ids[0] = 1; n = 1; } // fallback: Magi Spark Bolt
+            float dist = e->o.dist(d->o);
+            loopi(n)
+            {
+                int id = ids[(ai->bgcastidx + i) % n];
+                const rpg::abilitydef &ab = rpg::ability(id);
+                float margin = ab.melee ? 0 : 5; // ranged: old 115-for-120 margin
+                if(dist > ab.range - margin) continue;
+                ai->lastbgcast = lastmillis;
+                ai->bgcastidx = (ai->bgcastidx + i + 1) % n;
+                addmsg(N_RPG_CAST, "rci3", d, id, int(d->yaw), e->clientnum);
+                return;
+            }
+            // No ability in range: do not burn the throttle, so the
+            // bot re-checks next think tick as it closes distance.
         }
 
         void logic(fpsent *d, aistate &b, bool run)

@@ -1,4 +1,6 @@
 #include "game.h"
+#include <map>
+#include <string>
 #include "auth.h"
 
 // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
@@ -2717,6 +2719,33 @@ namespace server
     // (they bank nothing, no persistent character). Team match uses
     // ctfteamflag, the same mapping scoreflag uses to credit captures,
     // so a player is paid exactly when their captures counted for the
+    // Per-match pending Embers (BG cluster, Nov 3): kill earnings no
+    // longer bank immediately. They accrue here and bank only at the
+    // scoreboard (bg_pending_bank, called at match end before
+    // bg_grantwin); leaving or disconnecting forfeits them, because
+    // banking applies only to connected players at that point.
+    static std::map<std::string, int> bg_pending;
+    static void bg_pending_bank()
+    {
+        loopv(clients)
+        {
+            clientinfo *ci = clients[i];
+            if(!ci || ci->state.ai.type != ai::AI_TYPE_NONE || !ci->name[0]) continue;
+            std::map<std::string, int>::iterator it = bg_pending.find(ci->name);
+            if(it == bg_pending.end() || it->second <= 0) continue;
+            int newtotal = rpg::addembers(ci->name, it->second);
+            if(newtotal >= 0)
+            {
+                sendf(ci->clientnum, 1, "ri2", N_RPG_EMBERS, newtotal);
+                defformatstring(bankmsg)("+%d Embers banked.", it->second);
+                rpg_qmsg(ci, bankmsg);
+                conoutf("rpg: battleground pending bank: +%d Embers to '%s' (total %d)", it->second, ci->name, newtotal);
+            }
+            else conoutf("rpg: WARNING battleground pending bank FAILED for '%s' (+%d Embers) - addembers returned %d (character row missing?)", ci->name, it->second, newtotal);
+        }
+        bg_pending.clear();
+    }
+
     // winning side; un-teamed/spectator clients map to 0 and never
     // match. Losers get nothing here and nothing is taken back: kill
     // earnings already granted stay (no clawback). Each winner gets a
@@ -2766,6 +2795,7 @@ namespace server
                     else if(s2 > s1) sendservmsg("Red team wins the battleground!");
                     else sendservmsg("The battleground ends in a draw!");
                 }
+                if(rpg::connected()) bg_pending_bank();
                 if(rpg::connected()) bg_grantwin(s1 > s2 ? 1 : (s2 > s1 ? 2 : 0));
             }
 
@@ -3056,7 +3086,7 @@ namespace server
             // --- Battlegrounds: Embers kill reward (Nov 1, locked rates) ---
             // +10 Embers to the KILLER on a battleground kill. Gate is the
             // battleground itself: CTF mode (gamemode 7) on a battleground
-            // map (mapactive covers ctf_obelisk_b1), so RPG-map monster
+            // map (mapactive covers ctf_twinkeeps_b1), so RPG-map monster
             // kills, FPS modes and the RPG world never reach it. GAME
             // TIME ONLY (Nov 1, anti-exploit): bg_match_active &&
             // !bg_start_active && interm <= 0 — kills during the 10s
@@ -3082,14 +3112,13 @@ namespace server
                (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
                !isteam(actor->team, target->team) && actor->name[0])
             {
-                int newtotal = rpg::addembers(actor->name, 10);
-                if(newtotal >= 0)
-                {
-                    sendf(actor->clientnum, 1, "ri2", N_RPG_EMBERS, newtotal);
-                    rpg_qmsg(actor, "+10 Embers (battleground kill).");
-                    conoutf("rpg: battleground kill: +10 Embers to '%s' (total %d, victim '%s')", actor->name, newtotal, target->name);
-                }
-                else conoutf("rpg: WARNING battleground kill grant FAILED for '%s' (+10 Embers, victim '%s') - addembers returned %d (character row missing?)", actor->name, target->name, newtotal);
+                // Pending tally (BG cluster, Nov 3): the +10 accrues per
+                // match and banks only at the scoreboard; no N_RPG_EMBERS
+                // sync here, so the shop shows banked Embers only and
+                // pending never inflates the spendable balance.
+                bg_pending[actor->name] += 10;
+                rpg_qmsg(actor, "+10 Embers (pending — banked at scoreboard).");
+                conoutf("rpg: battleground kill: +10 Embers pending to '%s' (victim '%s')", actor->name, target->name);
             }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
@@ -3406,16 +3435,59 @@ namespace server
             copystring(bi->name, name, MAXNAMELEN+1);
             bg_bots.add(bi->clientnum);
             // RPG character so casts validate (level 1 + starter kit),
-            // then the Magi archetype so the Spark Bolt class gate passes.
-            // The name is set before the next refresh sends N_INITAI, so
+            // then a class archetype, round-robin Warrior/Ranger/Magi
+            // (Ed, .46 notes: each class casts its own spells, and
+            // bots must not all do the same thing). The class gate
+            // on the server checks this stored archetype, and the
+            // client bot cast picks its spell list from it. The name
+            // is set before the next refresh sends N_INITAI, so
             // clients keep the server name instead of generating one.
+            static const char *bg_botclasses[] = { "Warrior", "Ranger", "Magi" };
+            static int bg_botclassidx = 0;
+            const char *botarch = bg_botclasses[bg_botclassidx++ % 3];
             if(rpg::connected())
             {
                 rpg::onconnect(name);
-                rpg::setarchetype(name, "Magi");
+                rpg::setarchetype(name, botarch);
+                // Class weapon in hand (onconnect's starter kit derives
+                // from the bot's model, not its archetype, so it would
+                // leave every bot on the puglin stick): Ranger gets the
+                // wooden bow, Magi the wooden staff, Warrior keeps the
+                // stick. Failures are ignored; the stick still casts.
+                if(!strcmp(botarch, "Ranger") && rpg::additem(name, "wooden_bow", 1)) rpg::equipitem(name, "wooden_bow");
+                else if(!strcmp(botarch, "Magi") && rpg::additem(name, "wooden_staff", 1)) rpg::equipitem(name, "wooden_staff");
             }
-            conoutf("bg: bot '%s' (cn %d) joins the battleground", name, bi->clientnum);
+            conoutf("bg: bot '%s' (%s, cn %d) joins the battleground", name, botarch, bi->clientnum);
         }
+    }
+
+    // Battleground bot hold (BG cluster, Nov 3): fillbots drop bots onto
+    // the RPG map up to ~10s before the changemap, and their FPS bot AI
+    // targets/fights immediately. A held bot is a fillbot while no match
+    // is running: ai::update skips its think (no targeting, no firing,
+    // no movement) until bg_match_active opens the gate at match start.
+    // Self-clearing: match start sets bg_match_active, match end and
+    // queue cancel/dissolve delete the bots.
+    bool bg_bot_held(int cn)
+    {
+        if(bg_match_active) return false;
+        loopv(bg_bots) if(bg_bots[i] == cn) return true;
+        return false;
+    }
+
+    // Per-player leave (BG cluster, Nov 3, Ed: the host-leave edge is
+    // old-engine only; the match continues for everyone else unless
+    // the leaver was the only player). Discard the leaver's pending
+    // tally, then ack so the client disconnects itself: a server-side
+    // kick would show as "kicked", the ack keeps it voluntary. The
+    // match itself is untouched, so everyone else keeps playing and
+    // their pending tallies still bank at the scoreboard.
+    static void bg_leave(clientinfo *cq)
+    {
+        if(!cq || !bg_match_active || cq->state.state == CS_SPECTATOR) return;
+        bg_pending.erase(cq->name);
+        sendf(cq->clientnum, 1, "ri", N_BG_LEFT);
+        conoutf("bg: '%s' left the battleground (pending Embers forfeited)", cq->name);
     }
 
     static bool bg_queue_join(clientinfo *cq, const char *modestr)
@@ -3493,7 +3565,7 @@ namespace server
                 {
                     bg_queue_active = false;
                     bg_match_starting = true;
-                    changemap("ctf_obelisk_b1", 7);
+                    changemap("ctf_twinkeeps_b1", 7);
                 }
             }
         }
@@ -6693,6 +6765,11 @@ namespace server
             case N_BG_CANCEL: // battlegrounds v0.1.41: leave the queue
             {
                 if(cq) bg_queue_cancel(cq);
+                break;
+            }
+            case N_BG_LEAVE: // battlegrounds BG cluster, Nov 3: leave the match (per-player)
+            {
+                if(cq) bg_leave(cq);
                 break;
             }
             // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---

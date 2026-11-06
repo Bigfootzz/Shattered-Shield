@@ -2,6 +2,8 @@
 
 #include "engine.h"
 #include "SDL_image.h"
+#include <string>
+#include <unordered_map>
 
 #define FUNCNAME(name) name##1
 #define DEFPIXEL uint OP(r, 0);
@@ -1308,6 +1310,51 @@ void loadalphamask(Texture *t)
     }
 }
 
+// Parallel texture pre-decode staging (model preload path, option D).
+// Workers decode texture files into CPU-side ImageData during the
+// preload phase; the main thread uploads them here instead of decoding
+// again. The map is only ever touched on the main thread: workers decode
+// into thread-local maps that the main thread merges after joining them,
+// and this function consumes entries on the main thread. No lock is
+// needed by construction. Entries are consumed exactly once; anything
+// the scan missed (or failed to decode) falls through to the normal
+// decode path below, so behavior without staging is unchanged.
+struct stagedtex { ImageData *img; int compress; };
+static std::unordered_map<std::string, stagedtex> stagedtextures;
+
+bool predecodetexture(ImageData &d, const char *name, int *compress)
+{
+    // CPU decode only: msg=false skips the progress draw and all
+    // msg-gated console output, so workers never touch GL or the
+    // console. (Two unconditional conoutf error paths for invalid files
+    // remain inside texturedata; they only fire on corrupt textures.)
+    return texturedata(d, name, NULL, false, compress);
+}
+
+void addstagedtexture(const char *key, ImageData *img, int compress)
+{
+    stagedtex &s = stagedtextures[key];
+    if(s.img) delete s.img; // defensive: keys are deduped before merge
+    s.img = img;
+    s.compress = compress;
+}
+
+ImageData *takestagedtexture(const char *key, int *compress)
+{
+    auto it = stagedtextures.find(key);
+    if(it == stagedtextures.end()) return NULL;
+    ImageData *img = it->second.img;
+    if(compress) *compress = it->second.compress;
+    stagedtextures.erase(it);
+    return img;
+}
+
+void endstagedtextures()
+{
+    for(auto &kv : stagedtextures) delete kv.second.img;
+    stagedtextures.clear();
+}
+
 Texture *textureload(const char *name, int clamp, bool mipit, bool msg)
 {
     string tname;
@@ -1315,6 +1362,14 @@ Texture *textureload(const char *name, int clamp, bool mipit, bool msg)
     Texture *t = textures.access(path(tname));
     if(t) return t;
     int compress = 0;
+    if(ImageData *staged = takestagedtexture(tname, &compress))
+    {
+        Texture *res = NULL;
+        if(staged->data) res = newtexture(NULL, tname, *staged, clamp, mipit, false, false, compress);
+        delete staged; // upload copies pixels to the GPU; staged pixels are done
+        if(res) return res;
+        // unusable stage: fall through and decode normally below
+    }
     ImageData s;
     if(texturedata(s, tname, NULL, msg, &compress)) return newtexture(NULL, tname, s, clamp, mipit, false, false, compress);
     return notexture;

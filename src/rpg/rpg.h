@@ -13,7 +13,7 @@ namespace rpg
     // XP awarded server-side per monster kill (additive to kill handling)
     const int XP_PER_MONSTER_KILL = 25;
     // Highest level covered by the threshold table
-    const int MAX_LEVEL = 10;
+    const int MAX_LEVEL = 50;
 
     struct charinfo
     {
@@ -475,6 +475,7 @@ namespace rpg
     void clearclientbuffs();
     int clientbufflist(int *attrs, int *exps, int *mags, int max); // active, expiry-pruned, attr order
     bool getclientquest(int &qid, int &state, int &kills, int &need); // tracked quest
+    int getclientquests(int *qids, int *states, int *kills, int *needs, int max); // up to max in-progress quests, lowest-id first (multi-quest tracker)
     bool getclientquesttext(int qid, char *buf, int buflen);
     int clientqueststate(int qid); // -1 when the client has no row for qid
     // True when a monster with this display name is a current quest target.

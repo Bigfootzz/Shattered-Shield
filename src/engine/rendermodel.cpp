@@ -1,4 +1,8 @@
 #include "engine.h"
+#include <fstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 VAR(oqdynent, 0, 1, 1);
 VAR(animationinterpolationtime, 0, 150, 1000);
@@ -362,8 +366,180 @@ void preloadmodel(const char *name)
     preloadmodels.add(newstring(name));
 }
 
+// Parallel texture pre-decode for model preload (option D, Nov 3 load-time work).
+// Texture decode (PNG via SDL_image, DDS parse) is the dominant CPU cost
+// of the load screen, and it needs no GL context. So the flush splits
+// into two phases when more than one worker is available:
+//   phase 1 (workers): scan each queued model's iqm.cfg for skin/bumpmap
+//     texture paths and decode them into CPU-side ImageData. Workers
+//     never call GL, never touch the texture cache, and never execute
+//     cfg commands: the scan is a plain text read, and decoding goes
+//     through predecodetexture (texturedata with msg=false, so no
+//     progress draw and no console output from workers).
+//   phase 2 (main thread, unchanged): the existing loadmodel +
+//     preloadmeshes loop. textureload uploads staged pixels instead of
+//     decoding again, and falls back to normal decode for anything the
+//     scan missed (non-IQM models, cfgs without matches, decode
+//     failures). Load order, model dedup by name, and texture caching
+//     by path are exactly as before.
+// Workers are spawned per flush and joined before phase 2 starts, so no
+// thread outlives the flush and quit/shutdown can never race a worker.
+// Staged leftovers (shared textures already cached, over-approximated
+// scans) are freed at the end of the flush. Each phase has a strict
+// lifecycle: mapmodels staging is freed at the end of
+// preloadusedmapmodels, queue staging at the end of
+// flushpreloadedmodels, so nothing persists across map loads.
+// Single-threaded behavior is unchanged: preloadthreads 1, a
+// single-core machine, or fewer than 2 decodable textures all skip
+// phase 1 entirely.
+VAR(preloadthreads, 0, 0, 16); // 0 = auto (all cores, capped at 8), 1 = force single-threaded
+
+namespace
+{
+    bool isimagefile(const char *f)
+    {
+        const char *ext = strrchr(f, '.');
+        if(!ext) return false;
+        ++ext;
+        return !strcasecmp(ext, "png") || !strcasecmp(ext, "dds") || !strcasecmp(ext, "jpg") || !strcasecmp(ext, "jpeg") || !strcasecmp(ext, "tga") || !strcasecmp(ext, "bmp");
+    }
+
+    // Append the normalized cache key for one cfg texture argument.
+    // Mirrors makerelpath(dir, file) + path(): dir + "/" + file with any
+    // leading <...> command segment stripped by path(), then normalized.
+    // (makerelpath itself is not called: it returns a shared static
+    // buffer, which is not safe to use from workers, and the scan runs
+    // before workers spawn anyway.)
+    void addcfgkey(std::vector<std::string> &keys, const char *dir, const char *file)
+    {
+        if(!file || !file[0] || file[0] == '<' || !isimagefile(file)) return;
+        string buf;
+        formatstring(buf)("%s/%s", dir, file);
+        keys.push_back(path(buf));
+    }
+
+    // Plain-text scan of one model's iqm.cfg for skin/bumpmap textures.
+    // Deliberately NOT cfg execution: no command interpreter, no globals,
+    // no GL. Masks are skipped on purpose: setskin always passes
+    // "<stub>", which texturedata answers without decoding, so there is
+    // nothing to pre-decode for them.
+    void scancfgtextures(const char *modelname, std::vector<std::string> &keys)
+    {
+        string cfgpath, dir;
+        formatstring(cfgpath)("packages/models/%s/iqm.cfg", modelname);
+        formatstring(dir)("packages/models/%s", modelname);
+        std::ifstream f(cfgpath);
+        if(!f) return; // no cfg (non-IQM, default parts): main thread loads as today
+        std::string line;
+        while(std::getline(f, line))
+        {
+            size_t p = line.find_first_not_of(" \t\r");
+            if(p == std::string::npos) continue;
+            size_t e = line.find_first_of(" \t\r", p);
+            std::string cmd = line.substr(p, e == std::string::npos ? std::string::npos : e - p);
+            if(cmd != "iqmskin" && cmd != "iqmbumpmap") continue;
+            std::vector<std::string> tok;
+            size_t i = e;
+            while(i != std::string::npos)
+            {
+                i = line.find_first_not_of(" \t\r", i);
+                if(i == std::string::npos) break;
+                size_t j = line.find_first_of(" \t\r", i);
+                tok.push_back(line.substr(i, j == std::string::npos ? std::string::npos : j - i));
+                i = j;
+            }
+            if(cmd == "iqmskin")
+            {
+                if(tok.size() >= 2) addcfgkey(keys, dir, tok[1].c_str());
+            }
+            else // iqmbumpmap: <mesh> <normal> <skin>
+            {
+                if(tok.size() >= 2) addcfgkey(keys, dir, tok[1].c_str());
+                if(tok.size() >= 3) addcfgkey(keys, dir, tok[2].c_str());
+            }
+        }
+    }
+
+    struct decodedtex { ImageData *img; int compress; };
+
+    struct decodejob
+    {
+        const std::vector<std::string> *keys;
+        size_t begin, end;
+        std::unordered_map<std::string, decodedtex> *out;
+    };
+
+    int decodeworker(void *data)
+    {
+        decodejob *job = (decodejob *)data;
+        for(size_t i = job->begin; i < job->end; ++i)
+        {
+            const std::string &key = (*job->keys)[i];
+            ImageData *img = new ImageData;
+            int compress = 0;
+            if(predecodetexture(*img, key.c_str(), &compress) && img->data)
+            {
+                decodedtex dt;
+                dt.img = img;
+                dt.compress = compress;
+                (*job->out)[key] = dt;
+            }
+            else delete img; // decode failed: main thread retries normally
+        }
+        return 0;
+    }
+
+    // Decode every key in parallel, then hand the results to the staging
+    // map on the main thread. No shared state during the parallel phase:
+    // each worker writes only its own map, and keys are deduped and
+    // partitioned before spawning, so no two workers ever decode (or
+    // store) the same texture.
+    void predecodetextures(std::vector<std::string> &keys)
+    {
+        if(keys.empty()) return;
+        std::unordered_map<std::string, char> seen;
+        std::vector<std::string> uniq;
+        for(size_t i = 0; i < keys.size(); ++i)
+            if(seen.insert(std::make_pair(keys[i], (char)1)).second) uniq.push_back(keys[i]);
+        keys.swap(uniq);
+        int want = preloadthreads;
+        if(want <= 0)
+        {
+            want = SDL_GetCPUCount();
+            if(want > 8) want = 8;
+        }
+        if(want < 2 || keys.size() < 2) return;
+        if((size_t)want > keys.size()) want = (int)keys.size();
+        std::vector<decodejob> jobs(want);
+        std::vector<std::unordered_map<std::string, decodedtex> > results(want);
+        std::vector<SDL_Thread *> threads(want, NULL);
+        size_t chunk = (keys.size() + want - 1) / want;
+        for(int i = 0; i < want; ++i)
+        {
+            jobs[i].keys = &keys;
+            jobs[i].begin = i * chunk;
+            jobs[i].end = keys.size() < (i + 1) * chunk ? keys.size() : (i + 1) * chunk;
+            jobs[i].out = &results[i];
+            threads[i] = SDL_CreateThread(decodeworker, "preload-decode", &jobs[i]);
+        }
+        for(int i = 0; i < want; ++i) if(threads[i]) SDL_WaitThread(threads[i], NULL);
+        for(int i = 0; i < want; ++i)
+        {
+            for(std::unordered_map<std::string, decodedtex>::iterator it = results[i].begin(); it != results[i].end(); ++it)
+                addstagedtexture(it->first.c_str(), it->second.img, it->second.compress);
+            results[i].clear(); // ownership moved to staging; clear drops pointers only
+        }
+    }
+}
+
 void flushpreloadedmodels(bool msg)
 {
+    if(preloadthreads != 1)
+    {
+        std::vector<std::string> keys;
+        loopv(preloadmodels) scancfgtextures(preloadmodels[i], keys);
+        predecodetextures(keys);
+    }
     loopv(preloadmodels)
     {
         loadprogress = float(i+1)/preloadmodels.length();
@@ -376,6 +552,7 @@ void flushpreloadedmodels(bool msg)
         }
         printf("Init: [model] '%s' took %dms\n", preloadmodels[i], SDL_GetTicks() - pt0);
     }
+    endstagedtextures();
     preloadmodels.deletearrays();
     loadprogress = 0;
 }
@@ -390,6 +567,16 @@ void preloadusedmapmodels(bool msg, bool bih)
         if(e.type==ET_MAPMODEL && e.attr2 >= 0 && mapmodels.find(e.attr2) < 0) mapmodels.add(e.attr2);
     }
 
+    if(preloadthreads != 1)
+    {
+        std::vector<std::string> keys;
+        loopv(mapmodels)
+        {
+            mapmodelinfo *mmi = getmminfo(mapmodels[i]);
+            if(mmi && mmi->name[0]) scancfgtextures(mmi->name, keys);
+        }
+        predecodetextures(keys);
+    }
     loopv(mapmodels)
     {
         loadprogress = float(i+1)/mapmodels.length();
@@ -403,6 +590,7 @@ void preloadusedmapmodels(bool msg, bool bih)
             mmi->m->preloadmeshes();
         }
     }
+    endstagedtextures();
     loadprogress = 0;
 }
 

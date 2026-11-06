@@ -2,6 +2,8 @@
 #include "game.h"
 #include "engine.h" // v0.1.25: textureload for the death-window logo
 #include "rpg/rpg.h"
+#include <map>
+#include <string>
 
 extern float gtextscale; //TODO: move to some header file
 
@@ -118,6 +120,32 @@ namespace game
         spectators.sort(playersort);
         groups.sort(scoregroupcmp, 0, numgroups);
         return numgroups;
+    }
+
+    // BG scoreboard class names (Ed, .46 notes): show the RPG archetype
+    // (Magi/Warrior/Ranger) instead of the old FPS class name, because a
+    // player's FPS playerclass is not their RPG archetype (4 FPS classes
+    // vs 3 RPG classes, and bot FPS classes are assigned independently).
+    // Empty archetype (no character row, or an empty stored archetype)
+    // falls back to the FPS class name, so non-RPG games are unchanged.
+    // Cached per name with a 5s refresh: renderscoreboard runs every
+    // frame while open, and chararchetype() opens the character DB per
+    // call, so an uncached lookup would hammer the DB at intermission.
+    struct scorearch { std::string text; int when; };
+    static const char *scoreboard_classname(fpsent *o)
+    {
+        static std::map<std::string, scorearch> cache;
+        std::map<std::string, scorearch>::iterator it = cache.find(o->name);
+        if(it == cache.end() || lastmillis - it->second.when > 5000)
+        {
+            string arch;
+            const char *shown = game::getplayerclassinfo(o).name;
+            if(rpg::chararchetype(o->name, arch, sizeof(arch)) && arch[0]) shown = arch;
+            scorearch entry; entry.text = shown; entry.when = lastmillis;
+            if(it == cache.end()) it = cache.insert(std::make_pair(std::string(o->name), entry)).first;
+            else it->second = entry;
+        }
+        return it->second.text.c_str();
     }
 
     void renderscoreboard(g3d_gui &g, bool firstpass)
@@ -288,7 +316,7 @@ namespace game
                     if(o->state==CS_DEAD) status = (status>>1)&0x7F7F7F;
                 }
                 g.pushlist();
-                    formatstring(playername)("\f-%s", colorname(o));
+                    formatstring(playername)("\f-%s", o->name); // Scoreboard shows plain names: no bot [cn] tags (Ed, .46 note 6). colorname() elsewhere is unchanged, so chat disambiguation keeps its suffixes.
                     g.text(playername, status, NULL, 17);
 
                     g.strut(0.5);
@@ -297,7 +325,7 @@ namespace game
                         //g.textf("<none>", 0xFFFFDD, NULL, 10); //TODO: clantag
                         if (m_classes)
                         {
-                            g.textf("%s", 0xFFFFDD, NULL, game::getplayerclassinfo(o).name);
+                            g.textf("%s", 0xFFFFDD, NULL, scoreboard_classname(o));
                         }
                     gtextscale *= 1.5;
                 g.poplist();

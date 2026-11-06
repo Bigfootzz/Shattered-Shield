@@ -726,6 +726,8 @@ enum
     N_BG_QUEUE,     // s->c: battleground queue status (mode int, seconds remaining; seconds <= 0 = clear)
     N_BG_START,     // s->c: match start countdown (seconds)
     N_BG_CANCEL,    // c->s: leave the battleground queue (no args) — v0.1.41, Ed's Cancel button pick
+    N_BG_LEAVE,     // c->s: leave the battleground match (no args) — BG cluster, Nov 3, per-player
+    N_BG_LEFT,      // s->c: leave ack, client disconnects itself (no args) — BG cluster, Nov 3
     N_RPG_FLOATDMG, // s->c: floating damage number (damage, x, y, z as DMF ints) -- to the attacker only
     N_RPG_EMBERS, // s->c: Embers sync (total Embers int) — Oct 31, Blasque shop
     N_RPG_NOTICE, // s->c: HUD notice (string) — appended last so no existing wire value moves
@@ -767,7 +769,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0,
     -1
 };
 
@@ -792,8 +794,8 @@ struct demoheader
 #define MAXNAMELEN 15
 #define MAXTEAMLEN 10
 
-#define TEAM_0 "survivor"
-#define TEAM_1 "scavenger"
+#define TEAM_0 "wolf" // BG teams: Wolf (blue) vs Raven (red), Ed .46 notes
+#define TEAM_1 "raven"
 
 #define TEAM_0_COLOR_TEXT "\fb"
 #define TEAM_1_COLOR_TEXT "\fr"
@@ -1426,6 +1428,7 @@ namespace server
     extern const char *modename(int n, const char *unknown = "unknown");
     extern const char *mastermodename(int n, const char *unknown = "unknown");
     extern void startintermission();
+    extern bool bg_bot_held(int cn); // BG fillbot hold gate for ai::update (BG cluster, Nov 3)
     extern void stopdemo();
     extern void forcemap(const char *map, int mode);
     extern void forcepaused(bool paused);
