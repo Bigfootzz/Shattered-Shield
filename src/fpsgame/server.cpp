@@ -3485,6 +3485,30 @@ namespace server
                 if(!used && rpg::connected() && rpg::charexists(bg_botnames[k])) used = true;
                 if(!used) { name = bg_botnames[k]; break; }
             }
+            // Phase 2 (v0.1.47 notes fix 6): the pool is exhausted by
+            // STALE rows. A mid-match L-leave or a full quit never ran
+            // the queue-end cleanup, so leaked bot rows blocked every
+            // pool name and the next fill produced zero bots. Reclaim
+            // the first pool name no live client holds: delete its
+            // stale row, then reuse the name. Pool names are
+            // bot-reserved (the character select filter hides them),
+            // so no reachable character is ever deleted here.
+            if(!name && rpg::connected())
+            {
+                loopk(sizeof(bg_botnames)/sizeof(bg_botnames[0]))
+                {
+                    bool held = false;
+                    loopv(clients) if(!strcmp(clients[i]->name, bg_botnames[k])) { held = true; break; }
+                    if(held) continue;
+                    if(rpg::charexists(bg_botnames[k]))
+                    {
+                        rpg::chardelete(bg_botnames[k]);
+                        conoutf("bg: reclaimed stale bot row '%s'", bg_botnames[k]);
+                        name = bg_botnames[k];
+                        break;
+                    }
+                }
+            }
             if(!name) break; // name pool exhausted
             clientinfo *bi = aiman::addai(75, -1, ai::AI_TYPE_BOT);
             if(!bi) break;
@@ -3541,7 +3565,23 @@ namespace server
     static void bg_leave(clientinfo *cq)
     {
         if(!cq || !bg_match_active || cq->state.state == CS_SPECTATOR) return;
+        // v0.1.47 notes fix 1(b) (Ed's ruling): leaving mid-match puts
+        // the player back in front of Lady Abbott, like a finished
+        // match. A listen server runs one map at a time, so this only
+        // works when the leaver is the LAST human in the match: the
+        // match ends and the changemap rides the existing match-end
+        // return path (client spawns at Abbott). With other humans
+        // still playing, the leaver disconnects to the menu as before
+        // (their pending Embers are forfeited either way).
+        int humansleft = 0;
+        loopv(clients) if(clients[i] != cq && clients[i]->state.ai.type == ai::AI_TYPE_NONE && clients[i]->state.state != CS_SPECTATOR) humansleft++;
         bg_pending.erase(cq->name);
+        if(humansleft == 0)
+        {
+            conoutf("bg: '%s' left the battleground (last human, match ends; pending Embers forfeited)", cq->name);
+            changemap("rpg_01", 16);
+            return;
+        }
         sendf(cq->clientnum, 1, "ri", N_BG_LEFT);
         conoutf("bg: '%s' left the battleground (pending Embers forfeited)", cq->name);
     }
@@ -5013,10 +5053,14 @@ namespace server
         if(rpg_projectiles.empty() || !rpg::connected()) return;
         float dt = curtime/1000.0f;
         if(dt <= 0) return;
+        // v0.1.47 notes fix 5: in battlegrounds a bolt's target is an
+        // enemy player, not a monster; monsteronly would fizzle every BG
+        // projectile on the first tick. Same gate as rpg_findtarget.
+        bool bg_pvp = rpg::mapactive(smapname) && (m_ctf || m_koth || m_tff);
         loopvrev(rpg_projectiles)
         {
             rpg_projectile &pr = rpg_projectiles[i];
-            clientinfo *t = rpg_projfind(pr.targetcn, true);
+            clientinfo *t = rpg_projfind(pr.targetcn, !bg_pvp);
             bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
             bool timeout = totalmillis - pr.born > 5000;
             if(gone || timeout)
@@ -5098,10 +5142,13 @@ namespace server
     static void rpg_dottick()
     {
         if(rpg_dots.empty() || !rpg::connected()) return;
+        // v0.1.47 notes fix 5: as in rpg_projectiletick above, a DoT on a
+        // BG enemy player must keep ticking (monsteronly would drop it).
+        bool bg_pvp = rpg::mapactive(smapname) && (m_ctf || m_koth || m_tff);
         loopvrev(rpg_dots)
         {
             rpg_dot &d = rpg_dots[i];
-            clientinfo *t = rpg_projfind(d.targetcn, true);
+            clientinfo *t = rpg_projfind(d.targetcn, !bg_pvp);
             bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
             if(gone || d.ticksleft <= 0) { rpg_dots.remove(i); continue; }
             if(totalmillis < d.nexttick) continue;
@@ -6439,6 +6486,17 @@ namespace server
             sendf(-1, 1, "ri2", N_CDIS, n);
             clients.removeobj(ci);
             aiman::removeai(ci);
+            // v0.1.47 notes fix 6: the last human leaving a battleground
+            // (L-leave disconnect, or closing the game mid-match) never
+            // ran the queue-end cleanup, so bot rows leaked and the next
+            // fill found every pool name blocked (zero bots). Delete the
+            // match bots (rows included) once no human remains.
+            if(bg_bots.length() > 0)
+            {
+                bool humansleft = false;
+                loopv(clients) if(clients[i]->state.ai.type == ai::AI_TYPE_NONE && clients[i]->state.state != CS_SPECTATOR) { humansleft = true; break; }
+                if(!humansleft) bg_deletebots();
+            }
             if(!numclients(-1, false, true)) noclients(); // bans clear when server empties
             if(ci->local) checkpausegame();
         }

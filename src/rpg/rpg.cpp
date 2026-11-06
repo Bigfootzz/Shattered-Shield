@@ -785,6 +785,12 @@ namespace rpg
         return !strcmp(map, "rpg_01") || !strcmp(map, "krpg") || !strcmp(map, "ctf_twinkeeps_b1") || !strcmp(map, "koth_riverbend_b1") || !strcmp(map, "tff_craterbattlefield_b1");
     }
 
+    bool bgmap(const char *map)
+    {
+        if(!map || !map[0]) return false;
+        return !strcmp(map, "ctf_twinkeeps_b1") || !strcmp(map, "koth_riverbend_b1") || !strcmp(map, "tff_craterbattlefield_b1");
+    }
+
     // Write the session cache's inventory + equipment rows for one character.
     // Delete + reinsert is simple and always consistent for these small sets.
     void saveinv(const char *name)

@@ -124,6 +124,11 @@ namespace rpg
     // Equipment effects (weapon damage, armor) and loot apply there and only
     // there, so FPS-mode behavior on other maps is never altered.
     bool mapactive(const char *map);
+    // Battleground maps only (subset of mapactive). NPC models never
+    // render there (v0.1.47 notes fix 2): the RPG NPC table belongs to
+    // the world, so even a stale table entry cannot put a vendor on a
+    // battleground map.
+    bool bgmap(const char *map);
 
     struct itemstack { int item; int count; }; // item = index into the items table
 

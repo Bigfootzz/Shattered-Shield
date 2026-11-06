@@ -129,36 +129,42 @@ namespace rpg
         }
         // Already loaded for this map: no-op (map changes call this fresh).
         if(!strcmp(loaded_map, mapname) && (from_file || nnpcs > 0)) return from_file;
+        // v0.1.47 notes fix 2: the fallback table is the RPG-world NPC
+        // set (Maren/Tomas/Corvin/Glimmer/Blasque). It used to load for
+        // ANY map whose npcs_<map>.cfg was missing, so Blasque's shop
+        // opened in every battleground. Only rpg_01 falls back now;
+        // every other map gets an empty table when its file is missing
+        // or unparsable, and a failed parse NEVER restores the previous
+        // map's table (that path could carry RPG NPCs into a BG map).
+        bool isrpgworld = !strcmp(mapname, "rpg_01");
 
         defformatstring(path)("data/rpg/npcs_%s.cfg", mapname);
         if(!contentfileexists(path))
         {
-            conoutf("rpg: npcs: %s missing - using hardcoded fallback NPCs", path);
-            use_fallback(mapname);
+            if(isrpgworld)
+            {
+                conoutf("rpg: npcs: %s missing - using hardcoded fallback NPCs", path);
+                use_fallback(mapname);
+            }
+            else
+            {
+                conoutf("rpg: npcs: %s missing - no NPCs on this map", path);
+                nnpcs = 0;
+                from_file = false;
+                copystring(loaded_map, mapname, sizeof(loaded_map));
+            }
             return false;
         }
-        // Parse into a staging copy so a failed file never half-loads.
-        npcdef staged[MAXNPCS];
-        int staged_n = 0;
-        // Temporarily point the parser at the staging area via globals swap.
-        // Simplest safe route: parse into npcs[] directly, but snapshot first.
-        npcdef backup[MAXNPCS];
-        int backup_n = nnpcs;
-        loopi(nnpcs) backup[i] = npcs[i];
-        char backup_map[128];
-        copystring(backup_map, loaded_map, sizeof(backup_map));
-        bool backup_from = from_file;
-
         nnpcs = 0;
         NP = nparse();
         std::string err;
         if(!parsecontentfile(path, nline, err))
         {
-            conoutf("rpg: npcs: %s parse failed (%s) - using fallback NPCs", path, err.c_str());
-            nnpcs = backup_n;
-            loopi(backup_n) npcs[i] = backup[i];
-            copystring(loaded_map, backup_map, sizeof(loaded_map));
-            from_file = backup_from;
+            conoutf("rpg: npcs: %s parse failed (%s) - %s", path, err.c_str(), isrpgworld ? "using fallback NPCs" : "no NPCs on this map");
+            if(isrpgworld) { use_fallback(mapname); return false; }
+            nnpcs = 0;
+            from_file = false;
+            copystring(loaded_map, mapname, sizeof(loaded_map));
             return false;
         }
         // Validate: every NPC needs an id, name, and model. Position (0,0,0)
@@ -167,17 +173,16 @@ namespace rpg
         {
             if(!npcs[i].id[0] || !npcs[i].name[0] || !npcs[i].model[0])
             {
-                conoutf("rpg: npcs: %s: entry %d missing id/name/model - using fallback NPCs", path, i);
-                nnpcs = backup_n;
-                loopi(backup_n) npcs[i] = backup[i];
-                copystring(loaded_map, backup_map, sizeof(loaded_map));
-                from_file = backup_from;
+                conoutf("rpg: npcs: %s: entry %d missing id/name/model - %s", path, i, isrpgworld ? "using fallback NPCs" : "no NPCs on this map");
+                if(isrpgworld) { use_fallback(mapname); return false; }
+                nnpcs = 0;
+                from_file = false;
+                copystring(loaded_map, mapname, sizeof(loaded_map));
                 return false;
             }
             if(npcs[i].x == 0 && npcs[i].y == 0 && npcs[i].z == 0)
                 conoutf("rpg: npcs: warning: '%s' at (0,0,0) - move it in the editor", npcs[i].id);
         }
-        (void)staged; (void)staged_n;
         copystring(loaded_map, mapname, sizeof(loaded_map));
         from_file = true;
         conoutf("rpg: npcs: loaded %d NPCs for '%s' from %s", nnpcs, mapname, path);

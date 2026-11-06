@@ -161,11 +161,17 @@ namespace game
         float worldd = raycubepos(from, dir, hitpos, 0, RAY_CLIPMAT|RAY_SKIPFIRST);
         if(worldd < 0) worldd = 1e16f;
         fpsent *best = NULL; float bestd = 1e16f;
+        // Battlegrounds (v0.1.47 notes fix 5): enemy players/bots are
+        // clickable targets too (same cylinder test as monsters). The
+        // RPG world stays monsters-only: players/bots can never be
+        // attacked there (Ed's ruling).
+        bool bgpick = rpg::mapactive(getclientmap()) && (m_ctf || m_koth || m_tff);
         loopv(clients)
         {
             fpsent *d = clients[i];
             if(!d || d == player1) continue;
-            if(d->ai.type != ai::AI_TYPE_MONSTER) continue;
+            if(d->ai.type == ai::AI_TYPE_MONSTER) { /* candidate */ }
+            else if(!(bgpick && !isteam(d->team, player1->team))) continue;
             if(d->state != CS_ALIVE) continue;
             float dist;
             if(!rpg_pickintersect(d, from, to, dist)) continue;
@@ -200,15 +206,23 @@ namespace game
         return r;
     }
 
-    // Resolve the selected clientnum to a live monster, NULL when gone/dead.
+    // Resolve the selected clientnum to a live target, NULL when gone/dead.
+    // Monsters everywhere; in battleground modes (v0.1.47 notes fix 5)
+    // enemy players/bots too. The RPG world can never select a player
+    // (pick/tabcycle only produce monsters there), and the BG branch
+    // requires an enemy team, so the world stays non-hostile toward
+    // players and bots (Ed's ruling).
     static fpsent *rpg_selmon()
     {
         int cn = rpg::selectedtarget();
         if(cn < 0) return NULL;
+        bool bg = rpg::mapactive(getclientmap()) && (m_ctf || m_koth || m_tff);
         loopv(clients)
         {
             fpsent *d = clients[i];
-            if(d && d->clientnum == cn && d->ai.type == ai::AI_TYPE_MONSTER && d->state == CS_ALIVE) return d;
+            if(!d || d->clientnum != cn || d->state != CS_ALIVE) continue;
+            if(d->ai.type == ai::AI_TYPE_MONSTER) return d;
+            if(bg && d != player1 && !isteam(d->team, player1->team)) return d;
         }
         return NULL;
     }
@@ -233,10 +247,15 @@ namespace game
     static fpsent *rpg_projmon(int cn)
     {
         if(cn < 0) return NULL;
+        // v0.1.47 notes fix 5: projectile visuals track BG enemy players
+        // too (same gate as rpg_selmon above); monsters-only elsewhere.
+        bool bg = rpg::mapactive(getclientmap()) && (m_ctf || m_koth || m_tff);
         loopv(clients)
         {
             fpsent *d = clients[i];
-            if(d && d->clientnum == cn && d->ai.type == ai::AI_TYPE_MONSTER && d->state == CS_ALIVE) return d;
+            if(!d || d->clientnum != cn || d->state != CS_ALIVE) continue;
+            if(d->ai.type == ai::AI_TYPE_MONSTER) return d;
+            if(bg && d != player1 && !isteam(d->team, player1->team)) return d;
         }
         return NULL;
     }
@@ -416,6 +435,11 @@ namespace game
     // World|Clan|System tabs are mouse-driven (rpg_chattabclick in fps.cpp),
     // so the Tab key has no chat function to conflict with.
     static const float RPG_TABCYCLE_RANGE = 60.0f; // "nearby", engine units; tune freely
+    // Battlegrounds (v0.1.47 notes fix 5): Tab range on BG maps. Ability
+    // range caps at 120u, so 300u finds the enemies you are about to
+    // fight without grabbing targets across the map; the server still
+    // validates cast range, so an out-of-range pick just fails to cast.
+    static const float RPG_BG_TABCYCLE_RANGE = 300.0f;
     struct rpg_tabcand { bool npc; int idx; int clientnum; float dist; };
     static bool rpg_tabcmp(const rpg_tabcand &a, const rpg_tabcand &b) { return a.dist < b.dist; }
     static void rpg_tabcycle()
@@ -423,20 +447,36 @@ namespace game
         if(!rpg::mapactive(getclientmap())) return;
         if(!player1 || player1->state != CS_ALIVE) return;
         vector<rpg_tabcand> cands;
-        int nn = rpg::npccount();
-        loopi(nn)
+        // Battlegrounds (v0.1.47 notes fix 5): Tab cycles enemy players
+        // and bots only (no NPCs on BG maps). The RPG world is unchanged:
+        // NPCs + monsters within 60u, never players or bots.
+        bool bg = rpg::mapactive(getclientmap()) && (m_ctf || m_koth || m_tff);
+        if(!bg)
         {
-            const rpg::npcdef *nd = rpg::npcat(i);
-            if(!nd) continue;
-            float d = vec(nd->x, nd->y, nd->z).dist(player1->o);
-            if(d <= RPG_TABCYCLE_RANGE) { rpg_tabcand c = { true, i, -1, d }; cands.add(c); }
+            int nn = rpg::npccount();
+            loopi(nn)
+            {
+                const rpg::npcdef *nd = rpg::npcat(i);
+                if(!nd) continue;
+                float d = vec(nd->x, nd->y, nd->z).dist(player1->o);
+                if(d <= RPG_TABCYCLE_RANGE) { rpg_tabcand c = { true, i, -1, d }; cands.add(c); }
+            }
         }
         loopv(clients)
         {
             fpsent *d = clients[i];
-            if(!d || d == player1 || d->state != CS_ALIVE || d->ai.type != ai::AI_TYPE_MONSTER) continue;
-            float dist = d->o.dist(player1->o);
-            if(dist <= RPG_TABCYCLE_RANGE) { rpg_tabcand c = { false, -1, d->clientnum, dist }; cands.add(c); }
+            if(!d || d == player1 || d->state != CS_ALIVE) continue;
+            float range = bg ? RPG_BG_TABCYCLE_RANGE : RPG_TABCYCLE_RANGE;
+            if(d->ai.type == ai::AI_TYPE_MONSTER)
+            {
+                float dist = d->o.dist(player1->o);
+                if(dist <= range) { rpg_tabcand c = { false, -1, d->clientnum, dist }; cands.add(c); }
+            }
+            else if(bg && !isteam(d->team, player1->team))
+            {
+                float dist = d->o.dist(player1->o);
+                if(dist <= range) { rpg_tabcand c = { false, -1, d->clientnum, dist }; cands.add(c); }
+            }
         }
         if(cands.empty())
         {

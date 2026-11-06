@@ -836,11 +836,21 @@ void menuprocess()
 {
     processingmenu = true;
     int wasmain = mainmenu, level = guistack.length();
+    // v0.1.47 notes fix 1(a): the ESC Leave button ([cleargui; bgleave])
+    // opened the confirm dialog and the auto-clear below immediately
+    // closed it again: cleargui dropped the stack to 0, showgui pushed
+    // the dialog back to depth 1, so level==length held and clearguis(1)
+    // popped the dialog in the same frame ("nothing happened"). The
+    // auto-clear must only fire when the scheduled action left the SAME
+    // menu on top (a plain button that did not navigate anywhere); a
+    // different menu on top means the action navigated, and closing it
+    // would undo the navigation.
+    menu *topbefore = guistack.empty() ? NULL : guistack.last();
     loopv(updatelater) updatelater[i].run();
     updatelater.shrink(0);
     if(wasmain > mainmenu || clearlater)
     {
-        if(wasmain > mainmenu || level==guistack.length()) clearguis(level); 
+        if(wasmain > mainmenu || (level==guistack.length() && !guistack.empty() && guistack.last()==topbefore)) clearguis(level); 
         clearlater = false;
     }
     if(mainmenu && !isconnected(true) && guistack.empty()) showgui("main");

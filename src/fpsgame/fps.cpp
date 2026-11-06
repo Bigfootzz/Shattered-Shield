@@ -3846,6 +3846,24 @@ namespace game
     // NOT drawn as text (stock names are zombie-shooter names); teams read
     // by color + score + flag status until the medieval art pass renames
     // them. All banner state is already on the client: no new protocol.
+    // Battleground score band (v0.1.47 notes fix 8): the stock scorebar
+    // art (data/hud/scorebar.png) is gunmetal + rivets + blood — the
+    // "too metal" look Ed called out. The fantasy band is built from
+    // the same solid-quad + gold-trim idiom as the target plate and the
+    // queue CANCEL button: a dark wood plate, team-colour wings, gold
+    // trim top and bottom. Same geometry as the old band, so the title,
+    // timer and score text keep their coordinates.
+    static void drawbgfantasyband(float barx, float bary, float barw, float barh, float wingw)
+    {
+        rpg_solidquad(barx, bary, barw, barh, 0.10f, 0.08f, 0.07f, 0.92f); // dark wood plate
+        rpg_solidquad(barx, bary, wingw, barh, colorteam[0][0], colorteam[0][1], colorteam[0][2], 0.85f); // Wolf wing
+        rpg_solidquad(barx+barw-wingw, bary, wingw, barh, colorteam[1][0], colorteam[1][1], colorteam[1][2], 0.85f); // Raven wing
+        rpg_solidquad(barx, bary, barw, 3, 0.95f, 0.75f, 0.25f, 1.0f); // gold trim, top
+        rpg_solidquad(barx, bary+barh-3, barw, 3, 0.95f, 0.75f, 0.25f, 1.0f); // gold trim, bottom
+        rpg_solidquad(barx+wingw-2, bary, 2, barh, 0.95f, 0.75f, 0.25f, 0.8f); // gold divider, left wing
+        rpg_solidquad(barx+barw-wingw, bary, 2, barh, 0.95f, 0.75f, 0.25f, 0.8f); // gold divider, right wing
+    }
+
     void drawctfbanners(fpsent *d, int w, int h)
     {
         if(!m_ctf || !rpg::mapactive(getclientmap())) return;
@@ -3856,16 +3874,7 @@ namespace game
         if(barw < 400) return; // too narrow to be useful; skip rather than overlap
         float barh = 128.0f, barx = X/2.0f - barw/2.0f, bary = 10.0f;
         float wingw = min(576.0f, barw*0.375f);
-        Texture *t = textureload("data/hud/scorebar.png", 3);
-        glBindTexture(GL_TEXTURE_2D, t->id);
-        glColor4f(1.f, 1.f, 1.f, 1.f);
-        drawtexture(barx, bary, barw, barh);
-        t = textureload("data/hud/scorebar_wingacc.png", 3);
-        glBindTexture(GL_TEXTURE_2D, t->id);
-        glColor4f(colorteam[0][0], colorteam[0][1], colorteam[0][2], 1.f);
-        drawtexture(barx, bary, wingw, barh);
-        glColor4f(colorteam[1][0], colorteam[1][1], colorteam[1][2], 1.f);
-        drawtexture(barx+barw, bary, -wingw, barh);
+        drawbgfantasyband(barx, bary, barw, barh, wingw);
         int s1 = cmode ? cmode->getteamscoreflag(1) : 0;
         int s2 = cmode ? cmode->getteamscoreflag(2) : 0;
         int f1 = cmode ? cmode->getflagstatus(1) : -1;
@@ -3875,11 +3884,14 @@ namespace game
         pushfont(); setfont("default"); settextscale(0.7f);
         draw_textx("CAPTURE THE FLAG", X/2.0f, bary+40, 255, 255, 255, 255, TEXT_CENTER_UP);
         settextscale(1.f); popfont();
-        pushfont(); setfont("digit_white"); settextscale(1.4f);
+        // v0.1.47 notes fix 8: timer + scores in the default (fantasy)
+        // font, not the LED digit font; scale 1.2 (down from 1.4/1.5)
+        // because the default face runs wider than the digit face.
+        pushfont(); setfont("default"); settextscale(1.2f);
         if(secs >= 0) draw_textx("%d:%02d", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs/60, secs%60);
         else draw_textx("--:--", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP);
         settextscale(1.f); popfont();
-        pushfont(); setfont("digit_white"); settextscale(1.5f);
+        pushfont(); setfont("default"); settextscale(1.2f);
         draw_textx("%d", barx+wingw/2, bary+70, colorteam[0][0]*255.f, colorteam[0][1]*255.f, colorteam[0][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, s1);
         draw_textx("%d", barx+barw-wingw/2, bary+70, colorteam[1][0]*255.f, colorteam[1][1]*255.f, colorteam[1][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, s2);
         settextscale(1.f); popfont();
@@ -3916,25 +3928,19 @@ namespace game
         if(barw < 400) return; // too narrow to be useful; skip rather than overlap
         float barh = 128.0f, barx = X/2.0f - barw/2.0f, bary = 10.0f;
         float wingw = min(576.0f, barw*0.375f);
-        Texture *t = textureload("data/hud/scorebar.png", 3);
-        glBindTexture(GL_TEXTURE_2D, t->id);
-        glColor4f(1.f, 1.f, 1.f, 1.f);
-        drawtexture(barx, bary, barw, barh);
-        t = textureload("data/hud/scorebar_wingacc.png", 3);
-        glBindTexture(GL_TEXTURE_2D, t->id);
-        glColor4f(colorteam[0][0], colorteam[0][1], colorteam[0][2], 1.f);
-        drawtexture(barx, bary, wingw, barh);
-        glColor4f(colorteam[1][0], colorteam[1][1], colorteam[1][2], 1.f);
-        drawtexture(barx+barw, bary, -wingw, barh);
+        drawbgfantasyband(barx, bary, barw, barh, wingw);
         int secs = maplimit > 0 ? max(maplimit-lastmillis, 0)/1000 : -1;
         pushfont(); setfont("default"); settextscale(0.7f);
         draw_textx(m_koth ? "KING OF THE HILL" : "TEAM FREE-FOR-ALL", X/2.0f, bary+40, 255, 255, 255, 255, TEXT_CENTER_UP);
         settextscale(1.f); popfont();
-        pushfont(); setfont("digit_white"); settextscale(1.4f);
+        // v0.1.47 notes fix 8: timer + scores in the default (fantasy)
+        // font, not the LED digit font; scale 1.2 (down from 1.4/1.5)
+        // because the default face runs wider than the digit face.
+        pushfont(); setfont("default"); settextscale(1.2f);
         if(secs >= 0) draw_textx("%d:%02d", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP, -1, -1, secs/60, secs%60);
         else draw_textx("--:--", X/2.0f, bary+110, 255, 255, 255, 255, TEXT_CENTER_UP);
         settextscale(1.f); popfont();
-        pushfont(); setfont("digit_white"); settextscale(1.5f);
+        pushfont(); setfont("default"); settextscale(1.2f);
         if(m_koth)
         {
             draw_textx("%d:%02d", barx+wingw/2, bary+70, colorteam[0][0]*255.f, colorteam[0][1]*255.f, colorteam[0][2]*255.f, 255, TEXT_CENTER_UP, -1, -1, bg_team_score[0]/60, bg_team_score[0]%60);

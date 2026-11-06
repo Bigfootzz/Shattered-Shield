@@ -417,7 +417,9 @@ namespace game
         // NPC quest givers are static data (src/rpg), not entities: idle each
         // one's model at its map position on RPG maps only. NULL light gets
         // proper world lighting via lightreaching.
-        if(rpg::mapactive(getclientmap()))
+        // v0.1.47 notes fix 2: never on battleground maps (the NPC table
+        // belongs to the world; the gate makes the code match its comment).
+        if(rpg::mapactive(getclientmap()) && !rpg::bgmap(getclientmap()))
         {
             // PvP glow positions, one per NPC index (same one-frame-stale
             // pattern as the player path). Any NPC model carrying a tag_tip
