@@ -2312,24 +2312,23 @@ namespace game
         // HUD ability tooltip (Ed, Oct 24): hover over an action bar slot to see
         // what the ability does. Same pattern as character page tooltip: hover
         // shows info, click still activates. Tooltip appears above the slot.
-        // Uses g3d_cursorpos (0-1 range) converted to virtual coords (X, hudV).
+        // FIX (Nov 13): the tooltip never showed because this read
+        // ::g3d_cursorpos, which returns (0.5, 0.5) - screen centre -
+        // whenever no 2D GUI is open, i.e. during all of normal mouselook
+        // play, so the hover point sat at the crosshair and never reached
+        // a hotbar slot. The RPG free cursor (rpg::cursorget, screen px)
+        // is the one that actually moves with the mouse during play
+        // (game::cursormove -> cursoraccum), it is the same source the
+        // hotbar click path and the drawn world cursor use, and it is
+        // visible on screen - so hover and click now agree. Convert px
+        // to virtual exactly like rpg_doclick does.
         {
-            // NB: g3d_cursorpos lives in global namespace (3dgui.cpp, declared
-            // in iengine.h). A local extern here would resolve to game:: and
-            // fail to link, so qualify explicitly.
-            float cx = 0.5f, cy = 0.5f;
-            ::g3d_cursorpos(cx, cy);
-            // Only show tooltip when GUI cursor is visible (not in mouselook)
-            // g3d_gui2dopen() is true when a GUI is open; for HUD hover we
-            // check if cursor is over the action bar area regardless, but
-            // only when the player is not in mouselook mode (cursor visible)
-            // The cursor is hidden during mouselook, so cx/cy stay at last
-            // position; we gate on the action bar being hovered AND the
-            // game not being in pure mouselook (checked via g3d cursor state)
-            // For now, show tooltip whenever cursor is over a slot - the
-            // cursor is only visible when GUI is open or in RPG mode
-            float vx = cx * X;
-            float vy = cy * hudvirtualheight(h);
+            float cx = 0, cy = 0;
+            rpg::cursorget(cx, cy);
+            rpg::cursorclamp(cx, cy, w, h);
+            rpg::cursorget(cx, cy);
+            float vx = cx * hudvirtualheight(h) / h;
+            float vy = cy * hudvirtualheight(h) / h;
             int hoverSlot = -1;
             int hoverAid = -1;
             loopi(10)
@@ -2357,11 +2356,12 @@ namespace game
                 float tpad = 12*s;  // padding
                 // Build tooltip lines
                 // Line 1: Name
-                // Line 2: Damage / Range / Type
-                // Line 3: Mana / Cooldown
-                // Line 4: DoT if applicable
-                // Line 5: Delivery type
-                int nlines = 3;
+                // Line 2: Description (one line, Nov 13)
+                // Line 3: Damage / Range / Type
+                // Line 4: Mana / Cooldown
+                // Line 5: DoT if applicable
+                // Line 6: Delivery type
+                int nlines = 4; // name + description + damage/range/type + mana/cooldown
                 if(dot) nlines++;
                 // Delivery line always shown for clarity (Instant vs Projectile)
                 nlines++;
@@ -2386,6 +2386,9 @@ namespace game
                 // Name (larger, white)
                 rpg_hudtext(ab.name, int(tx + tpad), int(ly), tpxh*1.15f);
                 ly += tpxh*1.15f + 4*s;
+                // Description (one line, Nov 13)
+                if(ab.desc && ab.desc[0]) rpg_hudtext(ab.desc, int(tx + tpad), int(ly), tpxh);
+                ly += tpxh + 4*s;
                 // Damage / Range / Type
                 defformatstring(line2)("%d damage  |  Range %.0f  |  %s", ab.damage, ab.range, ab.melee ? "Melee" : "Ranged");
                 rpg_hudtext(line2, int(tx + tpad), int(ly), tpxh);

@@ -346,6 +346,7 @@ namespace game
     bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
     bool rpg_questcollapseclick(float vx, float vy); // fps.cpp: quest tracker collapse button (ported from .43)
     static bool rpg_isdlgo(); // defined below (dialogue-open gate, mirrors the key binds)
+    static int rpg_npchover(int npci); // defined below (quest ! / ? hover state, for click-to-talk)
 
     static void rpg_doclick(int button)
     {
@@ -412,6 +413,16 @@ namespace game
                 const rpg::npcdef *nd = rpg::npcat(pk.npci);
                 rpg::selectnpc(pk.npci);
                 rpg::setautoattack(false);
+                // Click-to-talk (Nov 13, Ed): a quest giver showing ! (new
+                // quest) or ? (turn-in) opens their dialogue on a left click
+                // within talk range (16u, same as the server-side gate in
+                // rpg_talk); the ring marker goes on the NPC via the select
+                // above. Any other NPC just selects, as before.
+                if(nd && (rpg_npchover(pk.npci) == rpg::RPG_HOVER_QUEST || rpg_npchover(pk.npci) == rpg::RPG_HOVER_TURNIN))
+                {
+                    vec delta(nd->x - player1->o.x, nd->y - player1->o.y, 0);
+                    if(delta.magnitude() <= 16.0f) addmsg(N_RPG_TALK, "ri", pk.npci);
+                }
                 conoutf("rpg: selected '%s'", nd ? nd->name : "npc");
             }
             else if(pk.kind == 1)
@@ -646,6 +657,11 @@ namespace game
             rpgpickresult pk = rpg_pick(cx, cy, w, h);
             if(pk.kind == 3 && pk.npci >= 0) ni = pk.npci;
         }
+        // Click-to-select ring (Nov 13): F-talk puts the gold ring on the
+        // NPC being talked to, so the marker matches the dialogue. Only
+        // when a real NPC was resolved (ni -1 = server nearest, resolved
+        // when the dialogue opens via N_RPG_DIALOG).
+        if(ni >= 0) rpg::selectnpc(ni);
         conoutf("rpg: talk: sending N_RPG_TALK npc %d", ni);
         addmsg(N_RPG_TALK, "ri", ni);
     }
@@ -1520,6 +1536,27 @@ namespace game
             if(d.type == rpg::ITEM_WEAPON) wd += d.damage;
         }
         intret(rpg::ability(*i).melee ? rpg::stat_powerstrike(l, wd, rpg_clientgearbonus(rpg::ATTR_STRENGTH)) : rpg::stat_sparkbolt(l, rpg_clientgearbonus(rpg::ATTR_KNOWLEDGE)));
+    });
+    // Ability description (Nov 13): one-line text for the HUD tooltip and
+    // the character-sheet Spells tab. "" when the id is invalid.
+    ICOMMAND(rpgabdesc, "i", (int *i), { result(rpg::validability(*i) && rpg::ability(*i).desc ? rpg::ability(*i).desc : ""); });
+    // Spells tab (Nov 13): ability id at position <slot> in the player's
+    // class list (rpg::classabilities), or -1 when the slot is empty.
+    // Lets the sheet list class spells without hardcoding ability ids;
+    // the cfg guards on >= 0 so empty slots render nothing.
+    ICOMMAND(rpgspellid, "i", (int *i), {
+        int id = -1;
+        if(player1 && *i >= 0)
+        {
+            char arch[32]; arch[0] = '\0';
+            rpg::classforname(player1->name, arch, sizeof(arch));
+            if(arch[0])
+            {
+                int ids[6]; int n = rpg::classabilities(arch, ids, 6);
+                if(*i < n) id = ids[*i];
+            }
+        }
+        intret(id);
     });
 
     void switchname(const char *name)
@@ -3870,6 +3907,11 @@ namespace game
                     rpg_dlg_nresp = min(nresp, 4);
                     loopi(rpg_dlg_nresp) copystring(rpg_dlg_resps[i], rs[i]);
                     rpg_dlg_open = true;
+                    // Click-to-select ring (Nov 13): the dialogue's NPC
+                    // gets the gold ring marker too, so F-talk with the
+                    // -1/nearest fallback (which bypasses selection) still
+                    // shows which NPC is being talked to.
+                    if(rpg_dlg_npcidx >= 0) rpg::selectnpc(rpg_dlg_npcidx);
                     showgui("rpgdialog");
                 }
                 break;

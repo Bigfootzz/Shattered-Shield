@@ -24,6 +24,10 @@ namespace rpg
         const char *reqclass;   // class gate (Oct 21): NULL = universal (all classes);
                                 // otherwise a space-separated list of allowed archetype
                                 // display names, e.g. "Magi", "Warrior", "Ranger".
+        const char *desc;       // one-line description for the HUD tooltip + Spells tab
+                                // (Nov 13): plain wording from the real ability data,
+                                // no numbers (damage/mana/cooldown are shown as
+                                // separate tooltip lines, so they cannot drift).
     };
 
     const int DELIVERY_INSTANT = 0;    // damage applied at cast (existing)

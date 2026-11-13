@@ -1,5 +1,6 @@
 #include "game.h"
 #include "diaglog.h"
+#include "engine.h"
 #include "rpg/rpg.h"
 
 extern int hiddenplayermeshes; // armor swap: defined in engine/rendermodel.cpp
@@ -631,6 +632,58 @@ namespace game
                     na = nat;
                 }
                 rendermodel(NULL, nd->model, ANIM_IDLE|ANIM_LOOP, vec(nd->x, nd->y, nd->z), nd->yaw, 0, MDL_CULL_VFC|MDL_CULL_DIST|MDL_CULL_OCCLUDED|MDL_LIGHT, NULL, na);
+            }
+            // Click-to-select ring (Nov 13, Ed): a small flat ring on the
+            // ground under the selected target's feet - the small ring
+            // under the character in the PoE reference, not a large AOE
+            // ring. Red for a hostile monster, gold for an NPC (matching
+            // the target-frame colours in drawrpgtarget). RPG world only
+            // (this whole block is already gated on mapactive && !bgmap),
+            // main pass only so it never doubles in a shadow pass.
+            if(mainpass)
+            {
+                vec ringpos(0, 0, 0);
+                float ringr = 0;
+                bool ringnpc = false;
+                int selt = rpg::selectedtarget();
+                int seln = rpg::selectednpc();
+                if(selt >= 0)
+                {
+                    fpsent *mon = getclient(selt);
+                    if(mon && mon->state != CS_DEAD)
+                    {
+                        ringpos = mon->feetpos();
+                        ringr = max(mon->radius, 7.0f);
+                    }
+                }
+                else if(seln >= 0)
+                {
+                    const rpg::npcdef *nd = rpg::npcat(seln);
+                    if(nd)
+                    {
+                        ringpos = vec(nd->x, nd->y, nd->z);
+                        ringr = 7.0f;
+                        ringnpc = true;
+                    }
+                }
+                if(ringr > 0)
+                {
+                    float outr = ringr + 2.0f, inr = outr - 1.5f;
+                    float cz = ringpos.z + 0.5f;
+                    lineshader->set();
+                    glDisable(GL_TEXTURE_2D);
+                    if(ringnpc) glColor3f(0.95f, 0.75f, 0.25f);
+                    else glColor3f(0.85f, 0.12f, 0.10f);
+                    glBegin(GL_TRIANGLE_STRIP);
+                    loopi(25)
+                    {
+                        const vec2 &sc = sincos360[(i % 24) * (360 / 24)];
+                        glVertex3f(ringpos.x + inr*sc.x, ringpos.y + inr*sc.y, cz);
+                        glVertex3f(ringpos.x + outr*sc.x, ringpos.y + outr*sc.y, cz);
+                    }
+                    glEnd();
+                    glEnable(GL_TEXTURE_2D);
+                }
             }
         }
         rendermovables();

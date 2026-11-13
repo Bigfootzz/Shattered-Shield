@@ -20,18 +20,18 @@ namespace rpg
         // covers real fighting distance with margin and stays clearly melee
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
-        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior" },
+        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior", "A powerful melee slash." },
         // MANA RETUNE Oct 22 (v0.1.8 fix 8): 25 -> 12. Level-1 pool is 80
         // (stat_maxmana base 40 -> 60): ~6.7 raw casts; the 3.5s Spark weave
         // (3.4 mana/s) sits under the 6/s regen, so steady casting is
         // sustainable while Ice dumps still drain the pool.
-        { "sparkbolt",    "Spark Bolt",   3500,     12,   120.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Magi" },
+        { "sparkbolt",    "Spark Bolt",   3500,     12,   120.0f, 50,   false, "spark", DELIVERY_INSTANT,    NULL, "Magi", "A crackling spark bolt." },
         // CLEANUP item 8: the basic weapon swing behind right-click
         // auto-attack. damage 7 = flat base: the server melee formula
         // (base + weapon + Strength) yields 7 + weapon + Strength.
         // TUNING Oct 21 (user-approved): a weaponless level-1 fists
         // (0 + 0 + 1 = 1/tick) could never win starter hunts.
-        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL, NULL },
+        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL, NULL, "A basic weapon swing." },
         // PROJECTILE SPELLS (Oct 21, Ed's request for wizard testing): the
         // first implementation of the RANGED DELIVERY DESIGN. Range + LoS are
         // checked at release exactly like Spark Bolt; the bolt then tracks
@@ -41,24 +41,24 @@ namespace rpg
         // workhorse (cheaper, faster, slightly softer, travel time is the
         // tradeoff); Ice is the heavy nuke (longer cooldown, bigger hit).
         // No slow/freeze v1 — damage + visuals only, keep it testable.
-        { "arcanebolt",   "Arcane Bolt",  3000,     8,    120.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Magi" },
-        { "icebolt",      "Ice Bolt",     6000,     15,   120.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Magi" },
+        { "arcanebolt",   "Arcane Bolt",  3000,     8,    120.0f, 45,   false, "arcane", DELIVERY_PROJECTILE, "arcane", "Magi", "An arcane bolt that tracks." },
+        { "icebolt",      "Ice Bolt",     6000,     15,   120.0f, 65,   false, "ice",   DELIVERY_PROJECTILE, "ice", "Magi", "A heavy ice bolt that tracks." },
         // ARROW SHOT (Oct 21, Ed's "perfect world"): the ranger's ranged
         // attack. Uses the same DELIVERY_PROJECTILE system as the spells
         // (range + LoS at release, tracks target, fizzles if target dies) —
         // proving the delivery works for non-spell projectiles. Physical
         // damage: 40 + 2xDexterity (mirrors the spell formula's 2xKnowledge).
         // 0 mana (it's an arrow, not a spell), 2.5s cooldown. Ranger-only.
-        { "arrowshot",    "Arrow Shot",   2500,     0,    120.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger" },
+        { "arrowshot",    "Arrow Shot",   2500,     0,    120.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger", "A piercing arrow shot at range." },
         // VENOM SHOT (v0.1.8 fix 10): the ranger's second starting attack.
         // Poison arrow: upfront physical hit (Dex-scaled like Arrow Shot)
         // plus a 10s poison DoT (see abilitydot() below). 0 mana (it's an
         // arrow), 8s cooldown — an opener, not a spam button.
-        { "poisonshot",   "Venom Shot",   8000,     0,    120.0f, 20,   false, "poison", DELIVERY_PROJECTILE, "arrow", "Ranger" },
+        { "poisonshot",   "Venom Shot",   8000,     0,    120.0f, 20,   false, "poison", DELIVERY_PROJECTILE, "arrow", "Ranger", "A poisoned arrow that wounds." },
         // REND (v0.1.8 fix 15): the warrior's second starting attack. Bleed
         // flavor of the same design: upfront melee hit (Strength-scaled)
         // plus a 10s bleed DoT. 8s cooldown, melee range.
-        { "rend",         "Rend",         8000,     0,    15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior" },
+        { "rend",         "Rend",         8000,     0,    15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior", "A slash that causes bleeding." },
     };
 
     // DoT definitions for the two v0.1.8 DoT attacks. 1s ticks x 10 = 10s.
