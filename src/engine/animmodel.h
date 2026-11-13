@@ -908,10 +908,16 @@ struct animmodel : model
     {
         LINK_TAG = 0,
         LINK_COOP,
-        LINK_REUSE
+        LINK_REUSE,
+        LINK_SKIN
     };
 
     virtual int linktype(animmodel *m) const { return LINK_TAG; }
+
+    // LINK_SKIN: give the attach model a copy of this model's animation frames,
+    // so a skinned attach can interpolate the same pose with its own skeleton.
+    // No-op by default; skelmodel overrides it to copy framebones.
+    virtual void linkanimframes(animmodel *parent) {}
 
     void render(int anim, int basetime, int basetime2, float pitch, const vec &axis, const vec &forward, dynent *d, modelattach *a)
     {
@@ -975,6 +981,11 @@ struct animmodel : model
 
                 case LINK_REUSE:
                     p->render(anim | ANIM_REUSE, basetime, basetime2, pitch, axis, forward, d, as); 
+                    break;
+
+                case LINK_SKIN:
+                    m->linkanimframes(this);
+                    p->render(anim | ANIM_REUSE, basetime, basetime2, pitch, axis, forward, d, as);
                     break;
             }
         }

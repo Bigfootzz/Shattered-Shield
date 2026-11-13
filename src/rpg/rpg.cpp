@@ -185,12 +185,20 @@ namespace rpg
                 "archetype TEXT NOT NULL DEFAULT '',"
                 "appearance TEXT NOT NULL DEFAULT '',"
                 "created_at INTEGER NOT NULL DEFAULT 0,"
-                "last_seen INTEGER NOT NULL DEFAULT 0)");
+                "last_seen INTEGER NOT NULL DEFAULT 0,"
+                "bot INTEGER NOT NULL DEFAULT 0)");
         // v0.1.23 migration: existing DBs lack the copper column. ALTER fails
         // harmlessly (logged once) when the column already exists (new DBs).
         { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN copper INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
         // PvP currency (Oct 31): same migration pattern for embers.
         { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN embers INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
+        // Bot flag (Nov 13, v0.1.99 playtest: bots on the select screen):
+        // battleground / world bots get real character rows, and the select
+        // screen must never list them. A name-pool filter is not enough —
+        // the bots-repo world bots (Wren/Kestrel/Lark) share this DB and
+        // were not in the main game's pool, so they leaked through.
+        // Same migration pattern: flags bot rows durably by data, not name.
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN bot INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
         // --- inventory & equipment v1 (milestone step 4) ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_inventory("
                 "name TEXT NOT NULL,"
@@ -949,6 +957,33 @@ namespace rpg
         return false;
     }
 
+    // Vendor buy gate (Ed, Nov 13 vendor rule): a vendor sells only
+    // items the buyer can use. Mirrors the equip gate above — a classed
+    // weapon (weaponcat) must be allowed for the buyer's class, and a
+    // classed armor piece (armorclass) must match the buyer's class —
+    // same class derivation (classfor: archetype first, model-dir
+    // fallback). Unclassed items (rings, necklaces, cape, puglin stick,
+    // etc.) are universal and sell to all classes. Unknown buyer class
+    // or unknown item fails closed. PvP (ember-price) items are NOT
+    // covered here; rpg_buy gates those by pvpclass separately.
+    bool buyallowed(const char *name, const char *itemid)
+    {
+        int id = finditem(itemid);
+        if(id < 0) return false;
+        const itemdef &def = item(id);
+        if(def.type == ITEM_WEAPON && def.weaponcat && def.weaponcat[0])
+        {
+            char cls[32];
+            if(!classfor(name, cls, sizeof(cls)) || !weaponcatallowed(cls, def.weaponcat)) return false;
+        }
+        else if(def.type == ITEM_ARMOR && def.armorclass && def.armorclass[0])
+        {
+            char cls[32];
+            if(!classfor(name, cls, sizeof(cls)) || strcmp(cls, def.armorclass)) return false;
+        }
+        return true;
+    }
+
     bool equipitem(const char *name, const char *itemid)
     {
         equipdenybuf[0] = '\0';
@@ -976,6 +1011,23 @@ namespace rpg
                 if(cls[0]) snprintf(equipdenybuf, sizeof(equipdenybuf), "%s cannot use %s.", cls, def.name);
                 else copystring(equipdenybuf, "Your class cannot use that weapon.");
                 conoutf("rpg: weapon gate: '%s' (%s) refused %s (%s)", name, cls[0] ? cls : "unknown", def.name, def.weaponcat);
+                return false;
+            }
+        }
+        // Class armor restriction (Ed, Nov 10, class-armor rule): a classed
+        // armor piece equips only for its class. Unclassed armor (rings,
+        // necklaces, and ungated pieces) is unaffected. Same placement as
+        // the weapon gate: after the already-wearing check, so a piece
+        // already equipped is never stripped by a re-equip; only NEW
+        // disallowed equips are refused.
+        if(def.type == ITEM_ARMOR && def.armorclass && def.armorclass[0])
+        {
+            char cls[32];
+            if(!classfor(name, cls, sizeof(cls)) || strcmp(cls, def.armorclass))
+            {
+                if(cls[0]) snprintf(equipdenybuf, sizeof(equipdenybuf), "%s cannot wear %s.", cls, def.name);
+                else copystring(equipdenybuf, "Your class cannot wear that armor.");
+                conoutf("rpg: armor gate: '%s' (%s) refused %s (%s)", name, cls[0] ? cls : "unknown", def.name, def.armorclass);
                 return false;
             }
         }
@@ -1202,6 +1254,13 @@ namespace rpg
         return item(id).vwep; // NULL when the weapon has no model path
     }
 
+    const char *equippedattach(const char *name, int slot)
+    {
+        int id = equippeditem(name, slot);
+        if(id < 0) return NULL;
+        return item(id).attach; // NULL when the armor piece has no model path
+    }
+
     // --- loot drops v1 (milestone step 4): server-side, session-only ---
     static std::vector<lootdrop> lootdrops;
     static int nextlootidx = 1;
@@ -1286,6 +1345,56 @@ namespace rpg
         initclient();
         std::map<int, std::string>::iterator it = vwepmap.find(clientnum);
         return it == vwepmap.end() ? NULL : it->second.c_str();
+    }
+
+    // --- Armor attach map (Nov 10, Ed's "true armor swapping") ---
+    // Client-side cache of each client's equipped armor attach models, one
+    // map per armor slot (head/torso/legs/feet), filled by N_RPG_ARMOR.
+    // Mirrors vwepmap; the render code reads it via armorfor().
+    static std::map<int, std::string> armormap[4]; // index 0=head,1=torso,2=legs,3=feet
+    static int armorslotidx(int slot)
+    {
+        if(slot < SLOT_HEAD || slot > SLOT_FEET) return -1;
+        return slot - SLOT_HEAD;
+    }
+
+    void setarmor(int clientnum, int slot, const char *path)
+    {
+        initclient();
+        int idx = armorslotidx(slot);
+        if(idx < 0) return;
+        if(!path || !path[0]) armormap[idx].erase(clientnum);
+        else armormap[idx][clientnum] = path;
+    }
+
+    const char *armorfor(int clientnum, int slot)
+    {
+        initclient();
+        int idx = armorslotidx(slot);
+        if(idx < 0) return NULL;
+        std::map<int, std::string>::iterator it = armormap[idx].find(clientnum);
+        return it == armormap[idx].end() ? NULL : it->second.c_str();
+    }
+
+    // --- Cape attach map (Nov 11, Ed's cape rule: no character starts
+    // with a cape) --- Client-side cache of each client's equipped cape
+    // attach model, filled by N_RPG_ARMOR with slot SLOT_CAPE. Mirrors
+    // vwepmap; the render code reads it via capefor() and only renders
+    // the cape when a cape is actually equipped.
+    static std::map<int, std::string> capemap; // clientnum -> model path
+
+    void setcape(int clientnum, const char *path)
+    {
+        initclient();
+        if(!path || !path[0]) capemap.erase(clientnum);
+        else capemap[clientnum] = path;
+    }
+
+    const char *capefor(int clientnum)
+    {
+        initclient();
+        std::map<int, std::string>::iterator it = capemap.find(clientnum);
+        return it == capemap.end() ? NULL : it->second.c_str();
     }
 
     // --- PvP weapon glow registry (Oct 31, Ed's call: ALL PvP weapons share
@@ -2071,12 +2180,24 @@ namespace rpg
         return cdb;
     }
     // Bot-name pool for the charlist filter (must match server.cpp bg_botnames).
-    static const char *charlist_botnames[] = { "Aldric", "Brenna", "Cedric", "Delia", "Edric", "Fenna", "Gareth", "Helene", "Ivo", "Janna", "Kellan", "Lira" };
+    // The first 12 are the battleground pool; the last 3 are the bots-repo
+    // world bots (Wren/Kestrel/Lark, wanderers on rpg_01). The rpg.db file
+    // is shared between the bots-repo builds and the main game, so world-bot
+    // rows created by the bots repo persist here — and the main game's
+    // 12-name filter let them through (Nov 13, v0.1.99 playtest: WREN and
+    // KESTREL on the select screen, hiding Ed's characters). This pool is
+    // now only a fallback for legacy/shared rows that predate the bot
+    // column; the primary filter is the bot flag (see charlist).
+    static const char *charlist_botnames[] = { "Aldric", "Brenna", "Cedric", "Delia", "Edric", "Fenna", "Gareth", "Helene", "Ivo", "Janna", "Kellan", "Lira", "Wren", "Kestrel", "Lark" };
     static bool charlist_isbot(const char *name)
     {
         if(!name) return false;
+        // Case-insensitive: the select screen renders names in caps, and
+        // a bot row may be stored in any case (the bots-repo world-bot
+        // pool spells them "Wren"/"Kestrel", but a row stored as "WREN"
+        // must still be caught). strcasecmp, not strcmp.
         loopi(sizeof(charlist_botnames)/sizeof(charlist_botnames[0]))
-            if(!strcmp(name, charlist_botnames[i])) return true;
+            if(!strcasecmp(name, charlist_botnames[i])) return true;
         return false;
     }
     // Does a character row with this name exist? Used by bg_fillbots:
@@ -2115,20 +2236,41 @@ namespace rpg
         // server.cpp bg_botnames exactly. Edge: a real player character
         // sharing a pool name is hidden too (no bot flag in the schema);
         // that needs a bot column, not a wider filter.
-        if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance FROM characters ORDER BY last_seen DESC", -1, &st, NULL) == SQLITE_OK)
+        // Nov 13, v0.1.99 playtest (WREN/KESTREL on the select screen):
+        // the bot column now exists, so the primary filter is the bot
+        // flag (set by bg_fillbots via setbot): rows with bot=1 are never
+        // listed, whatever their name. The name-pool filter stays as a
+        // fallback for legacy/shared rows that predate the flag (the
+        // bots-repo world bots Wren/Kestrel/Lark share this DB). The
+        // bot-aware query falls back to the plain query when the DB
+        // predates the bot-column migration, so a stale DB still lists
+        // characters instead of showing an empty select screen.
+        bool hasbot = false;
+        if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance, bot FROM characters ORDER BY last_seen DESC", -1, &st, NULL) == SQLITE_OK)
         {
-            while(n < max && sqlite3_step(st) == SQLITE_ROW)
-            {
-                const char *nm = (const char *)sqlite3_column_text(st, 0);
-                if(charlist_isbot(nm)) continue;
-                copystring(names[n], nm, 64);
-                if(levels) levels[n] = sqlite3_column_int(st, 1);
-                if(archetypes) copystring(archetypes[n], (const char *)sqlite3_column_text(st, 2), 32);
-                if(models) copystring(models[n], (const char *)sqlite3_column_text(st, 3), 64);
-                n++;
-            }
-            sqlite3_finalize(st);
+            hasbot = true;
         }
+        else
+        {
+            sqlite3_finalize(st); st = NULL;
+            if(sqlite3_prepare_v2(cdb, "SELECT name, level, archetype, appearance FROM characters ORDER BY last_seen DESC", -1, &st, NULL) != SQLITE_OK)
+            {
+                sqlite3_close(cdb);
+                return 0;
+            }
+        }
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            const char *nm = (const char *)sqlite3_column_text(st, 0);
+            if(hasbot && sqlite3_column_int(st, 4) != 0) continue;
+            if(charlist_isbot(nm)) continue;
+            copystring(names[n], nm, 64);
+            if(levels) levels[n] = sqlite3_column_int(st, 1);
+            if(archetypes) copystring(archetypes[n], (const char *)sqlite3_column_text(st, 2), 32);
+            if(models) copystring(models[n], (const char *)sqlite3_column_text(st, 3), 64);
+            n++;
+        }
+        sqlite3_finalize(st);
         sqlite3_close(cdb);
         return n;
     }
@@ -2175,6 +2317,51 @@ namespace rpg
         sqlite3_close(cdb);
         return ok;
     }
+    // Set a character's model (appearance) row. Mirror of setarchetype
+    // (bot weapon fix, Nov 10): onconnect creates bot rows with an empty
+    // appearance, so the model never matches the archetype and the bot
+    // renders (and, via classfor, equips) as the wrong class.
+    bool setmodel(const char *name, const char *model)
+    {
+        if(!name || !name[0] || !model) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "UPDATE characters SET appearance=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, model, -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+            ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(cdb) > 0;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
+    // Set/clear a character's bot flag. Mirror of setarchetype/setmodel
+    // (Nov 13, v0.1.99 playtest: bots on the select screen). bg_fillbots
+    // calls setbot(name, true) right after onconnect creates the bot row,
+    // so the row is durably marked as a bot and charlist can exclude it
+    // by data instead of by name. No-op when the row is missing, and
+    // harmless when the bot column does not exist yet (pre-migration DB):
+    // the UPDATE then affects no rows and returns false.
+    bool setbot(const char *name, bool bot)
+    {
+        if(!name || !name[0]) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "UPDATE characters SET bot=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_int(st, 1, bot ? 1 : 0);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+            ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(cdb) > 0;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
     // Model dir for one character (used by rpg_enterworld to set the player
     // model). Direct DB read; infrequent so no session caching.
     bool charmodel(const char *name, char *out, int max)
@@ -2198,6 +2385,29 @@ namespace rpg
         sqlite3_close(cdb);
         return ok;
     }
+    // Known outfit suffixes (must match ss_item_outfit values in items.cfg).
+    static const char *outfitsuffixes[] = { "_ranger", "_peasant", NULL };
+    bool applyoutfit(const char *name, const char *suffix, char *outmodel, int maxout)
+    {
+        if(outmodel && maxout > 0) outmodel[0] = '\0';
+        if(!name || !name[0]) return false;
+        char cur[64]; cur[0] = '\0';
+        if(!charmodel(name, cur, sizeof(cur)) || !cur[0]) return false;
+        // Strip any existing outfit suffix to recover the base model dir.
+        char base[64];
+        copystring(base, cur, sizeof(base));
+        for(int i = 0; outfitsuffixes[i]; i++)
+        {
+            size_t sl = strlen(outfitsuffixes[i]), bl = strlen(base);
+            if(bl > sl && !strcmp(base + bl - sl, outfitsuffixes[i])) { base[bl - sl] = '\0'; break; }
+        }
+        char nm[64];
+        if(suffix && suffix[0]) { copystring(nm, base, sizeof(nm)); concatstring(nm, suffix); }
+        else copystring(nm, base, sizeof(nm));
+        if(!setmodel(name, nm)) return false;
+        if(outmodel && maxout > 0) copystring(outmodel, nm, maxout);
+        return true;
+    }
     bool charcreate(const char *name, const char *archetype, const char *model)
     {
         if(!name || !name[0] || strlen(name) > 32) return false;
@@ -2208,13 +2418,27 @@ namespace rpg
         // real rows in this table, so the old COUNT(*) blocked creation
         // whenever any bot rows existed, even when select showed empty
         // slots. Same pool filter as charlist, so the two agree.
+        // Nov 13: also exclude rows flagged bot=1 (the durable filter);
+        // the name-pool check stays for legacy/shared rows. Falls back
+        // to the plain query on a pre-migration DB.
         sqlite3_stmt *st = NULL;
         int count = 0;
-        if(sqlite3_prepare_v2(cdb, "SELECT name FROM characters", -1, &st, NULL) == SQLITE_OK)
+        bool hasbot = false;
+        if(sqlite3_prepare_v2(cdb, "SELECT name, bot FROM characters", -1, &st, NULL) == SQLITE_OK)
+        {
+            hasbot = true;
+        }
+        else
+        {
+            sqlite3_finalize(st); st = NULL;
+            if(sqlite3_prepare_v2(cdb, "SELECT name FROM characters", -1, &st, NULL) != SQLITE_OK) st = NULL;
+        }
+        if(st)
         {
             while(sqlite3_step(st) == SQLITE_ROW)
             {
                 const char *nm = (const char *)sqlite3_column_text(st, 0);
+                if(hasbot && sqlite3_column_int(st, 1) != 0) continue;
                 if(!charlist_isbot(nm)) count++;
             }
             sqlite3_finalize(st);

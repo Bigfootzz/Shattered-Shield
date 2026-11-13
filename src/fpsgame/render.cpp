@@ -1,5 +1,8 @@
 #include "game.h"
+#include "diaglog.h"
 #include "rpg/rpg.h"
+
+extern int hiddenplayermeshes; // armor swap: defined in engine/rendermodel.cpp
 
 #if defined(WITH_BULLET) && WITH_BULLET
 //extern vec ballPosition;
@@ -85,10 +88,72 @@ namespace game
 
     void preloadplayermodel()
     {
+        diaglog("preloadplayermodel: entry");
         // RPG maps are third-person only, so the first-person hudgun set
         // (mdl->quad) is never drawn there - skip it (load-time fix, Oct 22).
         // The vwep (hand weapon) IS drawn in third person; keep it.
         bool rpgmap = rpg::mapactive(getincomingmapname());
+        // Cape (Nov 10, re-applied from Nov 1): attached to every player model in renderplayer
+        // below, so warm it once here (loadmodel caches by name) instead
+        // of paying a first-frame load hitch like the old vwep path did.
+        diaglog("preloadplayermodel: loading cape");
+        preloadmodel("playermodels/attachments/cape");
+        diaglog("preloadplayermodel: cape loaded");
+        // Armor attach preload (Nov 11, Ed's equip-freeze fix): the
+        // armor attach models were NOT preloaded, so the first equip of
+        // each piece loaded its IQM + textures synchronously in the
+        // render thread (~3s freeze per piece). Queue every attach path
+        // in the item table here, so the cost lands on the loading
+        // screen (with progress) instead. Boots split into _l/_r, same
+        // as the render code. Data-driven: when Warrior mail / Magi
+        // cloth gain attach models, they preload automatically with no
+        // code change. RPG maps only (attaches never render on FPS
+        // maps). The cape is already queued above, so it is skipped.
+        if(rpgmap)
+        {
+            loopi(rpg::itemcount())
+            {
+                const rpg::itemdef &def = rpg::item(i);
+                if(!def.attach || !def.attach[0]) continue;
+                if(!strcmp(def.attach, "playermodels/attachments/cape")) continue;
+                if(def.slot == rpg::SLOT_FEET)
+                {
+                    defformatstring(bootl)("%s_l", def.attach);
+                    defformatstring(bootr)("%s_r", def.attach);
+                    diaglog("preloadplayermodel: loading armor attach '%s'", bootl);
+                    preloadmodel(bootl);
+                    diaglog("preloadplayermodel: loading armor attach '%s'", bootr);
+                    preloadmodel(bootr);
+                }
+                else
+                {
+                    diaglog("preloadplayermodel: loading armor attach '%s'", def.attach);
+                    preloadmodel(def.attach);
+                }
+            }
+        }
+        // Warrior armor preload (Nov 12, bots armor port): the Warrior
+        // attach models have no ss_item_attach line on any item def, so
+        // the data-driven loop above never queues them and the first
+        // Warrior equip would load each piece synchronously in the
+        // render thread (~3s freeze per piece, same as the Nov 11 fix).
+        // Queue the five table paths explicitly. RPG maps only
+        // (attaches never render on FPS maps). Ranger paths are covered
+        // by the loop above via ranger_tunic / leather_leggings /
+        // leather_boots attach lines.
+        if(rpgmap)
+        {
+            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_body'");
+            preloadmodel("playermodels/attachments/armor/warrior_body");
+            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_legs'");
+            preloadmodel("playermodels/attachments/armor/warrior_legs");
+            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_boots_l'");
+            preloadmodel("playermodels/attachments/armor/warrior_boots_l");
+            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_boots_r'");
+            preloadmodel("playermodels/attachments/armor/warrior_boots_r");
+            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_helm'");
+            preloadmodel("playermodels/attachments/armor/warrior_helm");
+        }
         loopi(NUMPLAYERMODELS)
         {
             const playermodelinfo *mdl = getplayermodelinfo(i);
@@ -103,16 +168,37 @@ namespace game
             // models at world entry so the cost lands on the loading screen
             // (with progress) instead. FPS solo maps keep the old behavior.
             if(i != playermodel && ((!multiplayer(false) && !rpgmap) || forceplayermodels || (!mdl->selectable && !allplayermodels))) continue;
+            diaglog("preloadplayermodel: model i=%d ffa='%s' vwep='%s'", i, mdl->ffa ? mdl->ffa : "", mdl->vwep ? mdl->vwep : "");
             if(m_teammode)
             {
+                diaglog("preloadplayermodel: model i=%d loading blueteam '%s'", i, mdl->blueteam ? mdl->blueteam : "");
                 preloadmodel(mdl->blueteam);
+                diaglog("preloadplayermodel: model i=%d loading redteam '%s'", i, mdl->redteam ? mdl->redteam : "");
                 preloadmodel(mdl->redteam);
             }
-            else preloadmodel(mdl->ffa);
-            if(mdl->vwep) preloadmodel(mdl->vwep);
-            if(mdl->quad && !rpgmap) preloadmodel(mdl->quad);
-            loopj(3) if(mdl->armour[j]) preloadmodel(mdl->armour[j]);
+            else
+            {
+                diaglog("preloadplayermodel: model i=%d loading ffa '%s'", i, mdl->ffa ? mdl->ffa : "");
+                preloadmodel(mdl->ffa);
+            }
+            if(mdl->vwep)
+            {
+                diaglog("preloadplayermodel: model i=%d loading vwep '%s'", i, mdl->vwep);
+                preloadmodel(mdl->vwep);
+            }
+            if(mdl->quad && !rpgmap)
+            {
+                diaglog("preloadplayermodel: model i=%d loading quad '%s'", i, mdl->quad);
+                preloadmodel(mdl->quad);
+            }
+            loopj(3) if(mdl->armour[j])
+            {
+                diaglog("preloadplayermodel: model i=%d loading armour[%d] '%s'", i, j, mdl->armour[j]);
+                preloadmodel(mdl->armour[j]);
+            }
+            diaglog("preloadplayermodel: model i=%d done", i);
         }
+        diaglog("preloadplayermodel: exit");
         ::monster::preloadMonsters();
     }
 
@@ -152,6 +238,10 @@ namespace game
 
     void renderplayer(fpsent *d, const playermodelinfo &mdl, int team, float fade, bool mainpass)
     {
+        static int diag_rp_calls = 0;
+        bool diag_rp_log = diag_rp_calls < 20;
+        if(diag_rp_log) diaglog("renderplayer: call #%d clientnum=%d state=%d", diag_rp_calls, d->clientnum, (int)d->state);
+        diag_rp_calls++;
         ASSERT(d->gunselect >= 0 && d->gunselect < NUMWEAPS);
         // PvP glow: consume last frame's stored tip position before the
         // readout below re-arms it (same pattern as d->muzzle).
@@ -219,7 +309,7 @@ namespace game
             hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
-        modelattach a[6]; // 5 entries max (weapon, powerup, shield, muzzle, tip) + terminator
+        modelattach a[12]; // 11 entries max (weapon, tip, powerup, shield, cape, muzzle, helm, torso, legs, boot_l, boot_r) + terminator
         // v0.1.16: Revelade FPS vweps removed (Ed). Vweps organized by class:
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
@@ -252,6 +342,102 @@ namespace game
                 a[ai++] = modelattach("tag_tip", &d->pvpglowpos);
             }
         }
+        // --- Cape (Nov 11, Ed's cape rule: no character starts with a
+        // cape) --- One design for all classes, a rigid drape skinned to
+        // a single root joint and baked in neck-local space (see
+        // packages/models/playermodels/attachments/cape/iqm.cfg). The tag
+        // is defined with IDENTITY offset in each player model's iqm.cfg
+        // (neck_01 on the ranger/warrior rig, Neck on the Magi rig); any
+        // offset would shift the drape off the back. Default anim (-1):
+        // the cape has no frames, so it renders in bind pose at the
+        // animated neck tag - the same static-attach pattern as the bow
+        // vwep. Gated on an equipped cape (rpg::capefor, filled by
+        // N_RPG_ARMOR with slot SLOT_CAPE): a character with no cape
+        // equipped renders no cape. Fail-safe: link() returns false when
+        // tag_cape is missing (infected / zombie models carry no such
+        // tag) and the entry is skipped with the body still rendering; a
+        // missing cape file is skipped the same way by rendermodel.
+        if(rpg::mapactive(getclientmap()))
+        {
+            const char *cape = rpg::capefor(d->clientnum);
+            if(cape && cape[0]) a[ai++] = modelattach("tag_cape", cape);
+        }
+        // --- RPG armor (table-driven, Phase 1c): attach equipped armor
+        // pieces to body tags and hide the body meshes underneath.
+        // One entry per piece; lookup is by BASE item id, so enhanced
+        // variants resolve through def.enhbase (ranger_tunic_enh and
+        // _t1-_t4 all resolve to ranger_tunic). A different torso item
+        // (e.g. chain_tunic) matches no entry. Stubs (baseid/path NULL)
+        // attach nothing and hide nothing until Phase 2 fills them in:
+        // adding pants/boots (or Warrior/Magi pieces) is a table row,
+        // not code. Boots need two attaches, so FEET has two rows.
+        // model = substring of mdl.ffa the piece fits (NULL = any
+        // model); the Ranger pieces only fit the Ranger skeleton.
+        // hidden bits: Body_Head=1, Body_Torso=2, Body_Legs=4,
+        // Body_Feet=8 (see hiddenmeshbit in engine/skelmodel.h).
+        // The client only knows the LOCAL player's equipment
+        // (N_RPG_INV -> clequip via getclientinv), so this applies to
+        // player1; other players/bots never wear armor here. Until the
+        // first N_RPG_INV sync clequip is all -1, so nothing is hidden
+        // and the bare body shows (fail closed).
+        struct armorattach
+        {
+            int slot;            // SLOT_* the piece equips to (SLOT_NONE = no equip slot yet)
+            const char *baseid;  // base item id, NULL = stub, no item yet
+            const char *model;   // mdl.ffa substring the piece fits, NULL = any model
+            const char *tag;     // body tag to attach to, NULL = no attach point yet
+            const char *path;    // attach model DIRECTORY (loadmodel appends /iqm.cfg), NULL = no model yet
+            int hidden;          // body-mesh hide bits, applied only when the piece attaches
+        };
+        static const armorattach armorattaches[] =
+        {
+            // TORSO: Ranger tunic (live). Enhanced variants resolve via enhbase.
+            { rpg::SLOT_TORSO, "ranger_tunic", "ranger_male", "tag_torso", "playermodels/attachments/armor/ranger_body", 2 },
+            // LEGS: Ranger pants (live; hides Body_Legs).
+            { rpg::SLOT_LEGS,  "ranger_pants", "ranger_male", "tag_legs",  "playermodels/attachments/armor/ranger_legs", 4 },
+            // FEET: Ranger boots (live; hides Body_Feet). Boots need two attaches, one per foot.
+            { rpg::SLOT_FEET,  "ranger_boots", "ranger_male", "tag_boot_l", "playermodels/attachments/armor/ranger_boots_l", 8 },
+            { rpg::SLOT_FEET,  "ranger_boots", "ranger_male", "tag_boot_r", "playermodels/attachments/armor/ranger_boots_r", 8 },
+            // ARMS: no SLOT_ARMS in rpg/items.h and no hideable arm mesh
+            // (hiddenmeshbit returns 0 for arms), so this row can never
+            // match; it exists so the slot is represented in the table.
+            { rpg::SLOT_NONE,  NULL, "ranger_male", NULL,        NULL, 0 },
+            // HEAD: Warrior great helm (live; hides NOTHING - full-face helm, face/eyes fill the eye slit naturally; hiding Body_Head would leave floating eyes since Eyes is a separate mesh the hide bit does not cover).
+            { rpg::SLOT_HEAD,  "iron_helm", "ranger_male", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 0 },
+            // TORSO: Warrior chainmail (live; hides Body_Torso). Same geometry as the Ranger tunic, chainmail texture.
+            { rpg::SLOT_TORSO, "chain_tunic", "warrior_male", "tag_torso", "playermodels/attachments/armor/warrior_body", 2 },
+            // LEGS: Warrior chainmail legs (live; hides Body_Legs).
+            { rpg::SLOT_LEGS, "iron_leggings", "warrior_male", "tag_legs", "playermodels/attachments/armor/warrior_legs", 4 },
+            // FEET: Warrior chainmail boots (live; hides Body_Feet). Boots need two attaches, one per foot.
+            { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_l", "playermodels/attachments/armor/warrior_boots_l", 8 },
+            { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
+            // HEAD: Warrior great helm (live; same helm as the Ranger row, model warrior_male so a Warrior equipping it sees it; hides NOTHING, same as Ranger).
+            { rpg::SLOT_HEAD, "iron_helm", "warrior_male", "tag_helm", "playermodels/attachments/armor/warrior_helm", 0 },
+        };
+        hiddenplayermeshes = 0;
+        if(d == player1)
+        {
+            rpg::itemstack inv[64]; int n = 0; int eq[rpg::SLOT_COUNT];
+            if(rpg::getclientinv(inv, 64, n, eq))
+            {
+                loopi(sizeof(armorattaches)/sizeof(armorattaches[0]))
+                {
+                    const armorattach &e = armorattaches[i];
+                    if(!e.baseid || !e.path || !e.tag) continue; // stub: no model yet
+                    if(e.slot < 0 || e.slot >= rpg::SLOT_COUNT) continue;
+                    if(e.model && (!mdl.ffa || !strstr(mdl.ffa, e.model))) continue;
+                    int idx = eq[e.slot];
+                    if(idx < 0) continue; // slot empty (also the pre-sync clequip -1 state)
+                    const rpg::itemdef &def = rpg::item(idx);
+                    const char *baseid = def.enhbase ? def.enhbase : def.id;
+                    if(baseid && !strcmp(baseid, e.baseid))
+                    {
+                        a[ai++] = modelattach(e.tag, e.path);
+                        hiddenplayermeshes |= e.hidden;
+                    }
+                }
+            }
+        }
         if(d->state==CS_ALIVE)
         {
             if((testquad || d->quadmillis) && mdl.quad)
@@ -274,7 +460,10 @@ namespace game
             case 1: mdlname = mdl.blueteam; break;
             case 2: mdlname = mdl.redteam; break;
         }
+        if(diag_rp_log) diaglog("renderplayer: before renderclient clientnum=%d hiddenbits=%d", d->clientnum, hiddenplayermeshes);
         renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : showpain, fade, ragdoll && mdl.ragdoll, d==player1);
+        if(diag_rp_log) diaglog("renderplayer: after renderclient clientnum=%d", d->clientnum);
+        hiddenplayermeshes = 0;
 
         const playerclassinfo &pci = game::getplayerclassinfo(hudplayer());
         if(pci.abilities & ABILITY_SEE_HEALTH && d->state == CS_ALIVE && !d->isInfected() && !hudplayer()->isInfected())
@@ -773,6 +962,7 @@ namespace game
 
     void preload()
     {
+        diaglog("game::preload: entry incomingmap='%s'", getincomingmapname());
         // --- RPG: Shattered Shield (load-time fix, Oct 22) ---
         // RPG maps are always played in the detached follow cam (third
         // person; drawhudgun() also bails in edit mode), so the first-person
@@ -782,12 +972,13 @@ namespace game
         // clientmap, so keying that loop on getclientmap() never fired on
         // first entry). FPS maps unchanged.
         bool rpgmap = rpg::mapactive(getincomingmapname());
-        if(hudgun && !rpgmap) preloadweapons();
-        preloadprojmodels();
+        if(hudgun && !rpgmap) { diaglog("game::preload: preloadweapons"); preloadweapons(); diaglog("game::preload: preloadweapons done"); }
+        diaglog("game::preload: preloadprojmodels"); preloadprojmodels(); diaglog("game::preload: preloadprojmodels done");
         preloadplayermodel();
-        preloadsounds();
-        entities::preloadentities();
+        diaglog("game::preload: preloadsounds"); preloadsounds(); diaglog("game::preload: preloadsounds done");
+        diaglog("game::preload: preloadentities"); entities::preloadentities(); diaglog("game::preload: preloadentities done");
         // if(m_sp) preloadmonsters(); TODO
+        diaglog("game::preload: exit");
     }
 
 }

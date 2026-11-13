@@ -8,6 +8,30 @@ VAR(testtags, 0, 0, 1);
 #define BONEMASK_END  0xFFFF
 #define BONEMASK_BONE 0x7FFF
 
+// Armor swap (Nov 10): which bit hides a body-part mesh by name.
+// 0 = not a hideable body part (arms, face, attachments, ...).
+static inline int hiddenmeshbit(const char *name)
+{
+    if(!name) return 0;
+    if(!strcmp(name, "Body_Head")) return 1;
+    if(!strcmp(name, "Body_Torso")) return 2;
+    if(!strcmp(name, "Body_Legs")) return 4;
+    if(!strcmp(name, "Body_Feet")) return 8;
+    return 0;
+}
+
+// Armor swap: draw order for body-part meshes (Ed, Nov 12).
+// Limbs (0) are drawn before the torso (1) so the torso is drawn
+// over the limb roots and the joints tuck inside it for clean seams.
+// Opaque meshes are depth-resolved, so order only matters where
+// surfaces coincide; the geometry overlap does the real work.
+static inline int meshdrawingorder(const char *name)
+{
+    if(!name) return 0;
+    if(!strcmp(name, "Body_Torso")) return 1;
+    return 0;
+}
+
 struct skelmodel : animmodel
 {
     struct vert { vec pos, norm; float u, v; int blend, interpindex; };
@@ -1393,8 +1417,20 @@ struct skelmodel : animmodel
         bool vnorms, vtangents;
         int vlen, vertsize, vblends, vweights;
         uchar *vdata;
+        // Per-model bind-pose correction (per bone), for models whose
+        // bind pose differs from the shared skeleton's. corr[b] =
+        // skel->bones[b].base * invbind_model[b]. The skinning palette
+        // for this meshgroup is sc.bdata[b] * corr[b]. NULL when the
+        // model uses the skeleton's own bind pose (no correction).
+        dualquat *bindcorr;
+        int numbindcorr;
+        // Scratch corrected bone palette (per frame) for meshgroups with
+        // a bindcorr. corr_sc.bdata/mdata point at corr_bdata/corr_mdata.
+        dualquat *corr_bdata;
+        matrix3x4 *corr_mdata;
+        skelcacheentry corr_sc;
 
-        skelmeshgroup() : skel(NULL), edata(NULL), ebuf(0), vnorms(false), vtangents(false), vlen(0), vertsize(0), vblends(0), vweights(0), vdata(NULL)
+        skelmeshgroup() : skel(NULL), edata(NULL), ebuf(0), vnorms(false), vtangents(false), vlen(0), vertsize(0), vblends(0), vweights(0), vdata(NULL), bindcorr(NULL), numbindcorr(0), corr_bdata(NULL), corr_mdata(NULL)
         {
             memset(numblends, 0, sizeof(numblends));
         }
@@ -1418,6 +1454,9 @@ struct skelmodel : animmodel
                 if(vbocache[i].vbuf) glDeleteBuffers_(1, &vbocache[i].vbuf);
             }
             DELETEA(vdata);
+            DELETEA(bindcorr);
+            DELETEA(corr_bdata);
+            DELETEA(corr_mdata);
         }
 
         void shareskeleton(char *name)
@@ -1439,6 +1478,48 @@ struct skelmodel : animmodel
             }
             skel->users.add(this);
             skel->shared++;
+        }
+
+        // Return the bone palette to skin with. When this meshgroup has a
+        // per-model bind-pose correction (bindcorr), the palette is the
+        // skeleton's cache with each bone multiplied by corr[b] =
+        // skel->bones[b].base * invbind_model[b], so the model's vertices
+        // (authored in its own bind pose) skin correctly under the shared
+        // skeleton's animation. Without a correction this returns sc itself.
+        skelcacheentry *getcorrected(skelcacheentry &sc)
+        {
+            if(!bindcorr || !numbindcorr || !skel) return &sc;
+            // The render reads numinterpbones entries, so the corrected
+            // arrays must be that big. But bindcorr only covers the
+            // model's own skin joints (numbindcorr); tag bones push
+            // numinterpbones past that, and those bones get no correction
+            // (their bind pose already matches the shared skeleton).
+            // Reading bindcorr past numbindcorr crashed .82, and capping
+            // the arrays at numbindcorr crashed .83 the same way.
+            // INTERPINDEX MAPPING (.96 fix): the palette is indexed by
+            // interpindex (the skeleton's compacted bone order from
+            // optimize()), but bindcorr is indexed by the model's bone
+            // index - a permutation of each other (only 4 of 62 bones
+            // coincide). Applying bindcorr[i] to slot i scrambled the
+            // correction across bones (the .95 tan-fan: pelvis correction
+            // on the foot, spine on the calf, ...). Each bone's correction
+            // must go to that bone's interp slot instead.
+            int n = skel->numinterpbones;
+            if(!corr_bdata) corr_bdata = new dualquat[n];
+            if(!corr_mdata) corr_mdata = new matrix3x4[n];
+            if(sc.bdata) loopi(n) corr_bdata[i] = sc.bdata[i];
+            if(sc.mdata) loopi(n) corr_mdata[i] = sc.mdata[i];
+            loopi(numbindcorr)
+            {
+                int ii = skel->bones[i].interpindex;
+                if(ii < 0 || ii >= n) continue;
+                if(sc.bdata) corr_bdata[ii].mul(bindcorr[i]);
+                if(sc.mdata) corr_mdata[ii].mul(matrix3x4(bindcorr[i]));
+            }
+            *(animcacheentry *)&corr_sc = *(animcacheentry *)&sc;
+            corr_sc.bdata = sc.bdata ? corr_bdata : NULL;
+            corr_sc.mdata = sc.mdata ? corr_mdata : NULL;
+            return &corr_sc;
         }
 
         int findtag(const char *name)
@@ -1805,11 +1886,29 @@ struct skelmodel : animmodel
                 {
                     if(hasVBO ? !vbocache->vbuf : !vbocache->vdata) genvbo(norms, tangents, *vbocache);
                     bindvbo(as, *vbocache);
-                    loopv(meshes) 
+                    // Limbs before torso (meshdrawingorder): pass 0 draws
+                    // everything except Body_Torso, pass 1 draws Body_Torso.
+                    loopj(2)
                     {
-                        skelmesh *m = (skelmesh *)meshes[i];
-                        p->skins[i].bind(m, as);
-                        m->render(as, p->skins[i], *vbocache);
+                        loopv(meshes)
+                        {
+                            skelmesh *m = (skelmesh *)meshes[i];
+                            if(meshdrawingorder(m->name) != j) continue;
+                            // Diagnostic (Nov 11): log mesh name + skip decision
+                            // when armor hide bits are set. Remove before the
+                            // next real release.
+                            {
+                                static int diag_meshlog = 0;
+                                if(hiddenplayermeshes && diag_meshlog < 60)
+                                {
+                                    diag_meshlog++;
+                                    conoutf("[DIAG] mesh name='%s' hiddenbit=%d hiddenbits=%d skip=%d", m->name ? m->name : "(null)", hiddenmeshbit(m->name), hiddenplayermeshes, (hiddenmeshbit(m->name) & hiddenplayermeshes) ? 1 : 0);
+                                }
+                            }
+                            if(hiddenplayermeshes && (hiddenmeshbit(m->name) & hiddenplayermeshes)) continue;
+                            p->skins[i].bind(m, as);
+                            m->render(as, p->skins[i], *vbocache);
+                        }
                     }
                 }
                 skel->calctags(p);
@@ -1817,6 +1916,12 @@ struct skelmodel : animmodel
             }
 
             skelcacheentry &sc = skel->checkskelcache(p, as, pitch, axis, forward, as->cur.anim&ANIM_RAGDOLL || !d || !d->ragdoll || d->ragdoll->skel != skel->ragdoll ? NULL : d->ragdoll);
+            // Per-model bind-pose correction: rsc is sc with each bone
+            // multiplied by this meshgroup's bindcorr (or sc itself when
+            // the model uses the skeleton's own bind pose). All bone-matrix
+            // reads below use rsc so a model with a different bind pose
+            // skins correctly under the shared skeleton's animation.
+            skelcacheentry &rsc = *getcorrected(sc);
             if(!(as->cur.anim&ANIM_NORENDER))
             {
                 int owner = &sc-&skel->skelcache[0];
@@ -1832,8 +1937,8 @@ struct skelmodel : animmodel
                     {
                         bc->owner = owner;
                         *(animcacheentry *)bc = sc;
-                        if(skel->usematskel) blendmatbones(sc, *bc);
-                        else blendbones(sc, *bc);
+                        if(skel->usematskel) blendmatbones(rsc, *bc);
+                        else blendbones(rsc, *bc);
                     }
                 }
                 if(!skel->usegpuskel && vc.owner!=owner)
@@ -1843,8 +1948,8 @@ struct skelmodel : animmodel
                     loopv(meshes)
                     {
                         skelmesh &m = *(skelmesh *)meshes[i];
-                        if(skel->usematskel) m.interpverts(sc.mdata, bc ? bc->mdata : NULL, norms, tangents, (hasVBO ? vdata : vc.vdata) + m.voffset*vertsize, p->skins[i]);
-                        else m.interpverts(sc.bdata, bc ? bc->bdata : NULL, norms, tangents, (hasVBO ? vdata : vc.vdata) + m.voffset*vertsize, p->skins[i]);
+                        if(skel->usematskel) m.interpverts(rsc.mdata, bc ? bc->mdata : NULL, norms, tangents, (hasVBO ? vdata : vc.vdata) + m.voffset*vertsize, p->skins[i]);
+                        else m.interpverts(rsc.bdata, bc ? bc->bdata : NULL, norms, tangents, (hasVBO ? vdata : vc.vdata) + m.voffset*vertsize, p->skins[i]);
                     }
                     if(hasVBO)
                     {
@@ -1854,16 +1959,34 @@ struct skelmodel : animmodel
                 }
 
                 bindvbo(as, vc, &sc, bc);
-                loopv(meshes) 
+                // Limbs before torso (meshdrawingorder): pass 0 draws
+                // everything except Body_Torso, pass 1 draws Body_Torso.
+                loopj(2)
                 {
-                    skelmesh *m = (skelmesh *)meshes[i];
-                    p->skins[i].bind(m, as);
-                    if(skel->usegpuskel) skel->setgpubones(sc, bc, vblends);
-                    m->render(as, p->skins[i], vc);
+                    loopv(meshes)
+                    {
+                        skelmesh *m = (skelmesh *)meshes[i];
+                        if(meshdrawingorder(m->name) != j) continue;
+                        // Diagnostic (Nov 11): log mesh name + skip decision
+                        // when armor hide bits are set. Remove before the
+                        // next real release.
+                        {
+                            static int diag_meshlog = 0;
+                            if(hiddenplayermeshes && diag_meshlog < 60)
+                            {
+                                diag_meshlog++;
+                                conoutf("[DIAG] mesh name='%s' hiddenbit=%d hiddenbits=%d skip=%d", m->name ? m->name : "(null)", hiddenmeshbit(m->name), hiddenplayermeshes, (hiddenmeshbit(m->name) & hiddenplayermeshes) ? 1 : 0);
+                            }
+                        }
+                        if(hiddenplayermeshes && (hiddenmeshbit(m->name) & hiddenplayermeshes)) continue;
+                        p->skins[i].bind(m, as);
+                        if(skel->usegpuskel) skel->setgpubones(rsc, bc, vblends);
+                        m->render(as, p->skins[i], vc);
+                    }
                 }
             }
 
-            skel->calctags(p, &sc);
+            skel->calctags(p, &rsc);
 
             if(as->cur.anim&ANIM_RAGDOLL && skel->ragdoll && !d->ragdoll)
             {
@@ -1950,12 +2073,49 @@ struct skelmodel : animmodel
     {
     }
 
+    // LINK_SKIN: same bone structure (same count, names and parents, in
+    // order) but a different skeleton object. The attach gets its own
+    // skeleton (own interp mapping, never disturbed by the parent) and a
+    // copy of the parent's animation frames, so it interpolates the same
+    // pose instead of sharing the skeleton pointer (LINK_REUSE).
+    static bool sameskeleton(skeleton *a, skeleton *b)
+    {
+        if(!a || !b || a == b || a->numbones != b->numbones || !a->bones || !b->bones) return false;
+        loopi(a->numbones)
+        {
+            if(!a->bones[i].name || !b->bones[i].name) return false;
+            if(strcmp(a->bones[i].name, b->bones[i].name)) return false;
+            if(a->bones[i].parent != b->bones[i].parent) return false;
+        }
+        return true;
+    }
+
     int linktype(animmodel *m) const
     {
-        return type()==m->type() &&
-            ((skelmeshgroup *)parts[0]->meshes)->skel == ((skelmeshgroup *)m->parts[0]->meshes)->skel ? 
-                LINK_REUSE : 
-                LINK_TAG;
+        if(type() != m->type()) return LINK_TAG;
+        skeleton *skel = ((skelmeshgroup *)parts[0]->meshes)->skel;
+        skeleton *mskel = ((skelmeshgroup *)m->parts[0]->meshes)->skel;
+        if(skel == mskel) return LINK_REUSE;
+        if(sameskeleton(skel, mskel)) return LINK_SKIN;
+        return LINK_TAG;
+    }
+
+    void linkanimframes(animmodel *parent)
+    {
+        // Copy the parent model's animation frames into this model's own
+        // skeleton, so it can interpolate the parent's pose with its own
+        // interp mapping. One-time: skipped once this skeleton has frames.
+        skelmeshgroup *dstg = (skelmeshgroup *)parts[0]->meshes;
+        skelmeshgroup *srcg = (skelmeshgroup *)parent->parts[0]->meshes;
+        if(!dstg || !srcg) return;
+        skeleton *dst = dstg->skel;
+        skeleton *src = srcg->skel;
+        if(!dst || !src || dst == src) return;
+        if(dst->numframes > 0 || !src->numframes || !src->framebones) return;
+        if(dst->numbones != src->numbones || !dst->bones || !src->bones) return;
+        dst->numframes = src->numframes;
+        dst->framebones = new dualquat[src->numframes * src->numbones];
+        memcpy(dst->framebones, src->framebones, src->numframes * src->numbones * sizeof(dualquat));
     }
     
     bool skeletal() const { return true; }
@@ -2020,6 +2180,10 @@ template<class MDL> struct skelcommands : modelcommands<MDL, struct MDL::skelmes
     {
         if(!MDL::loading || MDL::loading->parts.empty()) { conoutf("not loading an %s", MDL::formatname()); return; }
         part &mdl = *(part *)MDL::loading->parts.last();
+        meshgroup *mg = (meshgroup *)mdl.meshes;
+        skeleton *sk = mg ? mg->skel : NULL;
+        printf("[DIAG] settag '%s'->'%s': meshes=%p skel=%p numbones=%d firstbone='%s'\n", name, tagname, (void*)mg, (void*)sk, sk ? sk->numbones : -1, (sk && sk->numbones > 0 && sk->bones[0].name) ? sk->bones[0].name : "(none)");
+        fflush(stdout);
         int i = mdl.meshes ? ((meshgroup *)mdl.meshes)->skel->findbone(name) : -1;
         if(i >= 0)
         {

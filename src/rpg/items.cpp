@@ -60,6 +60,7 @@ namespace rpg
         { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          NULL,    0,  0,   40,  true,  10,   0 , 0, -1 },
         { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      "bow",   12,  0,   0,   false, 25,   0 , 0, -1 },
         { "wooden_staff",  "Wooden Staff", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/magi/staff",     "staff", 12,  0,   0,   false, 25,   0 , 0, -1 },
+        { "cape",          "Cape",         ITEM_ARMOR,     SLOT_CAPE,     "packages/ui/rpg/icons/icon_cape.png",     NULL,                          NULL,    0,  1,   0,   false, 20,   0 , 0, -1 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
@@ -107,7 +108,7 @@ namespace rpg
         return item(id).name;
     }
 
-    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2" };
+    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape" };
 
     const char *slotname(int slot)
     {
@@ -133,6 +134,9 @@ namespace rpg
         std::string enhbase;
         std::string pvpclass;
         int pvpreduce = 0, maxhp = 0, emberprice = 0;
+        std::string outfit; // outfit model-dir suffix (e.g. "_ranger"), "" = none
+        std::string armorclass; // class that may wear this armor, "" = any class
+        std::string attach; // armor attach model path, "" = no visual model
         bool stack = false;
     };
     static itembuild curitem;
@@ -277,6 +281,21 @@ namespace rpg
             curitem.stack = v != 0;
             return true;
         }
+        if(c == "ss_item_outfit")
+        {
+            if(argc != 1) { err = "ss_item_outfit: expected 1 argument (model-dir suffix, e.g. _ranger)"; return false; }
+            if(!argv[0][0] || argv[0][0] != '_') { err = "ss_item_outfit: suffix must start with '_'"; return false; }
+            curitem.outfit = argv[0];
+            return true;
+        }
+        if(c == "ss_item_armorclass")
+        {
+            if(argc != 1) { err = "ss_item_armorclass: expected 1 argument (class)"; return false; }
+            if(argv[0] == std::string("Magi") || argv[0] == std::string("Warrior") || argv[0] == std::string("Ranger")) curitem.armorclass = argv[0];
+            else { err = std::string("ss_item_armorclass: unknown class '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_attach") { if(argc != 1) { err = "ss_item_attach: expected 1 argument (model path)"; return false; } curitem.attach = argv[0]; return true; }
         err = "unknown content command '" + c + "'";
         return false;
     }
@@ -422,6 +441,12 @@ namespace rpg
                 if(!catok)
                 { err = "item '" + b.id + "' has unknown weapon category '" + b.weaponcat + "'"; return false; }
             }
+            // Outfit (Nov 10): an outfit suffix is armor-only (torso outfits).
+            if(!b.outfit.empty() && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets an outfit but is not armor"; return false; }
+            // Class armor gate (Nov 10): an armor class is armor-only.
+            if(!b.armorclass.empty() && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets an armor class but is not armor"; return false; }
             if(type != ITEM_ARMOR && b.armor != 0)
             { err = "item '" + b.id + "' sets armor but is not armor"; return false; }
             if(type != ITEM_CONSUMABLE && (b.heal != 0 || b.mana != 0))
@@ -494,6 +519,9 @@ namespace rpg
             d.pvpreduce = b.pvpreduce;
             d.maxhp = b.maxhp;
             d.emberprice = b.emberprice;
+            d.outfit = b.outfit.empty() ? NULL : poolstr(b.outfit);
+            d.armorclass = b.armorclass.empty() ? NULL : poolstr(b.armorclass);
+            d.attach = b.attach.empty() ? NULL : poolstr(b.attach);
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             // findfile "e" alone misses package files when no -k package dir is given (packagedirs empty); also try a direct existence check, like the path check above

@@ -475,7 +475,12 @@ namespace ai
 
         void BotAi::killed(fpsent *d, fpsent *e)
         {
-            if(d->ai.local && d->ai.type == AI_TYPE_BOT) getBotState(d)->reset();
+            // Real-kill crash guard (Nov 8, .55 follow-up): getBotState()
+            // asserts ai.data, but release builds skip the assert, so a
+            // bot whose AI state was never created (or was freed) would
+            // crash on ->reset(). The first real kill in .55 crashed in
+            // death processing; this closes that hole.
+            if(d->ai.local && d->ai.type == AI_TYPE_BOT && d->ai.data) getBotState(d)->reset();
         }
 
         void BotAi::itemSpawned(fpsent *d, int ent)
@@ -529,6 +534,23 @@ namespace ai
             {
                 ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, ai->route[0]);
                 return 1;
+            }
+            // Battlegrounds (bot movement fix, Nov 10, Ed): bots sat in
+            // WAIT until bumped because randomnode would not pick a
+            // waypoint at spawn (no enemy in range, and the random pick
+            // kept failing its checks), so logic() kept calling
+            // stopmoving() on them. Fall back to the single closest
+            // waypoint and route to it directly, so the bot starts moving
+            // toward the action instead of waiting for a bump. Only on
+            // battleground modes; other maps keep the old behavior.
+            if(m_ctf || m_koth || m_tff)
+            {
+                int n = closestwaypoint(d->feetpos(), 0, true, d);
+                if(n >= 0 && n != d->lastnode && makeroute(d, b, n))
+                {
+                    ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, ai->route[0]);
+                    return 1;
+                }
             }
             return 0; // but don't pop the state
         }
@@ -989,7 +1011,10 @@ namespace ai
                             break;
                         case 4: ai->reset(true); break;
                         case 5: ai->reset(false); break;
-                        case 6: default: suicide(d); return; break; // this is our last resort..
+                        // No suicide: a blocked bot resets and re-paths instead of dying.
+                        // Suiciding a stuck bot just respawns it into the same spot and
+                        // floods the log with self-kills (bots died on spawn in CTF).
+                        case 6: default: ai->reset(false); ai->blocktime = ai->blockseq = 0; return; break;
                     }
                 }
             }
@@ -1009,7 +1034,9 @@ namespace ai
                             break;
                         case 4: ai->reset(true); break;
                         case 5: ai->reset(false); break;
-                        case 6: default: suicide(d); return; break; // this is our last resort..
+                        // No suicide: same as the blocked ladder above. A bot that cannot
+                        // reach its target node resets and picks a new route instead of dying.
+                        case 6: default: ai->reset(false); ai->targtime = ai->targseq = 0; return; break;
                     }
                 }
             }
@@ -1030,7 +1057,11 @@ namespace ai
                     {
                         case 1: ai->reset(true); break;
                         case 2: ai->reset(false); break;
-                        case 3: default: suicide(d); return; break; // this is our last resort..
+                        // No suicide: a bot that cannot find a target yet resets and keeps
+                        // looking instead of dying. Freshly spawned bots need time to
+                        // navigate toward the enemy; killing them after 3s of no target
+                        // is what made bots die on spawn unless they engaged.
+                        case 3: default: ai->reset(false); ai->huntseq = 0; ai->lasthunt = lastmillis; return; break;
                     }
                 }
             }

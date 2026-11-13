@@ -1,4 +1,5 @@
 #include "game.h"
+#include "diaglog.h"
 #include "rpg/rpg.h"
 #include "rpg/stats.h"
 #include "rpg/abilities.h"
@@ -1069,6 +1070,12 @@ namespace game
 
         deathstate(d);
         ai::killed(d, actor);
+        // Real-kill crash diagnostic (Nov 8, .55 follow-up): log when the
+        // client finishes death processing on a battleground map, so the
+        // next crash log shows whether it got past ai::killed.
+        if(rpg::mapactive(getclientmap()))
+            conoutf("rpg: client killed() done: victim '%s' (cn %d), killer '%s' (cn %d)",
+                    d->name, d->clientnum, actor ? actor->name : "<none>", actor ? actor->clientnum : -1);
         if(d == player1) d->follow = actor->clientnum;
     }
 
@@ -1382,7 +1389,12 @@ namespace game
     const char *colorname(fpsent *d, const char *name, const char *prefix, const char *suffix, const char *alt)
     {
         if(!name) name = alt && d == player1 ? alt : d->name; 
-        bool dup = !name[0] || duplicatename(d, name, alt) || d->ai.type != ai::AI_TYPE_NONE;
+        // No bot marker (Ed, Nov 10): bots used to always get a [clientnum]
+        // suffix here because ai.type != AI_TYPE_NONE forced dup=true, so
+        // every bot showed as "Cedric [130]". Bots have unique pool names,
+        // so they display as plain names like human players; a suffix is
+        // only added when the name is actually duplicated (or empty).
+        bool dup = !name[0] || duplicatename(d, name, alt);
         if(dup || prefix[0] || suffix[0])
         {
             cidx = (cidx+1)%3;
@@ -1995,6 +2007,7 @@ namespace game
     ICOMMAND(rpg_enterworld, "s", (char *name),
     {
         if(!name || !name[0]) return;
+        diaglog("rpg_enterworld(%s): entry", name);
         // Load-path profiling (Oct 22, fix-list item 1): gated, silent by
         // default. The heavy work lands in changemapserv/load_world (client)
         // and rpg::onconnect (server); those log their own stages.
@@ -2019,11 +2032,13 @@ namespace game
                 // rpg_modelidx returns 0 if not found; only set if valid
                 playermodel = idx;
             }
+            diaglog("rpg_enterworld: charmodel modeldir='%s' playermodel=%d", modeldir, playermodel);
         }
         // Server hardcoded to local (Oct 21, Ed's call): the Server text
         // field was removed from the select screen. For testing it's always
         // local; when it's not, hardcode the server address here.
         if(!isconnected()) localconnect();
+        diaglog("rpg_enterworld: connected, calling changemap(rpg_01)");
         // Stronger gate (Oct 26, Ed): ENTER WORLD always loads RPG play.
         // Turn edit off if on, and never enter the world in an edit mode:
         // fall back to the existing default (DEFAULT_MODE) if the requested mode has M_EDIT.
@@ -2031,6 +2046,7 @@ namespace game
         int m = m_valid(nextmode) ? nextmode : localmode;
         if(m_check(m, M_EDIT)) m = DEFAULT_MODE;
         changemap("rpg_01", m);
+        diaglog("rpg_enterworld: changemap returned");
         cleargui();
     });
 

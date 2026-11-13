@@ -42,6 +42,7 @@ namespace rpg
         SLOT_NECK,
         SLOT_RING1,
         SLOT_RING2,
+        SLOT_CAPE,
         SLOT_COUNT,
         SLOT_NONE = -1
     };
@@ -95,13 +96,34 @@ namespace rpg
         int pvpreduce = 0; // PvP default: no PvP reduction
         int maxhp = 0; // PvP default: no max-HP bonus
         int emberprice = 0; // PvP default: not for sale for Embers
+        // Outfit (Nov 10, Warrior equip test): model-dir SUFFIX applied to
+        // the wearer's base model when this item is equipped, e.g. "_ranger"
+        // turns "warrior_male" into "warrior_male_ranger". NULL = not an
+        // outfit (no appearance change). Data files set it with
+        // ss_item_outfit. The equip hook strips a previous outfit suffix
+        // before applying, so outfits swap cleanly; unequip reverts to base.
+        const char *outfit = NULL; // outfit default: not an outfit item
+        // Class armor gate (Nov 10, Ed's class-armor rule): the class that
+        // may wear this armor ("Warrior"|"Ranger"|"Magi"). NULL = any class
+        // (rings/necklaces and ungated armor). Data files set it with
+        // ss_item_armorclass. Enforced in rpg::equipitem, mirroring the
+        // Oct 29 weapon-category gate; already-equipped pieces are never
+        // stripped by a re-equip, only new disallowed equips are refused.
+        const char *armorclass = NULL; // armor-class default: any class
+        // Armor attach (Nov 10, Ed's "true armor swapping"): model path
+        // attached to the wearer's body when this armor piece is equipped,
+        // e.g. "playermodels/attachments/armor/ranger_hood". NULL = no
+        // visual attach (stats only). Data files set it with
+        // ss_item_attach. The attach renders via the modelattach array in
+        // renderclient, same pattern as the cape (tag_cape) and vwep.
+        const char *attach = NULL; // armor-attach default: no visual model
     };
 
     int itemcount();                    // number of defs in the ACTIVE table
     const itemdef &item(int id);        // id in [0, itemcount())
     int finditem(const char *id);       // -1 when unknown
     const char *itemname(int id);       // display name, "" when invalid
-    const char *slotname(int slot);     // "mainhand".."ring2", "" when invalid
+    const char *slotname(int slot);     // "mainhand".."cape", "" when invalid
     int slotid(const char *name);       // SLOT_* or SLOT_NONE
 
     // --- content data layer (crafting build step 0) ---

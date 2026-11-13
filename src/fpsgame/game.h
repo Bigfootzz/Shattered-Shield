@@ -711,6 +711,8 @@ enum
     N_RPG_LOOT,    // s->c: loot drop spawned (idx, item, x, y, z as DMF ints)
     N_RPG_UNLOOT,  // s->c: loot drop removed (idx)
     N_RPG_VWEP,    // s->c: equipped weapon model for a client (clientnum, path; "" clears)
+    N_RPG_APPEAR,  // s->c: appearance/playermodel change for a client (clientnum, playermodel index) — outfit equip/unequip, Nov 10
+    N_RPG_ARMOR,   // s->c: equipped armor attach for a client (clientnum, slot, path; "" clears) — armor attach, Nov 10
     N_RPG_MANA,    // s->c: mana update for the caster (mana, maxmana)
     N_RPG_CD,      // s->c: ability cooldown started (ability, waitms)
     N_RPG_HPMAX,   // s->c: RPG engine max-HP sync (maxhp)
@@ -781,7 +783,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_DEMOPACKET, 0,
     N_RPG_CAST, 4, // (ability id, client-advisory yaw, advisory selected target, -1 = none)
     N_RPG_EQUIP, 0, N_RPG_UNEQUIP, 2, N_RPG_USE, 0, N_RPG_DROP, 0, N_RPG_INVL, 1,
-    N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 2, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
+    N_RPG_INV, 0, N_RPG_GOLD, 2, N_RPG_VENDOR, 2, N_RPG_BUY, 0, N_RPG_SELL, 0, N_RPG_LOOT, 6, N_RPG_UNLOOT, 2, N_RPG_VWEP, 0, N_RPG_APPEAR, 3, N_RPG_ARMOR, 0, N_RPG_MANA, 3, N_RPG_CD, 3, N_RPG_HPMAX, 2,
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,

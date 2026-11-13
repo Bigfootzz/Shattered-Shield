@@ -148,6 +148,19 @@ namespace game
         return it->second.text.c_str();
     }
 
+    // Battleground map pretty name (Ed, Nov 10): the real map name for
+    // the intermission header. Mirrors the load-screen mapping in
+    // client.cpp getbgloadinfo(); unknown maps fall back to the raw
+    // map filename so the header never comes up blank.
+    static const char *bgmapdisplay()
+    {
+        const char *mname = getclientmap();
+        if(!strcmp(mname, "ctf_twinkeeps_b1")) return "Twin Keeps";
+        if(!strcmp(mname, "koth_riverbend_b1")) return "Riverbend";
+        if(!strcmp(mname, "tff_craterbattlefield_b1")) return "Crater Battlefield";
+        return mname[0] ? mname : "[new map]";
+    }
+
     void renderscoreboard(g3d_gui &g, bool firstpass)
     {
         // v0.1.24: clean digital font instead of the default blackletter face
@@ -162,6 +175,17 @@ namespace game
      
         g.pushlist();
         g.spring();
+        // Battleground intermission (Ed, Nov 10): the header shows just
+        // the map's real name, centered across the top — not the mode,
+        // not the map filename, not the word "intermission". The pretty
+        // name comes from bgmapdisplay() below (Twin Keeps / Riverbend /
+        // Crater Battlefield). Other scoreboards keep the old header.
+        if(intermission && (m_ctf || m_koth || m_tff))
+        {
+            g.text(bgmapdisplay(), 0xFFFF80);
+        }
+        else
+        {
         g.text(server::modename(gamemode), 0xFFFF80);
         g.separator();
         const char *mname = getclientmap();
@@ -183,6 +207,7 @@ namespace game
             }
         }
         if(ispaused()) { g.separator(); g.text("paused", 0xFFFF80); }
+        }
         g.spring();
         g.poplist();
 
@@ -219,38 +244,6 @@ namespace game
                     b; \
                 }
 
-            g.pushlist();
-            if(sg.team && m_teammode)
-            {
-                g.pushlist();
-                g.background(bgcolor, numgroups>1 ? 3 : 5);
-                g.strut(1);
-                g.poplist();
-            }
-            g.text("", 0, " ");
-            loopscoregroup(o,
-            {
-                if(highlightscore && (multiplayer(false) || demoplayback || players.length() > 1))
-                {
-                    if (o==player1)
-                    {
-                        g.pushlist();
-                        g.background(0x808080, numgroups>1 ? 3 : 5);
-                    }
-                }
-                const playermodelinfo &mdl = getplayermodelinfo(o);
-                const char *icon = sg.team && m_teammode && strcmp(sg.team, "infected") ? (!strcmp(sg.team, TEAM_0) ? mdl.blueicon : mdl.redicon) : mdl.ffaicon;
-
-                const char *privIcon = getPrivilegeIcon(o->privilege);
-                if(privIcon)
-                {
-                    icon = privIcon;
-                }
-
-                g.text("", 0, icon);
-                if(o==player1 && highlightscore && (multiplayer(false) || demoplayback || players.length() > 1)) g.poplist();
-            });
-            g.poplist();
 
             if(sg.team && m_teammode)
             {

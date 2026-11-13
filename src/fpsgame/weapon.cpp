@@ -96,6 +96,28 @@ namespace game
             { NULL, NULL, NULL },
             "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
+        // Outfit variants (indices 6-9; NOT selectable at character creation).
+        // Same vwep/hudguns as the base Warrior; only the model dir differs.
+        {
+            "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
+        },
+        {
+            "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
+        },
+        {
+            "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
+        },
+        {
+            "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            { NULL, NULL, NULL },
+            "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
+        },
     };
 
     const int NUMPLAYERMODELS = sizeof(playermodels)/sizeof(playermodels[0]);

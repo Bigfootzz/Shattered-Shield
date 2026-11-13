@@ -276,6 +276,15 @@ namespace ai
 
     void update()
     {
+        // DIAGNOSTIC (v0.1.67): .66 proved the crash is after a cast that
+        // kills a bot, in the unbracketed code after the cast returns.
+        // Bracket the server AI update (think loop) start/end, throttled
+        // to 1/sec so the log stays readable. If the next log ends with
+        // "ai update start" and no "ai update done", the crash is inside
+        // the AI think; if both fire, it is after the AI update.
+        static int diag_ai_last = 0;
+        bool diag_ai_log = totalmillis - diag_ai_last >= 1000;
+        if(diag_ai_log) { diag_ai_last = totalmillis; conoutf("rpg: ai update start"); fflush(stdout); }
         if(intermission) { loopv(players) if(players[i]->ai.local) players[i]->stopmoving(); }
         else // fixed rate logic done out-of-sequence at 1 frame per second for each ai
         {
@@ -300,6 +309,7 @@ namespace ai
             AI_MULTI_DISPATCH(ai->endThink());
             if(++iteration > count) iteration = 0;
         }
+        if(diag_ai_log) { conoutf("rpg: ai update done"); fflush(stdout); }
     }
 
     bool badhealth(fpsent *d)

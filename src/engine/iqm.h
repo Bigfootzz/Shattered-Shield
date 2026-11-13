@@ -139,8 +139,10 @@ struct iqm : skelmodel, skelloader<iqm>
 
             if(hdr.num_joints)
             {
+                bool definedskel = false;
                 if(skel->numbones <= 0)
                 {
+                    definedskel = true;
                     skel->numbones = hdr.num_joints;
                     skel->bones = new boneinfo[skel->numbones];
                     loopi(hdr.num_joints)
@@ -164,6 +166,43 @@ struct iqm : skelmodel, skelloader<iqm>
 
                 if(skel->shared <= 1)
                     skel->linkchildren();
+
+                // Per-model bind-pose correction (IQM armor fix, Nov 12):
+                // when this model did NOT define the shared skeleton, its
+                // own bind pose may differ from the skeleton's (the .81
+                // tan-fan failure: the loader kept only the first model's
+                // bind pose and skinned every later model with it).
+                // Compute this model's model-space bind poses from its
+                // joints (same Y-up -> engine conversion as above),
+                // invert them, and set bindcorr[b] =
+                // skel->bones[b].base * invbind_model[b] — the same
+                // correction the glTF loader builds from the skin IBMs.
+                // getcorrected() applies it to the bone palette at render
+                // time. When this model defined the skeleton the
+                // correction is identity, so no bindcorr is needed.
+                if(!definedskel && skel->bones && (int)hdr.num_joints <= skel->numbones)
+                {
+                    dualquat *modelbase = new dualquat[hdr.num_joints];
+                    loopi(hdr.num_joints)
+                    {
+                        iqmjoint &j = joints[i];
+                        vec pos(j.pos.x, -j.pos.y, j.pos.z);
+                        quat orient(-j.orient.x, j.orient.y, -j.orient.z, j.orient.w);
+                        orient.normalize();
+                        modelbase[i] = dualquat(orient, pos);
+                        if(j.parent >= 0) modelbase[i].mul(modelbase[j.parent], dualquat(modelbase[i]));
+                    }
+                    numbindcorr = hdr.num_joints;
+                    bindcorr = new dualquat[numbindcorr];
+                    loopi(numbindcorr)
+                    {
+                        dualquat invbind = modelbase[i];
+                        invbind.invert();
+                        bindcorr[i] = skel->bones[i].base;
+                        bindcorr[i].mul(invbind);
+                    }
+                    delete[] modelbase;
+                }
             }
 
             loopi(hdr.num_meshes)

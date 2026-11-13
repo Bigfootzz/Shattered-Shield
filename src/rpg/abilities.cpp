@@ -78,6 +78,12 @@ namespace rpg
 
     const abilitydef &ability(int id)
     {
+        // Bounds guard (Nov 8, DoT crash hardening): ABILITIES has
+        // ABILITY_COUNT entries and this used to index it unchecked.
+        // A stale or corrupt ability id (e.g. a DoT whose ability was
+        // never validated) read out of bounds and could segfault on
+        // ab.name. Clamp to a valid entry instead of crashing.
+        if(id < 0 || id >= ABILITY_COUNT) id = 0;
         return ABILITIES[id];
     }
 

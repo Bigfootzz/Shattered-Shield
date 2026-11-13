@@ -33,6 +33,21 @@ namespace rpg
     // (bots are created by onconnect with an empty archetype; the class
     // gate in rpg_cast reads this column). No-op when the row is missing.
     bool setarchetype(const char *name, const char *arch);
+    // Battlegrounds (bot weapon fix, Nov 10): set a character's model
+    // (appearance) row. Bots are created by onconnect with an empty
+    // appearance, so classfor() falls back to nothing and the class
+    // weapon equip in bg_fillbots can be refused by the weapon gate,
+    // leaving the bot on a wrong-model default weapon (mace/sword).
+    // Setting the model to match the archetype makes the class
+    // derivation (archetype, then model) and the weapon gate agree.
+    // No-op when the row is missing.
+    bool setmodel(const char *name, const char *model);
+    // Bot flag (Nov 13, v0.1.99 playtest: bots on the select screen).
+    // Marks a character row as a bot (battleground / world bot) so the
+    // character select filter can exclude it by data instead of by name.
+    // Set by bg_fillbots right after onconnect creates the bot row.
+    // No-op when the row is missing.
+    bool setbot(const char *name, bool bot);
     void ondisconnect(const char *name, const char *map, float x, float y, float z, float yaw);
     // Reload quest + repeatable caches from the DB for an already-connected
     // client. Needed because onconnect runs before the first map change, so
@@ -75,6 +90,16 @@ namespace rpg
     // Same derivation as the weapon equip gate (archetype first, model-dir
     // fallback); false on unknown class, and the caller fails closed.
     bool classforname(const char *name, char *out, int max);
+    // --- vendor buy gate (Ed, Nov 13 vendor rule) ---
+    // A vendor sells only items the buyer can use. Classed weapons
+    // (weaponcat) and classed armor (armorclass) require the buyer's
+    // class to match (same derivation as the equip gate: classforname,
+    // archetype first, model-dir fallback). Unclassed items (rings,
+    // necklaces, cape, puglin stick, etc.) are universal and sell to
+    // all classes. Unknown buyer class or unknown item fails closed.
+    // PvP (ember-price) items keep their own pvpclass gate in rpg_buy
+    // and are NOT covered here.
+    bool buyallowed(const char *name, const char *itemid);
 
     // --- ability layer v1 (milestone step 3): session state, server-authoritative ---
     // Mana and cooldowns live only for connected characters (cleared on
@@ -171,6 +196,7 @@ namespace rpg
     void clearbuffs(const char *name); // logout: drop all rows + cache
     int bufflist(const char *name, int *attrs, int *mags, int *secsleft, int max); // active buffs (debug/display)
     const char *equippedvwep(const char *name);             // equipped weapon model path, or NULL
+    const char *equippedattach(const char *name, int slot); // equipped armor attach path for a slot, or NULL
     void saveinv(const char *name);                        // write-through persistence of inv+equipment
 
     // --- loot drops v1 (milestone step 4): server-side ---
@@ -188,6 +214,10 @@ namespace rpg
     // into the client too, so the GUI/HUD read these. Never authoritative.
     void setvwep(int clientnum, const char *path);   // "" clears the override
     const char *vwepfor(int clientnum);               // NULL = use the model's default vwep
+    void setarmor(int clientnum, int slot, const char *path); // "" clears the slot's attach
+    const char *armorfor(int clientnum, int slot);    // NULL = no attach for that slot
+    void setcape(int clientnum, const char *path); // "" clears the cape attach
+    const char *capefor(int clientnum);    // NULL = no cape equipped
     bool vwep_has_pvpglow(const char *path);          // client: true when the vwep path is a PvP weapon (data/rpg/pvpglow.cfg)
     void setmana(int mana, int maxmana);
     bool getclientmana(int &mana, int &maxmana);
@@ -440,6 +470,13 @@ namespace rpg
     bool charexists(const char *name); // true if a character row with this name exists
     bool chararchetype(const char *name, char *out, int max); // archetype for one character ("" if unknown)
     bool charmodel(const char *name, char *out, int max); // model dir for one character ("" if unknown)
+    // Outfit appearance swap (Nov 10, Warrior equip test): apply or remove an
+    // outfit suffix on a character's model dir. suffix like "_ranger" applies
+    // it (base + suffix); NULL reverts to the base model. The base is the
+    // current appearance with any known outfit suffix stripped, so outfits
+    // swap cleanly and unequip reverts. Writes the new model dir to outmodel
+    // and updates the DB; returns false when the character/model is unknown.
+    bool applyoutfit(const char *name, const char *suffix, char *outmodel, int maxout);
     bool charcreate(const char *name, const char *archetype, const char *model); // false if name taken or 3+ chars
     bool chardelete(const char *name);
     // Champion tracking (server-side session state; the champion is a real

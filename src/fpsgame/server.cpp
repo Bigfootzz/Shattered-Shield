@@ -459,6 +459,8 @@ namespace server
         extern clientinfo *addai(int skill, int limit, ai::AiType aiType = ai::AI_TYPE_BOT);
         extern void deleteai(clientinfo *ci);
         extern void reinitai(clientinfo *ci); // RPG ability-layer test spawner runs the normal spawn pipeline eagerly
+        extern const char *chooseteam(); // BG bot team assignment: smallest team (aiman.h)
+        extern void balanceteams(); // BG bot team assignment: even the sides (aiman.h)
     }
 
     #define MM_MODE 0xF
@@ -686,7 +688,7 @@ namespace server
     stream *demotmp = NULL, *demorecord = NULL, *demoplayback = NULL;
     int nextplayback = 0, demomillis = 0;
 
-    VARFP(localrecorddemo, 0, 2, 2, demonextmatch = localrecorddemo != 0 );
+    VARFP(localrecorddemo, 0, 0, 2, demonextmatch = localrecorddemo != 0 ); // default 0: demo recording is OFF (Ed, Nov 9)
     VAR(restrictdemos, 0, 1, 1);
 
     VAR(restrictpausegame, 0, 0, 1);
@@ -1554,6 +1556,11 @@ namespace server
 
     void setupdemorecord()
     {
+        // Demo recording DISABLED (Ed, Nov 9): we should not be demo
+        // recording at all. Guard here so no config value can re-enable it;
+        // recordpacket/writedemo/enddemorecord are already no-ops when
+        // demorecord is NULL, so the whole demo path stays inert.
+        return;
         if(!m_mp(gamemode) || m_edit) return;
 
         demotmp = opentempfile("demorecord", "w+b");
@@ -2936,6 +2943,7 @@ namespace server
         {
             int newdmg = rpg::stat_mitigatepvp(damage, rpg::armorvalue(target->name), rpg::pvpreducevalue(target->name));
             if(newdmg != damage) conoutf("rpg: pvp gear reduces %d (%d -> %d) for '%s'", damage - newdmg, damage, newdmg, target->name);
+            fflush(stdout); // Diagnostic (v0.1.65): prove the PvP gear block completed before the N_DAMAGE send.
             damage = newdmg;
         }
         // survival damage upgrade: bought damage levels scale a human's outgoing damage (dmsp only)
@@ -2964,9 +2972,23 @@ namespace server
             }
         }
         gamestate &ts = target->state;
+        // NULL-actor guard (Nov 8, CTF death-crash hardening): a projectile
+        // or DoT whose caster has left passes actor==NULL here, and every
+        // actor deref below (N_DAMAGE, the damage credit, fragvalue, frags,
+        // N_DIED, smode->died, teamkill) would segfault on it. Treat a
+        // caster-less hit as a self-kill: no credit to anyone, the victim
+        // loses a frag exactly like a suicide, and the flag still drops.
+        // The RPG blocks above already null-check actor, so this only
+        // changes the shared death/damage path.
+        if(!actor) actor = target;
         ts.dodamage(damage);
         if (damage>0 && target!=actor && !isteam(target->team, actor->team)) actor->state.damage += damage;
+        // Diagnostic (v0.1.65): bracket the N_DAMAGE broadcast — prime suspect for the .64b crash (stale bot slot in the all-clients send).
+        conoutf("rpg: dodamage: pre-ndamage, target '%s' (cn %d), actor cn %d", target->name, target->clientnum, actor->clientnum);
+        fflush(stdout);
         sendf(-1, 1, "ri7", N_DAMAGE, target->clientnum, actor->clientnum, damage, ts.armour, ts.health, gun);
+        conoutf("rpg: dodamage: ndamage sent");
+        fflush(stdout);
         if(target==actor) target->setpushed();
         else if(!hitpush.iszero())
         {
@@ -3200,6 +3222,12 @@ namespace server
             target->position.setsize(0);
             bool didrespawn = false;
             if(smode) didrespawn = smode->died(target, actor);
+            // CTF death-crash diagnostic (Nov 8, .55 follow-up): log when
+            // smode->died() returns on a battleground map, so the next
+            // crash log shows whether death processing got past died().
+            if((m_ctf || m_koth || m_tff) && rpg::mapactive(smapname))
+                conoutf("rpg: died() returned for '%s' (cn %d), killer '%s' (cn %d)",
+                        target->name, target->clientnum, actor ? actor->name : "<none>", actor ? actor->clientnum : -1);
             ts.lastdeath = gamemillis;
             if(!didrespawn)
             {
@@ -3528,17 +3556,71 @@ namespace server
             if(rpg::connected())
             {
                 rpg::onconnect(name);
+                // Bot flag (Nov 13, v0.1.99 playtest: bots on the select
+                // screen): mark the row as a bot so charlist excludes it
+                // by data instead of by name. Without this, a bot row is
+                // indistinguishable from a player character and the select
+                // screen lists it (the name-pool filter only covers the
+                // 12 BG names, not the bots-repo world bots Wren/Kestrel/
+                // Lark that share this DB).
+                rpg::setbot(name, true);
                 rpg::setarchetype(name, botarch);
+                // Model to match the archetype (bot weapon fix, Nov 10):
+                // onconnect creates the bot row with an empty appearance,
+                // so the bot rendered (and, via classfor, equipped) as the
+                // wrong class — Magi holding maces, Rangers holding swords.
+                // Set the model dir and the server-side playermodel index
+                // (game_fps.cfg playermodeldir: 0 ranger_male, 2 warrior_male,
+                // 4 wizard_male) so the bot looks and equips as its class.
+                // The class weapon equip below then passes the weapon gate.
+                const char *botmodel = "warrior_male";
+                int botpm = 2;
+                if(!strcmp(botarch, "Ranger")) { botmodel = "ranger_male"; botpm = 0; }
+                else if(!strcmp(botarch, "Magi")) { botmodel = "wizard_male"; botpm = 4; }
+                rpg::setmodel(name, botmodel);
+                bi->state.playermodel = botpm;
                 // Class weapon in hand (onconnect's starter kit derives
                 // from the bot's model, not its archetype, so it would
                 // leave every bot on the puglin stick): Ranger gets the
                 // wooden bow, Magi the wooden staff, Warrior keeps the
-                // stick. Failures are ignored; the stick still casts.
-                if(!strcmp(botarch, "Ranger") && rpg::additem(name, "wooden_bow", 1)) rpg::equipitem(name, "wooden_bow");
-                else if(!strcmp(botarch, "Magi") && rpg::additem(name, "wooden_staff", 1)) rpg::equipitem(name, "wooden_staff");
+                // stick. A refused equip is logged (it used to fail
+                // silently, which is how the wrong weapons went unnoticed).
+                if(!strcmp(botarch, "Ranger") && rpg::additem(name, "wooden_bow", 1))
+                {
+                    if(!rpg::equipitem(name, "wooden_bow")) conoutf("bg: WARNING: bot '%s' (Ranger) could not equip wooden_bow: %s", name, rpg::equipdeny());
+                }
+                else if(!strcmp(botarch, "Magi") && rpg::additem(name, "wooden_staff", 1))
+                {
+                    if(!rpg::equipitem(name, "wooden_staff")) conoutf("bg: WARNING: bot '%s' (Magi) could not equip wooden_staff: %s", name, rpg::equipdeny());
+                }
             }
             conoutf("bg: bot '%s' (%s, cn %d) joins the battleground", name, botarch, bi->clientnum);
         }
+    }
+
+    // Battleground bot team assignment (v0.1.54 notes fix, Ed Nov 8):
+    // safety net at match start: assign every teamless bot via
+    // chooseteam() (smallest team) and broadcast N_SETTEAM, then run
+    // balanceteams() to even the sides. Bots already on a team are
+    // left alone; only the empty-team fillbots are assigned here.
+    // (Was the primary fix when fillbots ran on rpg_01, where addai()
+    // leaves the team empty; since the Nov 8 rewire the fill runs on
+    // the BG map itself, where addai() assigns teams directly, so this
+    // normally finds nothing to do — kept as the balance guarantee.)
+    static void bg_assignbotteams()
+    {
+        loopv(bg_bots)
+        {
+            clientinfo *bi = getinfo(bg_bots[i]);
+            if(!bi || bi->team[0]) continue;
+            const char *team = aiman::chooseteam();
+            if(!team || !team[0]) continue;
+            if(bi->state.state == CS_ALIVE && smode) smode->changeteam(bi, bi->team, team);
+            copystring(bi->team, team, MAXTEAMLEN+1);
+            sendf(-1, 1, "riisi", N_SETTEAM, bi->clientnum, bi->team, 0);
+            conoutf("bg: bot '%s' assigned to team '%s'", bi->name, bi->team);
+        }
+        aiman::balanceteams();
     }
 
     // Battleground bot hold (BG cluster, Nov 3): fillbots drop bots onto
@@ -3950,16 +4032,15 @@ namespace server
             if(bg_queue_members.empty())
             {
                 bg_queue_active = false;
-                bg_deletebots(); // queue dissolved after fill: bots never reach a match
+                bg_deletebots(); // queue dissolved: no match, so no bots (fill runs after the BG map loads now, so this is normally a no-op)
             }
             else
             {
-                // Fill missing players in the last ~10s of the countdown.
-                if(!bg_botfilled && totalmillis >= bg_queue_until - 10000) { bg_botfilled = true; bg_fillbots(); }
                 if(totalmillis >= bg_queue_until)
                 {
                     bg_queue_active = false;
                     bg_match_starting = true;
+                    bg_botfilled = false; // fresh fill guard for this match; the fill now runs after the BG map loads, not in the queue
                     // Queue mode picks the map: CTF Twin Keeps, KOTH
                     // Riverbend, TFF Crater Battlefield.
                     if(bg_queue_mode == BG_MODE_KOTH) changemap("koth_riverbend_b1", BG_MODE_KOTH);
@@ -5060,11 +5141,24 @@ namespace server
         loopvrev(rpg_projectiles)
         {
             rpg_projectile &pr = rpg_projectiles[i];
+            // DIAGNOSTIC (v0.1.63): tick-entry brackets. The .62 log proved
+            // the crash is NOT in the tick's hit branch (zero tick lines
+            // fired) — it is somewhere in the per-frame loop after a cast.
+            // These two lines prove whether the tick even runs, and whether
+            // the target lookup (rpg_projfind, which dereferences each
+            // clients[] slot with no null check) returns a usable pointer.
+            conoutf("rpg: proj tick: enter, proj %d, targetcn %d, castercn %d", pr.id, pr.targetcn, pr.castercn);
+            fflush(stdout);
             clientinfo *t = rpg_projfind(pr.targetcn, !bg_pvp);
+            if(t) conoutf("rpg: proj tick: lookup done, proj %d, target '%s', state %d, hp %d", pr.id, t->name, t->state.state, t->state.health);
+            else conoutf("rpg: proj tick: lookup done, proj %d, target NULL", pr.id);
+            fflush(stdout);
             bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
             bool timeout = totalmillis - pr.born > 5000;
             if(gone || timeout)
             {
+                conoutf("rpg: proj tick: fizzle, proj %d", pr.id);
+                fflush(stdout);
                 sendf(-1, 1, "ri2", N_RPG_PROJFIZZLE, pr.id);
                 rpg_projectiles.remove(i);
                 continue;
@@ -5078,14 +5172,41 @@ namespace server
                 vec push(t->state.o); push.sub(pr.pos); push.z = 0;
                 if(push.squaredlen() > 0.01f) push.normalize();
                 int hpbefore = t->state.health;
+                conoutf("rpg: proj tick: pre-dodamage, proj %d, target '%s', castercn %d", pr.id, t->name, pr.castercn);
+                fflush(stdout);
                 dodamage(t, caster, pr.damage, WEAP_FIST, push, false);
+                conoutf("rpg: proj tick: dodamage returned, target '%s' hp %d", t->name, t->state.health);
+                fflush(stdout);
+                conoutf("rpg: proj tick: pre-projhit, proj %d", pr.id);
+                fflush(stdout);
                 sendf(-1, 1, "ri4", N_RPG_PROJHIT, pr.id, pr.targetcn, pr.damage);
+                conoutf("rpg: proj tick: projhit sent, proj %d", pr.id);
+                fflush(stdout);
                 // Battlegrounds (v0.1.40): floating damage number, attacker only.
-                if(pr.castercn >= 0) sendf(pr.castercn, 1, "ri5", N_RPG_FLOATDMG, pr.damage, int(t->state.o.x*DMF), int(t->state.o.y*DMF), int((t->state.o.z+20)*DMF));
+                // FIX (v0.1.62): only send to a HUMAN caster. A bot caster has
+                // no screen to show the number on, and its client slot is not
+                // a valid send target — sendpacket does clients[n]->type with
+                // no bounds check, and a stale bot slot crashed the game here
+                // (v0.1.61-test: "pre-floatdmg, castercn 129" then crash).
+                // caster comes from rpg_projfind above (NULL when gone).
+                conoutf("rpg: proj tick: pre-floatdmg, proj %d, castercn %d", pr.id, pr.castercn);
+                fflush(stdout);
+                if(caster && caster->state.ai.type == ai::AI_TYPE_NONE) sendf(pr.castercn, 1, "ri5", N_RPG_FLOATDMG, pr.damage, int(t->state.o.x*DMF), int(t->state.o.y*DMF), int((t->state.o.z+20)*DMF));
+                conoutf("rpg: proj tick: floatdmg sent, proj %d", pr.id);
+                fflush(stdout);
+                conoutf("rpg: proj tick: pre-ability, proj %d", pr.id);
+                fflush(stdout);
                 const rpg::abilitydef &ab = rpg::ability(pr.ability);
+                conoutf("rpg: proj tick: ability ok, proj %d", pr.id);
+                fflush(stdout);
                 conoutf("rpg: projectile %s hits '%s' for %d (%d -> %d hp)",
                         ab.name, t->name, pr.damage, hpbefore, t->state.health);
+                fflush(stdout);
+                conoutf("rpg: proj tick: pre-applydot, proj %d", pr.id);
+                fflush(stdout);
                 rpg_applydot(caster, t, pr.ability, pr.level); // Venom Shot poison
+                conoutf("rpg: proj tick: hit done, proj %d", pr.id);
+                fflush(stdout);
                 rpg_projectiles.remove(i);
                 continue;
             }
@@ -5147,21 +5268,56 @@ namespace server
         bool bg_pvp = rpg::mapactive(smapname) && (m_ctf || m_koth || m_tff);
         loopvrev(rpg_dots)
         {
-            rpg_dot &d = rpg_dots[i];
-            clientinfo *t = rpg_projfind(d.targetcn, !bg_pvp);
+            // DoT crash hardening (Nov 8, .54 log): the .54 crash landed
+            // inside a Venom Shot tick, after the PvP gear log line and
+            // before the tick log line — i.e. inside dodamage or in the
+            // lines right after it. The old code held a reference into
+            // rpg_dots across dodamage, and dodamage can run death
+            // handling that mutates the vector (reallocation would leave
+            // the reference dangling). Snapshot the fields first, use the
+            // index (not the reference) after dodamage, and re-validate
+            // the dot still exists before touching it.
+            int idx = i;
+            int targetcn = rpg_dots[idx].targetcn;
+            int casterncn = rpg_dots[idx].casterncn;
+            int ability = rpg_dots[idx].ability;
+            int tickdmg = rpg_dots[idx].tickdmg;
+            int tickms = rpg_dots[idx].tickms;
+            clientinfo *t = rpg_projfind(targetcn, !bg_pvp);
             bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
-            if(gone || d.ticksleft <= 0) { rpg_dots.remove(i); continue; }
-            if(totalmillis < d.nexttick) continue;
-            d.nexttick += d.tickms;
-            d.ticksleft--;
-            clientinfo *caster = d.casterncn >= 0 ? rpg_projfind(d.casterncn, false) : NULL;
+            if(gone || rpg_dots[idx].ticksleft <= 0) { rpg_dots.remove(idx); continue; }
+            if(totalmillis < rpg_dots[idx].nexttick) continue;
+            rpg_dots[idx].nexttick += tickms;
+            rpg_dots[idx].ticksleft--;
+            clientinfo *caster = casterncn >= 0 ? rpg_projfind(casterncn, false) : NULL;
             vec nopush(0, 0, 0); // DoT: no knockback
             int hpbefore = t->state.health;
-            dodamage(t, caster, d.tickdmg, WEAP_FIST, nopush, false);
-            const rpg::abilitydef &ab = rpg::ability(d.ability);
+            int ticksleft = rpg_dots[idx].ticksleft;
+            // DIAGNOSTIC (v0.1.64): log the target's state at tick time. The
+            // .63 log showed a DoT ticking Janna AFTER her death was processed
+            // (2 -> -4 hp), which the 'gone' check above should have prevented
+            // by removing the dot. This line proves what the tick actually saw
+            // (state/hp) before dodamage runs.
+            conoutf("rpg: dot tick: due, target '%s', state %d, hp %d, ticksleft %d", t->name, t->state.state, t->state.health, ticksleft);
+            fflush(stdout);
+            dodamage(t, caster, tickdmg, WEAP_FIST, nopush, false);
+            // Diagnostic (Nov 8): if the next crash log shows this line,
+            // dodamage returned and the crash is after it; if it does not,
+            // the crash is inside dodamage.
+            conoutf("rpg: dot tick: dodamage returned for '%s'", t->name);
+            fflush(stdout); // Diagnostic (v0.1.65): flush so the next log proves dodamage returned.
+            // Re-validate: dodamage may have removed this dot or
+            // reallocated the vector, so only touch it if it is still
+            // the same dot at the same index.
+            if(idx >= rpg_dots.length() || rpg_dots[idx].targetcn != targetcn || rpg_dots[idx].ability != ability) continue;
+            const rpg::abilitydef &ab = rpg::ability(ability);
             conoutf("rpg: %s ticks '%s' for %d (%d -> %d hp, %d ticks left)",
-                    ab.name, t->name, d.tickdmg, hpbefore, t->state.health, d.ticksleft);
-            if(d.ticksleft <= 0) rpg_dots.remove(i);
+                    ab.name, t->name, tickdmg, hpbefore, t->state.health, ticksleft);
+            fflush(stdout); // Diagnostic (v0.1.66): flush so the next log proves the tick result printed.
+            if(ticksleft <= 0) rpg_dots.remove(idx);
+            // Diagnostic (v0.1.66): prove the tick fully completed (re-validation, ability lookup, result print, removal check).
+            conoutf("rpg: dot tick: done, target '%s', ticksleft %d", t->name, ticksleft);
+            fflush(stdout);
         }
     }
 
@@ -5180,6 +5336,16 @@ namespace server
         bool bg_botcast = cq->state.ai.type != ai::AI_TYPE_NONE && bg_match_active && !bg_start_active && interm <= 0;
         if(cq->state.ai.type != ai::AI_TYPE_NONE && !bg_botcast) return; // only real players cast, except BG bots in a match
         int msgcn = cq->state.ai.type != ai::AI_TYPE_NONE ? cq->ownernum : cq->clientnum;
+        // .58 hit-crash bracket (Nov 9): .53/.57 both crashed right after a
+        // bot Spark Bolt hit a human, with the floatdmg diagnostic never
+        // firing, while .54/.55 bot casts completed fine. Log the routing
+        // for bot casts so the next log shows whether sendf was given a
+        // sane client. fflush after each cast diagnostic: stdout is fully
+        // buffered, so without it a crash loses the tail and the log can
+        // not tell whether the crash is before or after a diagnostic.
+        if(cq->state.ai.type != ai::AI_TYPE_NONE)
+            conoutf("rpg: cast: bot '%s' msgcn %d ownernum %d clientnum %d", cq->name, msgcn, cq->ownernum, cq->clientnum);
+            fflush(stdout);
         const rpg::abilitydef &ab = rpg::ability(ability);
         if(cq->state.state != CS_ALIVE)
         {
@@ -5295,31 +5461,55 @@ namespace server
             vec staffdir(push); staffdir.mul(10); pr.pos.add(staffdir);
             pr.born = totalmillis;
             rpg_projectiles.add(pr);
+            conoutf("rpg: cast: proj pre-proj, msgcn %d", msgcn);
+            fflush(stdout);
             sendf(-1, 1, "ri8", N_RPG_PROJ, pr.id, pr.castercn, pr.targetcn, ability,
                   int(pr.pos.x*DMF), int(pr.pos.y*DMF), int(pr.pos.z*DMF));
             conoutf("rpg: '%s' casts %s at '%s' (projectile %d, %d dmg)",
                     cq->name, ab.name, target->name, pr.id, castdmg);
+            fflush(stdout);
             defformatstring(cmsg)("\f2%s \f7flies toward %s.", ab.name, target->name);
+            conoutf("rpg: cast: proj pre-servmsg, msgcn %d", msgcn);
+            fflush(stdout);
             sendf(msgcn, 1, "ris", N_SERVMSG, cmsg);
             // push fresh mana + cooldown to the caster for the RPG HUD
+            conoutf("rpg: cast: proj pre-mana, msgcn %d", msgcn);
+            fflush(stdout);
             rpg::getmana(cq->name, mana, maxmana);
             sendf(msgcn, 1, "ri3", N_RPG_MANA, mana, maxmana);
+            conoutf("rpg: cast: proj pre-cd, msgcn %d", msgcn);
+            fflush(stdout);
             sendf(msgcn, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+            conoutf("rpg: cast: proj done, msgcn %d", msgcn);
+            fflush(stdout);
             return;
         }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
         rpg_applydot(cq, target, ability, level); // Rend bleed (no-op for non-DoT abilities)
         conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
+        fflush(stdout);
         defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
+        conoutf("rpg: cast: pre-servmsg, msgcn %d", msgcn);
+        fflush(stdout);
         sendf(msgcn, 1, "ris", N_SERVMSG, msg);
         // Battlegrounds (v0.1.40): floating damage number, attacker
         // only (Ed: competitive, see damage dealt). Gold, above the
         // target's head; the client renders it via particle_text.
+        conoutf("rpg: cast: pre-floatdmg, msgcn %d", msgcn);
+        fflush(stdout);
         sendf(msgcn, 1, "ri5", N_RPG_FLOATDMG, castdmg, int(target->state.o.x*DMF), int(target->state.o.y*DMF), int((target->state.o.z+20)*DMF));
+        // CTF crash diagnostic (Nov 8, .53 crash after a bot Spark Bolt hit
+        // at 95 hp, no death): bracket the sends after the hits message so
+        // the next log shows whether the crash is in floatdmg, mana/cd, or
+        // after the cast returns (client-side processing).
+        conoutf("rpg: cast: floatdmg sent, '%s' -> '%s'", cq->name, target->name);
+        fflush(stdout);
         // push fresh mana + cooldown to the caster for the RPG HUD
         rpg::getmana(cq->name, mana, maxmana);
         sendf(msgcn, 1, "ri3", N_RPG_MANA, mana, maxmana);
         sendf(msgcn, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+        conoutf("rpg: cast: mana/cd sent, '%s' cast done", cq->name);
+        fflush(stdout);
     }
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
@@ -5379,6 +5569,55 @@ namespace server
         conoutf("rpg: vwep for '%s' -> %s", cq->name, path && path[0] ? path : "(model default)");
     }
 
+    // Armor attach (Nov 10, Ed's "true armor swapping"): broadcast this
+    // client's equipped armor attach models, one N_RPG_ARMOR per slot.
+    // Called on every equip/unequip so all clients render the new armor.
+    static void rpg_sendarmor(clientinfo *cq)
+    {
+        static const int slots[5] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE };
+        loopi(5)
+        {
+            const char *path = rpg::equippedattach(cq->name, slots[i]);
+            sendf(-1, 1, "riiis", N_RPG_ARMOR, cq->clientnum, slots[i], path ? path : "");
+        }
+    }
+
+    // Outfit appearance (Nov 10, Warrior equip test): resolve a model dir to
+    // its playermodel index by scanning the game_fps.cfg playermodeldir
+    // aliases, mirroring the client's rpg_modelidx. Returns -1 when the dir
+    // is not registered.
+    static int rpg_modelidx(const char *model)
+    {
+        if(!model || !model[0]) return -1;
+        loopi(16)
+        {
+            defformatstring(alias)("playermodeldir%d", i);
+            const char *dir = getalias(alias);
+            if(dir && dir[0] && !strcmp(dir, model)) return i;
+        }
+        return -1;
+    }
+
+    static void rpg_sendappear(clientinfo *cq, int pmidx) // broadcast this client's appearance change
+    {
+        sendf(-1, 1, "ri3", N_RPG_APPEAR, cq->clientnum, pmidx);
+        conoutf("rpg: appear for '%s' -> playermodel %d", cq->name, pmidx);
+    }
+
+    // Apply an outfit appearance swap after a successful equip/unequip and
+    // broadcast it live. suffix = outfit suffix to apply, or NULL to revert
+    // to the base model. No-op (and returns false) when the swap fails.
+    static bool rpg_applyoutfit(clientinfo *cq, const char *suffix)
+    {
+        char nm[64];
+        if(!rpg::applyoutfit(cq->name, suffix, nm, sizeof(nm))) return false;
+        int pm = rpg_modelidx(nm);
+        if(pm < 0) { conoutf("rpg: appear: model '%s' not registered, no live swap", nm); return false; }
+        cq->state.playermodel = pm;
+        rpg_sendappear(cq, pm);
+        return true;
+    }
+
     void rpg_equip(clientinfo *cq, const char *itemid)
     {
         if(!rpg_checkinv(cq)) return;
@@ -5389,6 +5628,10 @@ namespace server
             defformatstring(msg)("\f2%s \f7equipped.", rpg::itemname(id));
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
             rpg_sendvwep(cq); // weapon model swap is visible to everyone
+            rpg_sendarmor(cq); // armor attach swap is visible to everyone
+            // Outfit equip: swap the character's appearance to the outfit
+            // model and tell every client to render the new playermodel live.
+            if(id >= 0 && rpg::item(id).outfit) rpg_applyoutfit(cq, rpg::item(id).outfit);
             rpg_syncinv(cq);
         }
         else
@@ -5402,9 +5645,15 @@ namespace server
     void rpg_unequip(clientinfo *cq, int slot)
     {
         if(!rpg_checkinv(cq)) return;
+        // Outfit unequip: remember whether the slot held an outfit BEFORE the
+        // unequip, so the appearance can revert to the base model after.
+        int eid = rpg::equippeditem(cq->name, slot);
+        bool wasoutfit = eid >= 0 && rpg::item(eid).outfit;
         if(rpg::unequipslot(cq->name, slot))
         {
             rpg_sendvwep(cq);
+            rpg_sendarmor(cq);
+            if(wasoutfit) rpg_applyoutfit(cq, NULL);
             rpg_syncinv(cq);
         }
         else sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Nothing equipped there.");
@@ -5537,6 +5786,22 @@ namespace server
             sendf(cq->clientnum, 1, "ris", N_SERVMSG, msg);
             conoutf("rpg: '%s' buys %s for %d Embers", cq->name, rpg::itemname(id), d.emberprice);
             rpg_syncinv(cq);
+            return;
+        }
+        // Vendor rule (Ed, Nov 13): Glimmer sells only items the buyer
+        // can use. Classed weapons/armor require the buyer's class to
+        // match (rpg::buyallowed mirrors the equip gate: weaponcat via
+        // weaponcatallowed, armorclass via strcmp, class from
+        // classforname — archetype first, model-dir fallback); unclassed
+        // items (rings, necklaces, cape, puglin stick) are universal.
+        // The shop display hides other classes' gear, but a forged
+        // rpgbuy for another class's item still dies here, with no item
+        // and no charge. Unknown class fails closed. PvP (ember-price)
+        // items keep their own pvpclass gate above and never reach this.
+        if(!rpg::buyallowed(cq->name, itemid))
+        {
+            rpg_qmsg(cq, "That is not for your class.");
+            conoutf("rpg: buy refused: '%s' tried %s (wrong class)", cq->name, rpg::itemname(id));
             return;
         }
         int price = d.value;
@@ -6065,6 +6330,15 @@ namespace server
 
     void serverupdate()
     {
+        // DIAGNOSTIC (v0.1.67): same as ai.cpp - bracket the server frame
+        // start/end, throttled to 1/sec. If the next log ends with
+        // "server update start" and no "server update done", the crash is
+        // inside serverupdate (regen/projectiletick/dottick/bg_tick/loot/
+        // mana/ambient/behavior/autosave); if both fire, it is after the
+        // server frame (client frame or message processing).
+        static int diag_srv_last = 0;
+        bool diag_srv_log = totalmillis - diag_srv_last >= 1000;
+        if(diag_srv_log) { diag_srv_last = totalmillis; conoutf("rpg: server update start"); fflush(stdout); }
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
         rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
@@ -6211,6 +6485,17 @@ namespace server
                     if(bg_isbgmode(gamemode) && rpg::mapactive(smapname))
                     {
                         bg_match_active = true;
+                        // Bots fill in the battleground, not the RPG world
+                        // (Ed, Nov 8): the old queue-end fill created bots
+                        // on rpg_01 and carried them over via resetai(),
+                        // which held the load black into the countdown.
+                        // Now the map loads bot-free and the fill runs
+                        // here, after load completes and before the
+                        // countdown, so bots fill whatever spots are
+                        // missing (want = 10v10 - humans) on the BG map
+                        // itself, where addai() assigns proper teams.
+                        if(!bg_botfilled) { bg_botfilled = true; bg_fillbots(); }
+                        bg_assignbotteams();
                         bg_points_reset(gamemode, smapname);
                         bg_start_active = true;
                         bg_start_until = totalmillis + 10000;
@@ -6311,6 +6596,7 @@ namespace server
             }
         }
 
+        if(diag_srv_log) { conoutf("rpg: server update done"); fflush(stdout); }
         shouldstep = clients.length() > 0;
     }
 
@@ -6627,12 +6913,19 @@ namespace server
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // Everyone learns this client's equipped weapon model; the newcomer learns everyone's.
         rpg_sendvwep(ci);
+        rpg_sendarmor(ci);
         loopv(clients)
         {
             clientinfo *other = clients[i];
             if(other == ci) continue;
             const char *path = rpg::equippedvwep(other->name);
             sendf(ci->clientnum, 1, "riis", N_RPG_VWEP, other->clientnum, path ? path : "");
+            static const int aslots[5] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE };
+            loopj(5)
+            {
+                const char *apath = rpg::equippedattach(other->name, aslots[j]);
+                sendf(ci->clientnum, 1, "riiis", N_RPG_ARMOR, other->clientnum, aslots[j], apath ? apath : "");
+            }
         }
 
         #ifdef SERVER

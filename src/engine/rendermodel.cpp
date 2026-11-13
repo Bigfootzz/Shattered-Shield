@@ -8,6 +8,7 @@ VAR(oqdynent, 0, 1, 1);
 VAR(animationinterpolationtime, 0, 150, 1000);
 
 model *loadingmodel = NULL;
+int hiddenplayermeshes = 0; // armor swap: body-part meshes to hide this render
 
 #include "ragdoll.h"
 #include "animmodel.h"
@@ -35,6 +36,7 @@ UNUSED static int __dummy__##modelclass = addmodeltype((modeltype), __loadmodel_
 #include "obj.h"
 #include "smd.h"
 #include "iqm.h"
+#include "gltf.h"
 
 MODELTYPE(MDL_MD2, md2);
 MODELTYPE(MDL_MD3, md3);
@@ -42,6 +44,7 @@ MODELTYPE(MDL_MD5, md5);
 MODELTYPE(MDL_OBJ, obj);
 MODELTYPE(MDL_SMD, smd);
 MODELTYPE(MDL_IQM, iqm);
+MODELTYPE(MDL_GLTF, gltf);
 
 #define checkmdl if(!loadingmodel) { conoutf(CON_ERROR, "not loading a model"); return; }
 
@@ -544,11 +547,16 @@ void flushpreloadedmodels(bool msg)
     {
         loadprogress = float(i+1)/preloadmodels.length();
         int pt0 = SDL_GetTicks(); // boot-perf instrumentation (Oct 21)
+        // DIAG .85: flush each step so a crash during a model load or
+        // mesh preload leaves the model name and stage in stdout.txt.
+        printf("[DIAG] flushpreload: loading '%s'\n", preloadmodels[i]); fflush(stdout);
         model *m = loadmodel(preloadmodels[i], -1, msg);
         if(!m) { if(msg) conoutf(CON_WARN, "could not load model: %s", preloadmodels[i]); }
         else
         {
+            printf("[DIAG] flushpreload: preloadmeshes '%s'\n", preloadmodels[i]); fflush(stdout);
             m->preloadmeshes();
+            printf("[DIAG] flushpreload: done '%s'\n", preloadmodels[i]); fflush(stdout);
         }
         printf("Init: [model] '%s' took %dms\n", preloadmodels[i], SDL_GetTicks() - pt0);
     }
@@ -744,6 +752,7 @@ struct batchedmodel
     int basetime, basetime2, flags;
     dynent *d;
     int attached;
+    int hidden; // armor swap: body-part meshes to hide for this model (0 = none)
     occludequery *query;
 };
 struct modelbatch
@@ -799,7 +808,12 @@ void renderbatchedmodel(model *m, batchedmodel &b)
         if(b.flags&MDL_GHOST) anim |= ANIM_GHOST;
     }
 
+    // Armor swap (Nov 11): the hide bits live on the batched entry now,
+    // because the batch renders later (endmodelbatches), after renderplayer
+    // cleared the global. Set them for this model, clear after.
+    hiddenplayermeshes = b.hidden;
     m->render(anim, b.basetime, b.basetime2, b.pos, b.yaw, b.pitch, b.d, a, b.color, b.dir, b.transparent);
+    hiddenplayermeshes = 0;
 }
 
 struct transparentmodel
@@ -1111,6 +1125,7 @@ void rendermodel(entitylight *light, const char *mdl, int anim, const vec &o, fl
         modelbatch &mb = addbatchedmodel(m);
         batchedmodel &b = mb.batched.add();
         b.query = modelquery;
+        b.hidden = hiddenplayermeshes; // armor swap: capture the hide bits at queue time (the batch renders later, after renderplayer clears the global)
         b.pos = o;
         b.color = lightcolor;
         b.dir = lightdir;

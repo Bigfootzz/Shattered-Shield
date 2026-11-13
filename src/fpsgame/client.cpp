@@ -1,4 +1,5 @@
 #include "game.h"
+#include "diaglog.h"
 #include "engine.h"
 #include <vector>
 #include "rpg/rpg.h"
@@ -960,6 +961,12 @@ namespace game
         float cx, cy; rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
 
         // hover state (real pick every frame; logs transitions only)
+        // DIAGNOSTIC (v0.1.64): hovChanged tracks whether the hover state
+        // changed this frame. The .63 log ended after a hover change with a
+        // bare "[" — the crash is in the frame code after the hover, in a path
+        // with no diagnostics. The "targeting done" line at the end of this
+        // function proves updatetargeting() ran to completion on such a frame.
+        bool hovChanged = false;
         rpgpickresult pk = rpg_pick(cx, cy, w, h);
         int hov = rpg::RPG_HOVER_DEFAULT;
         if(pk.kind == 2) hov = rpg::RPG_HOVER_HOSTILE;
@@ -968,6 +975,7 @@ namespace game
         if(hov != rpg::hoverstate())
         {
             rpg::sethoverstate(hov);
+            hovChanged = true;
             conoutf("rpg: hover %s", hov == rpg::RPG_HOVER_HOSTILE ? "hostile" : (hov == rpg::RPG_HOVER_LOOT ? "loot" : (hov == rpg::RPG_HOVER_QUEST ? "quest" : (hov == rpg::RPG_HOVER_TURNIN ? "turnin" : "default"))));
         }
 
@@ -1100,6 +1108,13 @@ namespace game
                 }
             }
         }
+        // DIAGNOSTIC (v0.1.64): proves updatetargeting() ran to completion on
+        // a frame where the hover changed. If the next log shows a hover line
+        // without this line (and without an early-return log like "target
+        // lost" or "auto-attack stopped"), the crash is inside this function
+        // after the hover. If this line shows, the crash is after this
+        // function returns (rendering or the server loop).
+        if(hovChanged) { conoutf("rpg: frame: targeting done"); fflush(stdout); }
     }
     ICOMMAND(rpginventory, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpginv"); });
     ICOMMAND(rpgcharacter, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpgchar"); });
@@ -1415,14 +1430,21 @@ namespace game
     });
     // --- RPG character screen (C key) WoW-style additions, read-only ---
     // rpgclass: character archetype ("Ranger"/"Warrior"/"Magi") for the
-    // "Level N Class" header line. Same client-side lookup the hotbar
-    // already uses (rpg_castslot); "" when unknown.
+    // "Level N Class" header line and the class-filtered shop listings
+    // (Glimmer's rpgvendor, Blasque's rpgvendor_pvp). Uses
+    // rpg::classforname — archetype first, model-dir fallback — the same
+    // derivation as the server's equip/buy gates, so the display can
+    // never disagree with the server about the player's class. The old
+    // chararchetype-only lookup read the stored archetype column alone,
+    // which the codebase documents as unreliable/empty ("DB write
+    // issue"); a character with an empty stored archetype showed no
+    // class gear at all. "" when unknown (fail closed, same as before).
     ICOMMAND(rpgclass, "", (), {
         if(!player1) result("");
         else
         {
             char arch[32]; arch[0] = '\0';
-            rpg::chararchetype(player1->name, arch, sizeof(arch));
+            rpg::classforname(player1->name, arch, sizeof(arch));
             result(arch);
         }
     });
@@ -1800,6 +1822,7 @@ namespace game
 
     void changemapserv(const char *name, int mode)        // forced map change from the server
     {
+        diaglog("changemapserv: entry name='%s' mode=%d", name ? name : "", mode);
         // Battlegrounds (v0.1.40): remember the previous map/mode for
         // the Abbott return spawn, and clear the queue display (the
         // match map load replaces it with the start countdown).
@@ -1851,18 +1874,30 @@ namespace game
         // never fired on first entry — Maren/Tomas/Corvin then cold-decoded
         // on the first frame instead of behind the progress bar.
         if(rpg::mapactive(name))
+        {
+            diaglog("changemapserv: warming %d NPC models", rpg::npccount());
             for(int i = 0; i < rpg::npccount(); i++)
             {
                 const rpg::npcdef *nd = rpg::npcat(i);
-                if(nd && nd->model && nd->model[0]) preloadmodel(nd->model);
+                if(nd && nd->model && nd->model[0])
+                {
+                    diaglog("changemapserv: preload NPC model '%s'", nd->model);
+                    preloadmodel(nd->model);
+                    diaglog("changemapserv: preloaded NPC model '%s'", nd->model);
+                }
             }
+            diaglog("changemapserv: NPC models warmed");
+        }
         int t0 = SDL_GetTicks();
+        diaglog("changemapserv: calling load_world('%s')", name ? name : "");
         if((m_edit && !name[0]) || !load_world(name))
         {
             emptymap(0, true, name);
             senditemstoserver = false;
         }
+        diaglog("changemapserv: load_world returned, calling startgame()");
         startgame();
+        diaglog("changemapserv: startgame returned");
         bgloading = false;
         if(rpg_loadprofile) conoutf("rpgprof: changemapserv(%s): load_world+startgame %dms", name ? name : "", SDL_GetTicks()-t0);
         // v0.1.40 (Ed Oct 30, .39 note 5): entering an RPG map clears the
@@ -3518,6 +3553,24 @@ namespace game
                 rpg::setvwep(cn, path);
                 break;
             }
+            case N_RPG_ARMOR:
+            {
+                int cn = getint(p);
+                int slot = getint(p);
+                string path; getstring(path, p);
+                diaglog("N_RPG_ARMOR: clientnum=%d slot=%d path='%s'", cn, slot, path);
+                if(slot == rpg::SLOT_CAPE) rpg::setcape(cn, path);
+                else rpg::setarmor(cn, slot, path);
+                break;
+            }
+            case N_RPG_APPEAR:
+            {
+                int cn = getint(p);
+                int pm = getint(p);
+                fpsent *d = getclient(cn);
+                if(d && pm >= 0 && pm < NUMPLAYERMODELS) d->playermodel = pm;
+                break;
+            }
             case N_RPG_MANA:
             {
                 int mana = getint(p), maxmana = getint(p);
@@ -3657,6 +3710,9 @@ namespace game
                 int dmg = getint(p);
                 vec pos(getint(p)/DMF, getint(p)/DMF, getint(p)/DMF);
                 defformatstring(txt)("%d", dmg);
+                // CTF crash diagnostic (Nov 8): log receipt so the next crash
+                // log shows whether the client processed the floatdmg.
+                conoutf("rpg: floatdmg recv %d at (%.0f, %.0f, %.0f)", dmg, pos.x, pos.y, pos.z);
                 particle_textcopy(pos, txt, PART_TEXT, 1, 0xFFD24A, 2.0f, 0);
                 break;
             }

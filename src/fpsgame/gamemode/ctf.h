@@ -342,6 +342,10 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
         loopv(flags) if(flags[i].owner==ci->clientnum)
         {
             flag &f = flags[i];
+            // CTF death-crash diagnostic (Nov 8): log the drop so a
+            // crash log shows whether death processing reached the flag drop.
+            conoutf("ctf: dropflag: '%s' (cn %d) drops flag %d (team %d) at (%.0f, %.0f, %.0f)",
+                    ci->name, ci->clientnum, i, f.team, ci->state.o.x, ci->state.o.y, ci->state.o.z);
             if(m_protect && insidebase(f, ci->state.o))
             {
                 returnflag(i);
@@ -365,8 +369,16 @@ struct ctfclientmode : clientmode, ai::bot::BotGameMode
 
     bool died(clientinfo *ci, clientinfo *actor)
     {
+        // CTF death-crash diagnostic (Nov 8): log every CTF death so a
+        // crash log shows whether death processing entered died() at all.
+        conoutf("ctf: died: victim '%s' (cn %d) killed by '%s' (cn %d)",
+                ci->name, ci->clientnum, actor ? actor->name : "<none>", actor ? actor->clientnum : -1);
         dropflag(ci, ctftkpenalty && actor && actor != ci && isteam(actor->team, ci->team) ? actor : NULL);
         loopv(flags) if(flags[i].dropper == ci->clientnum) { flags[i].dropper = -1; flags[i].dropcount = 0; }
+        // CTF death-crash diagnostic (Nov 8, .55 follow-up): log when died()
+        // completes, so the next crash log shows whether it got past dropflag
+        // and the flag loop or died inside them.
+        conoutf("ctf: died: done for '%s' (cn %d)", ci->name, ci->clientnum);
         return false;
     }
 

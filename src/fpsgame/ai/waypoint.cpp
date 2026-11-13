@@ -694,7 +694,15 @@ namespace ai
     {
         string wptname;
         if(!getwaypointfile(mname, wptname)) return;
-        if(!force && (waypoints.length() || !strcmp(loadedwaypoints, wptname))) return;
+        // Battleground waypoint fix (Ed, Nov 10): the old guard returned
+        // early whenever ANY waypoints were loaded, so after the RPG map
+        // loaded its waypoints the battleground map never got its own.
+        // Bots on Twin Keeps then had no valid waypoints, so dowait /
+        // randomnode could not pick a node and the bots sat in WAIT until
+        // bumped (a bump puts an enemy in front of them, so they PURSUE
+        // instead of navigating). Only skip the reload when the file
+        // already loaded IS this map's file; a map change reloads.
+        if(!force && !strcmp(loadedwaypoints, wptname)) return;
 
         stream *f = opengzfile(wptname, "rb");
         if(!f) return;

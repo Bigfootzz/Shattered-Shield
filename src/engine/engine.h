@@ -131,6 +131,11 @@ extern int scr_w, scr_h;
 extern int zpass, glowpass;
 
 extern vector<int> entgroup;
+// Armor swap (Nov 10): bitmask of player body-part meshes to hide on the
+// next model render. Set by the game before rendering a player with armor
+// equipped, cleared after. Bits: 1=Body_Head, 2=Body_Torso, 4=Body_Legs,
+// 8=Body_Feet. The engine only knows mesh names, not RPG armor.
+extern int hiddenplayermeshes;
 
 // rendertext
 struct font
