@@ -690,9 +690,42 @@ namespace game
     static string rpg_dlg_npc;
     static std::vector<std::string> rpg_dlg_lines;
     static string rpg_dlg_resps[4];
+    static std::vector<std::string> rpg_dlg_resp_lines[4]; // pre-wrapped lines per response (Notes 98/99)
     static int rpg_dlg_nresp = 0;
     static bool rpg_dlg_open = false;
     static int rpg_dlg_npcidx = -1; // dialogue anchor for walk-away auto-close (index into rpg::npcat)
+    // word-wrap one paragraph (no newlines) onto lines of at most width
+    // chars and append them to out. 36 chars at the 0.6 dialog scale is
+    // 21.6 FONTW, inside the 24-FONTW column with 2.4 FONTW of breathing
+    // room (Note 96).
+    static void rpg_dlg_wordwrap(const char *para, std::vector<std::string> &out, size_t width)
+    {
+        const char *w = para;
+        while(*w)
+        {
+            size_t len = strlen(w);
+            if(len > width)
+            {
+                len = width;
+                while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
+                if(len == 0) len = width;
+            }
+            char line[72];
+            memcpy(line, w, len); line[len] = '\0';
+            out.push_back(std::string(line));
+            w += len;
+            while(*w == ' ') w++;
+        }
+    }
+    // split text into paragraphs on any newline form, then word-wrap each.
+    // The quest content parser (parsecontentfile, items.cpp) reads
+    // quests.cfg directly and does NOT run CubeScript unescapestring, so
+    // a ^n in quests.cfg arrives here as the literal two characters ^ + n
+    // (and a \n arrives as a literal backslash-n). Accept all three: a
+    // real 0x0A newline, the two-character sequence \ + n, and the
+    // two-character sequence ^ + n. (Note 99: the .114 fix only handled
+    // the first two, so the ^n in Lady Abbott's greeting rendered as the
+    // literal text "^N" and the greeting stayed one long string.)
     static void rpg_dlg_wrap(const char *text)
     {
         rpg_dlg_lines.clear();
@@ -701,51 +734,51 @@ namespace game
         char para[512];
         while(*p)
         {
-            // split paragraphs on a newline first. CubeScript's newline
-            // escape is ^n, NOT \n (command.cpp unescapestring only treats
-            // ^ as the escape char), so a config author writing \n leaves
-            // a literal backslash-n in the string. Accept BOTH: a real
-            // 0x0A newline, or the two-character sequence \ + n.
-            // FIX (Note 96, Nov 14): the old code only looked for a real
-            // '\n', so the Note 89 \n in quests.cfg never split and the
-            // whole 61-char greeting wrapped at 40 chars.
             const char *nl = strchr(p, '\n');
             const char *lit = NULL;
-            for(const char *q = p; *q && q[1]; q++) if(q[0] == '\\' && q[1] == 'n') { lit = q; break; }
             int skip = 1;
+            for(const char *q = p; *q && q[1]; q++)
+            {
+                if((q[0] == '\\' || q[0] == '^') && q[1] == 'n') { lit = q; break; }
+            }
             if(lit && (!nl || lit < nl)) { nl = lit; skip = 2; }
             size_t plen = nl ? (size_t)(nl - p) : strlen(p);
             if(plen >= sizeof(para)) plen = sizeof(para) - 1;
             memcpy(para, p, plen); para[plen] = '\0';
-            // then wrap the paragraph on word boundaries. v0.1.30: 40 chars,
-            // not 50 - the dialogue window is now the Inventory frame
-            // (24 FONTW column, Ed Oct 27), and the text renders at
-            // 0.6 scale, so 40*0.6 = 24 fits the column exactly. The
-            // old 50-char wrap drew 30-FONTW lines that would stretch
-            // the 24 column past the frame.
-            // FIX (Note 96, Nov 14): 40 chars at 0.6 scale is exactly
-            // 24.0 FONTW = the column width, zero margin, so wide glyphs
-            // (W) clip at the edge. Wrap at 36 (36*0.6 = 21.6 FONTW,
-            // leaving 2.4 FONTW of breathing room).
-            const char *w = para;
-            while(*w)
-            {
-                size_t len = strlen(w);
-                if(len > 36)
-                {
-                    len = 36;
-                    while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
-                    if(len == 0) len = 36;
-                }
-                char line[72];
-                memcpy(line, w, len); line[len] = '\0';
-                rpg_dlg_lines.push_back(std::string(line));
-                w += len;
-                while(*w == ' ') w++;
-            }
+            rpg_dlg_wordwrap(para, rpg_dlg_lines, 36);
             if(!nl) break;
             p = nl + skip;
         }
+    }
+    // wrap one response string the same way, into its own line vector.
+    // Responses are drawn with a "N. " prefix (3 chars) on the first line,
+    // so wrap at 33: 33 + 3 = 36, the same 21.6 FONTW as the greeting.
+    // (Notes 98/99: responses were never wrapped, so a 42-char option
+    // overflowed the 24-FONTW column and clipped at the right edge.)
+    static void rpg_dlg_wrap_resp(int idx, const char *text)
+    {
+        rpg_dlg_resp_lines[idx].clear();
+        if(!text) return;
+        const char *p = text;
+        char para[512];
+        while(*p)
+        {
+            const char *nl = strchr(p, '\n');
+            const char *lit = NULL;
+            int skip = 1;
+            for(const char *q = p; *q && q[1]; q++)
+            {
+                if((q[0] == '\\' || q[0] == '^') && q[1] == 'n') { lit = q; break; }
+            }
+            if(lit && (!nl || lit < nl)) { nl = lit; skip = 2; }
+            size_t plen = nl ? (size_t)(nl - p) : strlen(p);
+            if(plen >= sizeof(para)) plen = sizeof(para) - 1;
+            memcpy(para, p, plen); para[plen] = '\0';
+            rpg_dlg_wordwrap(para, rpg_dlg_resp_lines[idx], 33);
+            if(!nl) break;
+            p = nl + skip;
+        }
+        if(rpg_dlg_resp_lines[idx].empty()) rpg_dlg_resp_lines[idx].push_back(std::string(text));
     }
     ICOMMAND(rpg_dlg_npc, "", (), result(rpg_dlg_npc));
     ICOMMAND(rpg_dlg_lines, "", (), intret((int)rpg_dlg_lines.size()));
@@ -754,6 +787,10 @@ namespace game
     ICOMMAND(rpg_dlg_n, "", (), intret(rpg_dlg_nresp));
     ICOMMAND(rpg_dlg_resp, "i", (int *i),
         result(*i >= 0 && *i < rpg_dlg_nresp ? rpg_dlg_resps[*i] : ""));
+    ICOMMAND(rpg_dlg_resp_lines, "i", (int *i),
+        intret(*i >= 0 && *i < rpg_dlg_nresp ? (int)rpg_dlg_resp_lines[*i].size() : 0));
+    ICOMMAND(rpg_dlg_resp_line, "ii", (int *i, int *j),
+        result(*i >= 0 && *i < rpg_dlg_nresp && *j >= 0 && *j < (int)rpg_dlg_resp_lines[*i].size() ? rpg_dlg_resp_lines[*i][*j].c_str() : ""));
     ICOMMAND(rpgdlgo, "", (), intret(rpg_dlg_open ? 1 : 0)); // 1 while the dialogue panel is open
     static bool rpg_isdlgo() { return rpg_dlg_open; } // v0.1.42: click-path dialogue gate
     ICOMMAND(rpgrespond, "i", (int *i), { if(!require_hardware_event("rpgrespond")) return; if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i); });
@@ -3971,7 +4008,7 @@ namespace game
                     }
                     rpg_dlg_wrap(text);
                     rpg_dlg_nresp = min(nresp, 4);
-                    loopi(rpg_dlg_nresp) copystring(rpg_dlg_resps[i], rs[i]);
+                    loopi(rpg_dlg_nresp) { copystring(rpg_dlg_resps[i], rs[i]); rpg_dlg_wrap_resp(i, rs[i]); }
                     rpg_dlg_open = true;
                     // Click-to-select ring (Nov 13): the dialogue's NPC
                     // gets the gold ring marker too, so F-talk with the

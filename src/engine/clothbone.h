@@ -204,8 +204,15 @@ static void cape_update(skeleton *skel, dualquat *bdata, const matrix3x4 &worldm
     bool firstframe = !cape.initialized;
 
     // First run: build the joint list from the skeleton and capture the
-    // bind pose (the 1-frame identity animation means bdata IS the bind
-    // pose right now, before any solver override).
+    // bind pose from the skeleton's ABSOLUTE bind transforms
+    // (bones[i].base), NOT from bdata. The 1-frame identity animation
+    // ("cape_bind") makes bdata the IDENTITY for every bone (the IQM
+    // loader's frame = pose * invbase composes to identity when the
+    // pose IS the bind pose), so reading bdata gives (0,0,0) for every
+    // joint, rest lengths of 0, and the solver collapses the whole cape
+    // to a point at the neck — exactly the .114 playtest symptom (Note
+    // 100: cape renders as a small patch at the neck instead of draping
+    // down the back). bones[i].base is the true absolute bind pose.
     if(firstframe)
     {
         cape.joints.shrink(0);
@@ -231,10 +238,11 @@ static void cape_update(skeleton *skel, dualquat *bdata, const matrix3x4 &worldm
             j.pinned = (b.parent < 0) ||
                 (b.name && strlen(b.name) == 6 && b.name[0] == 'c' && b.name[1] == 'h' &&
                  b.name[3] == '_' && b.name[4] == 'b' && b.name[5] == '1');
-            // Model-space bind position of this bone.
-            vec mpos = bdata[b.interpindex].transform(vec(0, 0, 0));
+            // Model-space bind position of this bone, from the skeleton's
+            // absolute bind transform (NOT bdata — see above).
+            vec mpos = b.base.transform(vec(0, 0, 0));
             cape.restpos.add(mpos);
-            cape.restorient.add(bdata[b.interpindex].real);
+            cape.restorient.add(b.base.real);
             cape.restaxis.add(vec(0, 0, 0));
             cape.childidx.add(-1);
             bone2joint[i] = cape.joints.length();

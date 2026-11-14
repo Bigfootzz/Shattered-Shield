@@ -543,9 +543,14 @@ namespace ai
             // waypoint and route to it directly, so the bot starts moving
             // toward the action instead of waiting for a bump. Only on
             // battleground modes; other maps keep the old behavior.
+            // FIX (Note 102, Nov 14): the radius was 0, and
+            // closestwaypoint only returns waypoints within its radius
+            // (dist < mindist*mindist), so it always returned -1 and
+            // this fallback never ran. Use SIGHTMAX so it finds the
+            // closest waypoint within 1024 units.
             if(m_ctf || m_koth || m_tff)
             {
-                int n = closestwaypoint(d->feetpos(), 0, true, d);
+                int n = closestwaypoint(d->feetpos(), SIGHTMAX, true, d);
                 if(n >= 0 && n != d->lastnode && makeroute(d, b, n))
                 {
                     ai->switchstate(b, AI_S_INTEREST, AI_T_NODE, ai->route[0]);
