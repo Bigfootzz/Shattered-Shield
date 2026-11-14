@@ -701,8 +701,19 @@ namespace game
         char para[512];
         while(*p)
         {
-            // split paragraphs on \n first
+            // split paragraphs on a newline first. CubeScript's newline
+            // escape is ^n, NOT \n (command.cpp unescapestring only treats
+            // ^ as the escape char), so a config author writing \n leaves
+            // a literal backslash-n in the string. Accept BOTH: a real
+            // 0x0A newline, or the two-character sequence \ + n.
+            // FIX (Note 96, Nov 14): the old code only looked for a real
+            // '\n', so the Note 89 \n in quests.cfg never split and the
+            // whole 61-char greeting wrapped at 40 chars.
             const char *nl = strchr(p, '\n');
+            const char *lit = NULL;
+            for(const char *q = p; *q && q[1]; q++) if(q[0] == '\\' && q[1] == 'n') { lit = q; break; }
+            int skip = 1;
+            if(lit && (!nl || lit < nl)) { nl = lit; skip = 2; }
             size_t plen = nl ? (size_t)(nl - p) : strlen(p);
             if(plen >= sizeof(para)) plen = sizeof(para) - 1;
             memcpy(para, p, plen); para[plen] = '\0';
@@ -712,15 +723,19 @@ namespace game
             // 0.6 scale, so 40*0.6 = 24 fits the column exactly. The
             // old 50-char wrap drew 30-FONTW lines that would stretch
             // the 24 column past the frame.
+            // FIX (Note 96, Nov 14): 40 chars at 0.6 scale is exactly
+            // 24.0 FONTW = the column width, zero margin, so wide glyphs
+            // (W) clip at the edge. Wrap at 36 (36*0.6 = 21.6 FONTW,
+            // leaving 2.4 FONTW of breathing room).
             const char *w = para;
             while(*w)
             {
                 size_t len = strlen(w);
-                if(len > 40)
+                if(len > 36)
                 {
-                    len = 40;
+                    len = 36;
                     while(len > 0 && w[len] != ' ' && w[len] != '\0') len--;
-                    if(len == 0) len = 40;
+                    if(len == 0) len = 36;
                 }
                 char line[72];
                 memcpy(line, w, len); line[len] = '\0';
@@ -729,7 +744,7 @@ namespace game
                 while(*w == ' ') w++;
             }
             if(!nl) break;
-            p = nl + 1;
+            p = nl + skip;
         }
     }
     ICOMMAND(rpg_dlg_npc, "", (), result(rpg_dlg_npc));
@@ -1272,15 +1287,26 @@ namespace game
         static string p;
         if(*i >= 0 && *i < rpg_cln)
         {
-            const char *id = rpg::item(rpg_clinv[*i].item).id;
+            const rpg::itemdef &it = rpg::item(rpg_clinv[*i].item);
             // Prefer a full-id cell (cell_<full id>.png) when it exists,
             // so items sharing a suffix (every potion) can have distinct
             // art; otherwise fall back to the suffix cell as before.
-            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", id);
+            // FIX (Note 93, Nov 14): the old fallback used strchr (first
+            // '_'), so a single-word id like "cape" retried the same
+            // missing cell_cape.png and returned a dead path, leaving the
+            // inventory slot blank. Now: last-underscore suffix (strrchr),
+            // then the item's own icon (every item def specifies one),
+            // then the empty slot — result(p) never returns a dead path.
+            formatstring(p)("packages/ui/rpg/icons/cell_%s.png", it.id);
             if(!findfile(p, "e") && !fileexists(p, "r"))
             {
-                const char *base = strchr(id, '_');
-                formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base ? base + 1 : id);
+                const char *base = strrchr(it.id, '_');
+                if(base) formatstring(p)("packages/ui/rpg/icons/cell_%s.png", base + 1);
+                if(!base || (!findfile(p, "e") && !fileexists(p, "r")))
+                {
+                    if(it.icon && it.icon[0] && (findfile(it.icon, "e") || fileexists(it.icon, "r"))) copystring(p, it.icon);
+                    else copystring(p, "packages/ui/rpg/slots/slot.png");
+                }
             }
             result(p);
         }

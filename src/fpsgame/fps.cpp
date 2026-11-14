@@ -22,6 +22,11 @@ namespace game
     // button, so queue end restores the grab exactly once.
     bool bgqueue_cancel_sent = false;
     static bool bgqueue_cursorfreed = false;
+    // FIX (queue mouse, Nov 14): true while a battleground queue is
+    // active. The engine uses it to stop re-grabbing the mouse (and
+    // re-enabling relative mode, which warps the cursor to center) on
+    // window focus gain while the queue overlay has freed the cursor.
+    bool freezecursor() { return bgqueue_until > lastmillis; }
     string bgprevmap;
     int respawnent = -1;
     int lasthit = 0, lastspawnattempt = 0;
@@ -1259,6 +1264,16 @@ namespace game
         respawnself(true);
         entities::resetspawns();
         copystring(clientmap, name ? name : "");
+
+        // FIX (Note 97, Nov 14): bots are created during the battleground
+        // queue (before the map change), so ai::init() loads the OLD
+        // map's waypoints and nothing reloads them for the new map until
+        // map_changed runs. Load the new map's waypoints deterministically
+        // here, in C++, right after the map name is published, so they
+        // are present before any bot thinks on the new map. The
+        // map_changed loadwaypoints stays as a backup. (The load itself
+        // was also silently failing on a bad path — see getwaypointfile.)
+        ai::loadwaypoints();
 
         // World maps: the engine generates the minimap texture inside
         // drawtextures(), which runs BEFORE startmap (clientmap still holds
@@ -4075,6 +4090,22 @@ namespace game
     // changemap tick, the server ignores it (queue already gone) and
     // the client is in the match anyway — leaving a match is separate
     // work, out of scope.
+    // Shared queue-cancel core (FIX, queue mouse, Nov 14): the state
+    // reset + input restore + N_BG_CANCEL send, used by both the Cancel
+    // button click (which first checks the mouse is over the button)
+    // and the Escape key (which cancels unconditionally). Returns true
+    // if a live queue was cancelled.
+    bool bgqueuedocancel()
+    {
+        if(bgqueue_until <= lastmillis || bgqueue_cancel_sent) return false;
+        bgqueue_cancel_sent = true;
+        bgqueue_until = 0; bgqueue_mode = 0;
+        if(bgqueue_cursorfreed) { bgqueue_cursorfreed = false; grabinput = true; inputgrab(true); }
+        addmsg(N_BG_CANCEL, "r");
+        return true;
+    }
+    ICOMMAND(bgqueuecancel, "", (), { intret(bgqueuedocancel() ? 1 : 0); });
+    ICOMMAND(bgqueueactive, "", (), { intret(bgqueue_until > lastmillis ? 1 : 0); });
     bool bgqueuecancelclick()
     {
         if(bgqueue_until <= lastmillis || bgqueue_cancel_sent) return false;
@@ -4088,11 +4119,7 @@ namespace game
         bgcancelrect(X, bx, by, bw, bh);
         float vx = mx*hudvirtualheight(hh)/hh, vy = my*hudvirtualheight(hh)/hh;
         if(vx < bx || vx > bx+bw || vy < by || vy > by+bh) return false;
-        bgqueue_cancel_sent = true;
-        bgqueue_until = 0; bgqueue_mode = 0;
-        if(bgqueue_cursorfreed) { bgqueue_cursorfreed = false; grabinput = true; inputgrab(true); }
-        addmsg(N_BG_CANCEL, "r");
-        return true;
+        return bgqueuedocancel();
     }
 
     ICOMMAND(bgleave, "", (), {

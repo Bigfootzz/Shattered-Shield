@@ -41,6 +41,7 @@ namespace game
     extern bool ispaused();
     extern int scaletime(int t);
     extern bool allowmouselook();
+    extern bool freezecursor(); // true while a battleground queue is active; the engine must not re-grab the mouse then
     extern void cursormove(int dx, int dy); // raw mouse deltas for game cursors (called even when mouse-look is gated off)
 
     extern const char *gameident();

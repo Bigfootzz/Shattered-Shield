@@ -916,7 +916,13 @@ void checkinput()
                     screenres(&event.window.data1, &event.window.data2);
                 }
                 #endif
-                if(event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
+                // FIX (queue mouse, Nov 14): do not re-grab the mouse on
+                // focus gain while a battleground queue is active. The
+                // queue overlay freed the cursor so the player can click
+                // Cancel; re-grabbing here re-enables relative mode,
+                // which warps the cursor to screen center and pins it
+                // there until the queue ends or Cancel is clicked.
+                if(event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && !game::freezecursor())
                     inputgrab(grabinput = true);
                 else if(event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
                     inputgrab(grabinput = false);

@@ -683,9 +683,26 @@ namespace ai
         if(!mname || !*mname) mname = getclientmap();
         if(!*mname) return false;
 
-        string pakname, mapname, cfgname;
-        getmapfilenames(mname, NULL, pakname, mapname, cfgname);
-        formatstring(wptname)("packages/%s.wpt", mapname);
+        // FIX (Note 97, Nov 14): getmapfilenames() is designed for .ogz
+        // map paths and prefixes the name with "base/" (or keeps a
+        // directory prefix), so the old code built
+        // "packages/base/<map>.wpt" -- a file that does not exist. The
+        // .wpt files live at "packages/<map>.wpt" (no package prefix).
+        // loadwaypoints then hit opengzfile == NULL and returned
+        // silently, so the bots never got any waypoints and sat in
+        // WAIT. Use only the basename of the map name here.
+        const char *base = mname;
+        const char *slash = strrchr(mname, '/');
+        const char *bslash = strrchr(mname, '\\');
+        if(bslash && (!slash || bslash > slash)) slash = bslash;
+        if(slash) base = slash + 1;
+        if(!*base) return false;
+        string clean;
+        copystring(clean, base);
+        size_t clen = strlen(clean);
+        if(clen > 4 && !strcmp(clean + clen - 4, ".ogz")) clean[clen - 4] = '\0';
+        if(!*clean) return false;
+        formatstring(wptname)("packages/%s.wpt", clean);
         path(wptname);
         return true;
     }
@@ -735,7 +752,13 @@ namespace ai
         delete f;
         conoutf("loaded %d waypoints from %s", numwp, wptname);
 
-        if(!cleanwaypoints()) clearwpcache();
+        // FIX (Note 97, Nov 14): the spatial waypoint cache is built
+        // from the previously loaded map, so it MUST be invalidated
+        // whenever a new set loads. The old code only cleared it when
+        // cleanwaypoints() reported a change, leaving a stale cache
+        // (old positions) behind a clean load. Clear unconditionally.
+        cleanwaypoints();
+        clearwpcache();
     }
     ICOMMAND(loadwaypoints, "s", (char *mname), loadwaypoints(true, mname));
 
