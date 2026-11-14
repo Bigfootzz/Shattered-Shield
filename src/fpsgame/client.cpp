@@ -92,13 +92,13 @@ namespace game
         int ids[6]; int n = rpg::classabilities(arch, ids, 6);
         if(slot <= n) rpg_castability(ids[slot-1]);
     }
-    ICOMMAND(ability1, "", (), rpg_castslot(1));
-    ICOMMAND(ability2, "", (), rpg_castslot(2));
+    ICOMMAND(ability1, "", (), { if(!require_hardware_event("ability1")) return; rpg_castslot(1); });
+    ICOMMAND(ability2, "", (), { if(!require_hardware_event("ability2")) return; rpg_castslot(2); });
     // Projectile spells (Oct 21): wizard/sorceress-only, server-gated.
-    ICOMMAND(ability3, "", (), rpg_castslot(3));
-    ICOMMAND(ability4, "", (), rpg_castslot(4));
+    ICOMMAND(ability3, "", (), { if(!require_hardware_event("ability3")) return; rpg_castslot(3); });
+    ICOMMAND(ability4, "", (), { if(!require_hardware_event("ability4")) return; rpg_castslot(4); });
     // Arrow Shot (v0.1.8): ranger's ranged attack, ability index 5.
-    ICOMMAND(ability5, "", (), rpg_castslot(5));
+    ICOMMAND(ability5, "", (), { if(!require_hardware_event("ability5")) return; rpg_castslot(5); });
 
     // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
     // The client only ASKS (item id / slot); the server validates and pushes
@@ -671,7 +671,7 @@ namespace game
     // standing next to an NPC and typing rpgtalknear works, the bind
     // or selection is at fault; if it fails too, the server's reply
     // names the cause. Diagnostic + workaround in one command.
-    ICOMMAND(rpgtalknear, "", (), { conoutf("rpg: talk: sending N_RPG_TALK nearest (-1)"); addmsg(N_RPG_TALK, "ri", -1); });
+    ICOMMAND(rpgtalknear, "", (), { if(!require_hardware_event("rpgtalknear")) return; conoutf("rpg: talk: sending N_RPG_TALK nearest (-1)"); addmsg(N_RPG_TALK, "ri", -1); });
     // v0.1.27 (item 5): open the NPC editor from the console, bypassing
     // the F7 editbind entirely. If F7 in edit mode still flashes (the
     // screenshot bind firing means editing is not actually toggled on,
@@ -741,7 +741,7 @@ namespace game
         result(*i >= 0 && *i < rpg_dlg_nresp ? rpg_dlg_resps[*i] : ""));
     ICOMMAND(rpgdlgo, "", (), intret(rpg_dlg_open ? 1 : 0)); // 1 while the dialogue panel is open
     static bool rpg_isdlgo() { return rpg_dlg_open; } // v0.1.42: click-path dialogue gate
-    ICOMMAND(rpgrespond, "i", (int *i), if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i));
+    ICOMMAND(rpgrespond, "i", (int *i), { if(!require_hardware_event("rpgrespond")) return; if(rpg_dlg_open && *i >= 0 && *i < rpg_dlg_nresp) addmsg(N_RPG_RESPOND, "ri", *i); });
     // v0.1.8: close dialogue from the X button (sends a -1 response to end)
     ICOMMAND(rpg_closerdlg, "", (), { if(rpg_dlg_open) { addmsg(N_RPG_RESPOND, "ri", -1); rpg_dlg_open = false; cleargui(1); } });
     // J-key quest log: a derived view (no new table). rpgjournal rebuilds the
@@ -1135,8 +1135,8 @@ namespace game
     ICOMMAND(rpginventory, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpginv"); });
     ICOMMAND(rpgcharacter, "", (), { addmsg(N_RPG_INVL, "r"); showgui("rpgchar"); });
     // v0.1.23 vendor: buy/sell (server validates gold + ownership).
-    ICOMMAND(rpgbuy, "s", (char *itemid), { addmsg(N_RPG_BUY, "rs", itemid); });
-    ICOMMAND(rpgsell, "s", (char *itemid), { addmsg(N_RPG_SELL, "rs", itemid); });
+    ICOMMAND(rpgbuy, "s", (char *itemid), { if(!require_hardware_event("rpgbuy")) return; addmsg(N_RPG_BUY, "rs", itemid); });
+    ICOMMAND(rpgsell, "s", (char *itemid), { if(!require_hardware_event("rpgsell")) return; addmsg(N_RPG_SELL, "rs", itemid); });
     ICOMMAND(rpgvendor, "", (), { addmsg(N_RPG_INVL, "r"); if(identexists("rpgvendoropen")) execute("rpgvendoropen"); else showgui("rpgvendor"); });
     // --- RPG: editor Phase 1 (Oct 24, 2026) - NPC placement tool (F7 in edit mode) ---
     // Client-only: the editor edits the LOCAL NPC table and saves it to
@@ -1229,10 +1229,10 @@ namespace game
         if(!map || !map[0]) { conoutf("rpg: npcs: npc_save: no map"); return; }
         if(rpg::savenpcs(map)) conoutf("rpg: npcs: saved to data/rpg/npcs_%s.cfg (reload map for server to pick it up)", map);
     });
-    ICOMMAND(rpgequip, "s", (char *s), addmsg(N_RPG_EQUIP, "rs", s));
-    ICOMMAND(rpgunequip, "s", (char *s), addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)));
-    ICOMMAND(rpguse, "s", (char *s), addmsg(N_RPG_USE, "rs", s));
-    ICOMMAND(rpgdrop, "s", (char *s), addmsg(N_RPG_DROP, "rs", s));
+    ICOMMAND(rpgequip, "s", (char *s), { if(!require_hardware_event("rpgequip")) return; addmsg(N_RPG_EQUIP, "rs", s); });
+    ICOMMAND(rpgunequip, "s", (char *s), { if(!require_hardware_event("rpgunequip")) return; addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)); });
+    ICOMMAND(rpguse, "s", (char *s), { if(!require_hardware_event("rpguse")) return; addmsg(N_RPG_USE, "rs", s); });
+    ICOMMAND(rpgdrop, "s", (char *s), { if(!require_hardware_event("rpgdrop")) return; addmsg(N_RPG_DROP, "rs", s); });
     // client cache queries for the GUIs (never authoritative)
     static int rpg_cln = 0;
     static rpg::itemstack rpg_clinv[64];
@@ -1303,6 +1303,7 @@ namespace game
     ICOMMAND(rpgcraftopen, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
     ICOMMAND(rpgcraft, "", (), { addmsg(N_RPG_INVL, "r"); addmsg(N_RPG_CRAFTL, "r"); showgui("rpgcraft"); });
     ICOMMAND(rpgcraftadd, "i", (int *i), {
+        if(!require_hardware_event("rpgcraftadd")) return;
         rpg_refreshcl();
         if(*i < 0 || *i >= rpg_cln) return;
         const char *id = rpg::item(rpg_clinv[*i].item).id;
@@ -1338,6 +1339,7 @@ namespace game
     });
     ICOMMAND(rpgcraftclear, "i", (int *i), { if(*i >= 0 && *i < 2) rpg_craftslot[*i][0] = '\0'; });
     ICOMMAND(rpgcraftsend, "", (), {
+        if(!require_hardware_event("rpgcraftsend")) return;
         // v0.1.34: window must STAY OPEN on Craft. rpgcraft is guistayopen
         // (menus.cpp only auto-closes when shouldclearmenu), so the drop
         // the user saw is guarded against here as well: after sending, the
@@ -2487,10 +2489,29 @@ namespace game
         conoutf("%s", gps2);
         return true;
     }
-    void toserver(char *text) { if(rpg_gps(text)) return; conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
+    // Chat throttle (Nov 14, WoW chat Phase 1): max 3 messages per 2 seconds,
+    // counted only for messages that pass the hardware-event gate. Over the
+    // limit the send is dropped and the player gets a local warning.
+    static int rpg_chatsendcount = 0;
+    static int rpg_chatsendwindow = 0;
+    static bool rpg_chatthrottle()
+    {
+        if(lastmillis - rpg_chatsendwindow > 2000) { rpg_chatsendwindow = lastmillis; rpg_chatsendcount = 0; }
+        if(rpg_chatsendcount >= 3)
+        {
+            conoutf(CON_INFO, "You are sending messages too quickly.");
+            return false;
+        }
+        rpg_chatsendcount++;
+        return true;
+    }
+    // WoW chat Phase 1 (Nov 14): sending requires a hardware event (the
+    // sandbox counter), so scripts, quests and timers cannot flood chat.
+    // The edit-box Enter handler and key binds run at depth > 0.
+    void toserver(char *text) { if(!require_hardware_event("say")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
     COMMANDN(say, toserver, "C");
 
-    void sayteam(char *text) { if(rpg_gps(text)) return; conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
+    void sayteam(char *text) { if(!require_hardware_event("sayteam")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
     COMMAND(sayteam, "C");
 
     void sendposition(fpsent *d, packetbuf &q)

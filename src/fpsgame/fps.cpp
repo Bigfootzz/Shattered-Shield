@@ -2428,7 +2428,13 @@ namespace game
     enum { RPG_CHAT_WORLD = 0, RPG_CHAT_CLAN = 1, RPG_CHAT_SYSTEM = 2, RPG_CHAT_NTABS = 3 };
     struct rpg_chatline { string text; };
     static vector<rpg_chatline> rpg_chatbuf[RPG_CHAT_NTABS];
-    static const int RPG_CHAT_CAP = 50;
+    // WoW chat Phase 1 (Nov 14): scrollback cap 500/tab (was 50), and a
+    // per-tab scroll offset for wheel scrolling. 0 = locked to the newest
+    // line (auto-scroll); >0 = scrolled up by that many lines. The visible
+    // window is RPG_CHAT_VISIBLE lines.
+    static const int RPG_CHAT_CAP = 500;
+    static const int RPG_CHAT_VISIBLE = 8;
+    static int rpg_chatscroll[RPG_CHAT_NTABS] = { 0, 0, 0 };
     static const char *rpg_chatnames[RPG_CHAT_NTABS] = { "World", "Clan", "System" };
     // channel colors: warm white / green / amber (spirit of the reference box)
     static const float rpg_chancol[RPG_CHAT_NTABS][3] = {
@@ -2436,6 +2442,8 @@ namespace game
     };
     // tab hit-rects from the last draw (virtual coords), for click routing
     static float rpg_chattabs[RPG_CHAT_NTABS][4];
+    // chat box rect from the last draw (virtual coords), for wheel hover
+    static float rpg_chatboxrect[4] = { 0, 0, 0, 0 };
 
     // Chat surface (user ruling, Oct 19): the tabbed box is the chat surface
     // on EVERY map (world + battlegrounds). While active, player chat lives
@@ -2471,7 +2479,18 @@ namespace game
         vector<rpg_chatline> &b = rpg_chatbuf[tab];
         rpg_chatline cl; copystring(cl.text, line);
         b.add(cl);
-        while(b.length() > RPG_CHAT_CAP) b.remove(0);
+        int dropped = 0;
+        while(b.length() > RPG_CHAT_CAP) { b.remove(0); dropped++; }
+        // WoW chat Phase 1 (Nov 14): anchor. If the user scrolled up, keep
+        // the same lines visible: a new line pushes the window down by 1
+        // (offset++), a dropped line pulls it up by 1 (offset--). Net
+        // offset += 1 - dropped. At the bottom (offset 0) nothing changes
+        // and the view auto-scrolls to the newest line.
+        if(rpg_chatscroll[tab] > 0)
+        {
+            rpg_chatscroll[tab] += 1 - dropped;
+            if(rpg_chatscroll[tab] < 0) rpg_chatscroll[tab] = 0;
+        }
     }
 
     // colored text helpers (the strip helpers are white-only)
@@ -2515,6 +2534,35 @@ namespace game
             { rpg_chattab = i; return true; }
         return false;
     }
+
+    // WoW chat Phase 1 (Nov 14): mouse-wheel scrolling for the chat box.
+    // Called from delta_game_0 (rpg.cfg) before the stock zoom/weapon
+    // cycle. Returns 1 and scrolls the active tab when the cursor is over
+    // the chat box, else 0 (the wheel falls through). dir +1 = wheel up
+    // (older lines), -1 = wheel down (newer lines, toward the bottom).
+    // The box rect is recorded each frame by drawrpgchat. Plain function,
+    // not inline in the ICOMMAND: the macro parser splits on bare commas,
+    // so multi-argument bodies live here instead (same as rpg_doclick).
+    static bool rpg_chatwheel_impl(int dir)
+    {
+        if(!chatboxactive()) return false;
+        int w = 0, h = 0;
+        if(screen) SDL_GetWindowSize(screen, &w, &h);
+        if(!w || !h) return false;
+        float cx = 0, cy = 0;
+        rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h);
+        float vscale = hudvirtualheight(h)/h;
+        float vx = cx*vscale, vy = cy*vscale;
+        if(vx < rpg_chatboxrect[0] || vx >= rpg_chatboxrect[2] ||
+           vy < rpg_chatboxrect[1] || vy >= rpg_chatboxrect[3]) return false;
+        int tab = rpg_chattab;
+        int maxscroll = max(0, (int)rpg_chatbuf[tab].length() - RPG_CHAT_VISIBLE);
+        rpg_chatscroll[tab] += (dir > 0) ? 1 : -1;
+        if(rpg_chatscroll[tab] < 0) rpg_chatscroll[tab] = 0;
+        if(rpg_chatscroll[tab] > maxscroll) rpg_chatscroll[tab] = maxscroll;
+        return true;
+    }
+    ICOMMAND(rpg_chatwheel, "i", (int *dir), intret(rpg_chatwheel_impl(*dir) ? 1 : 0));
 
     // TEST-ONLY accessors (harness): the current tab and the tab hit-rect
     // recorded by the last drawrpgchat, for the rpgtesttabclick proof.
@@ -2572,7 +2620,7 @@ namespace game
         if(bw < 352.0f) bw = 352.0f;
         float bx1 = X - 24.0f, bx0 = bx1 - bw;
         float tabh = 50.6f, lineh = 33.0f, pad = 13.2f;
-        int nlines = 8;
+        int nlines = RPG_CHAT_VISIBLE;
         // framed in-panel input field (MMO layout): the panel grows by the
         // field's height while a chat input is open, history above it.
         bool inputopen = consoleinputisbox();
@@ -2580,6 +2628,10 @@ namespace game
         float bh = tabh + pad + nlines*lineh + pad + fieldh;
         float by1 = hudvirtualheight(h) - 24.0f, by0 = by1 - bh;
         float msgby1 = by1 - fieldh; // message area bottom (above the field)
+        // WoW chat Phase 1 (Nov 14): record the box rect (virtual coords)
+        // for wheel hover detection (rpg_chatwheel).
+        rpg_chatboxrect[0] = bx0; rpg_chatboxrect[1] = by0;
+        rpg_chatboxrect[2] = bx1; rpg_chatboxrect[3] = by1;
 
         // black transparent plate behind the chat area (readability backing
         // over the 3D scene). v0.1.8: drawn via rpg_solidquad (texture-backed
@@ -2609,12 +2661,19 @@ namespace game
             rpg_chattextc(rpg_chatnames[i], tx0 + tabw/2, by0 + tabh/2, 28.6f, cr, cg, cb);
         }
 
-        // messages, bottom-aligned above the input field, most recent first
+        // messages, bottom-aligned above the input field, most recent first.
+        // WoW chat Phase 1 (Nov 14): the visible window ends scroll_offset
+        // lines before the newest line (0 = newest, auto-scroll). Clamped
+        // so the window never runs past the oldest buffered line.
         vector<rpg_chatline> &b = rpg_chatbuf[rpg_chattab];
-        int shown = min(nlines, b.length());
+        int maxscroll = max(0, b.length() - nlines);
+        if(rpg_chatscroll[rpg_chattab] > maxscroll) rpg_chatscroll[rpg_chattab] = maxscroll;
+        if(rpg_chatscroll[rpg_chattab] < 0) rpg_chatscroll[rpg_chattab] = 0;
+        int end = b.length() - rpg_chatscroll[rpg_chattab];
+        int shown = min(nlines, end);
         loopi(shown)
         {
-            string fit; rpg_chatfit(fit, b[b.length()-shown+i].text, bw - 2*pad, lineh*0.9f);
+            string fit; rpg_chatfit(fit, b[end-shown+i].text, bw - 2*pad, lineh*0.9f);
             float ly = msgby1 - pad - (shown-i)*lineh;
             // lines carry their own \f color codes; the default tint covers plain lines
             rpg_chattext(fit, int(bx0+pad), int(ly), lineh*0.9f,

@@ -975,7 +975,14 @@ void menuprocess()
     // different menu on top means the action navigated, and closing it
     // would undo the navigation.
     menu *topbefore = guistack.empty() ? NULL : guistack.last();
-    loopv(updatelater) updatelater[i].run();
+    {
+        // Add-on sandbox (Nov 14): deferred GUI actions (button clicks,
+        // slider/field changes) run inside a hardware-event scope, so
+        // gameplay commands called from them are allowed. Load-time and
+        // timer-driven code runs at depth 0 and is blocked.
+        ScopedHardwareEvent hardware_event;
+        loopv(updatelater) updatelater[i].run();
+    }
     updatelater.shrink(0);
     if(wasmain > mainmenu || clearlater)
     {

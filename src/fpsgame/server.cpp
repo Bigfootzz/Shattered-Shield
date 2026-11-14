@@ -70,6 +70,7 @@ namespace server
     static int bg_hold_ms[2] = { 0, 0 }; // KOTH: accumulated hold time per team (ms)
     static int bg_score[2] = { 0, 0 };   // TFF: points per team
     static int bg_winner = 0;            // set by bg_win, read by checkintermission
+    static int bg_pending_winner = 0;    // deferred TFF kill-win (v0.1.68 fix): set in dodamage(), fired in bg_points_tick()
     static int bg_point_team_score(int mode, int team); // KOTH hold seconds / TFF points
     static void bg_points_reset(int mode, const char *map);
     static void bg_win(int team);
@@ -2999,6 +3000,13 @@ namespace server
         if (actor!=target && isteam(actor->team, target->team)) actor->state.teamshooter = true;
         if(ts.health<=0)
         {
+            // DIAGNOSTIC (v0.1.68): fine-grained death-path checkpoints, battleground maps only.
+            // The CTF crash sits in the unbracketed code after a cast kills a bot; these
+            // checkpoints (all with fflush) pin down which death-path section it dies in.
+            // The XP/quest/loot block is skipped for bot kills (gated on monsters), so the
+            // CTF-relevant sections are Embers, TFF, frags, N_DIED, smode->died, respawn.
+            bool diag_bgdeath = (m_ctf || m_koth || m_tff) && rpg::mapactive(smapname);
+            if(diag_bgdeath) { conoutf("rpg: death-path: start, target '%s' (cn %d), actor '%s' (cn %d)", target->name, target->clientnum, actor ? actor->name : "<none>", actor ? actor->clientnum : -1); fflush(stdout); }
             if (target->state.isInfected() && monster::providesGuts(&target->state))
             {
                 const ::monster::MonsterType &zt = ::monster::getMonsterType(target->state.getMonsterType());
@@ -3139,6 +3147,7 @@ namespace server
                     }
                 }
             }
+            if(diag_bgdeath) { conoutf("rpg: death-path: monster block done"); fflush(stdout); }
             // --- Battlegrounds: Embers kill reward (Nov 1, locked rates) ---
             // +10 Embers to the KILLER on a battleground kill. Gate is the
             // battleground itself: any battleground mode (7/17/18) on a
@@ -3176,6 +3185,7 @@ namespace server
                 rpg_qmsg(actor, "+10 Embers (pending — banked at scoreboard).");
                 conoutf("rpg: battleground kill: +10 Embers pending to '%s' (victim '%s')", actor->name, target->name);
             }
+            if(diag_bgdeath) { conoutf("rpg: death-path: bg embers done"); fflush(stdout); }
             // --- Battlegrounds: TFF kill points (Nov 6, locked scoring) ---
             // +14 points to the killer's TEAM on a game-time TFF kill.
             // Same gate as the Embers block above, except bots count:
@@ -3194,10 +3204,17 @@ namespace server
                 {
                     bg_score[kteam-1] += BG_TFF_KILL_POINTS;
                     conoutf("bg: TFF kill: +%d to %s team (TFF %d/%d)", BG_TFF_KILL_POINTS, bg_teamname(kteam), bg_score[0], bg_score[1]);
-                    if(bg_score[kteam-1] >= BG_TFF_WIN_POINTS) bg_win(kteam);
-                    else bg_points_sync();
+                    // DEFERRED WIN (v0.1.68 fix): never call bg_win() from inside dodamage().
+                    // bg_win() -> startintermission() resets match state while death handling
+                    // (N_DIED, frags, smode->died, respawn) is still running — a re-entrancy
+                    // hazard. Set the pending winner and let bg_points_tick() fire it on the
+                    // next tick, after dodamage() has returned. Sync unconditionally so the
+                    // HUD shows the final score immediately.
+                    if(bg_score[kteam-1] >= BG_TFF_WIN_POINTS) bg_pending_winner = kteam;
+                    bg_points_sync();
                 }
             }
+            if(diag_bgdeath) { conoutf("rpg: death-path: bg tff done"); fflush(stdout); }
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
             {
@@ -3218,9 +3235,12 @@ namespace server
                 else { friends = 1; enemies = clients.length()-1; }
                 actor->state.effectiveness += fragvalue*friends/float(max(enemies, 1));
             }
+            if(diag_bgdeath) { conoutf("rpg: death-path: pre-ndied"); fflush(stdout); }
             sendf(-1, 1, "ri6", N_DIED, target->clientnum, actor->clientnum, actor->state.frags, gun, special);
+            if(diag_bgdeath) { conoutf("rpg: death-path: ndied sent"); fflush(stdout); }
             target->position.setsize(0);
             bool didrespawn = false;
+            if(diag_bgdeath) { conoutf("rpg: death-path: calling smode->died"); fflush(stdout); }
             if(smode) didrespawn = smode->died(target, actor);
             // CTF death-crash diagnostic (Nov 8, .55 follow-up): log when
             // smode->died() returns on a battleground map, so the next
@@ -3239,6 +3259,7 @@ namespace server
                 actor->state.teamkills++;
                 addteamkill(actor, target, 1);
             }
+            if(diag_bgdeath) { conoutf("rpg: death-path: done for '%s' (cn %d)", target->name, target->clientnum); fflush(stdout); }
         }
         else
         {
@@ -3795,6 +3816,7 @@ namespace server
         bg_hold_ms[0] = bg_hold_ms[1] = 0;
         bg_score[0] = bg_score[1] = 0;
         bg_winner = 0;
+        bg_pending_winner = 0;
         bg_points_lastms = totalmillis;
         bg_sync_s1 = bg_sync_s2 = -1;
         loopi(8) { bg_sync_owner[i] = bg_sync_capteam[i] = bg_sync_capprog[i] = -1; }
@@ -3830,6 +3852,16 @@ namespace server
         bg_points_lastms = totalmillis;
         if(dt <= 0) return;
         if(dt > 500) dt = 500; // hitch clamp: captures run slow, never fast-forward
+        // DEFERRED WIN (v0.1.68 fix): a TFF kill that reached the win target set
+        // bg_pending_winner in dodamage(). Fire it here, on the next tick, after
+        // dodamage() has returned. The rest of this tick is harmless (the win
+        // checks below no-op once interm > 0, and the sync sends the final state).
+        if(bg_pending_winner)
+        {
+            int w = bg_pending_winner;
+            bg_pending_winner = 0;
+            bg_win(w);
+        }
         loopi(bg_npoints)
         {
             const bg_pointdef &def = defs[i];

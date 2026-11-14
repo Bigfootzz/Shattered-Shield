@@ -476,6 +476,9 @@ struct hline
 
     void run()
     {
+        // Add-on sandbox (Nov 14): a console command typed by the player
+        // is a hardware event, so it may call gameplay actions.
+        ScopedHardwareEvent hardware_event;
         if(flags&CF_EXECUTE && buf[0]=='/') execute(buf+1);
         else if(action)
         {
@@ -528,6 +531,9 @@ COMMAND(onrelease, "s");
 
 void execbind(keym &k, bool isdown)
 {
+    // Add-on sandbox (Nov 14): a key press/release is a hardware event,
+    // so commands bound to keys may call gameplay actions.
+    ScopedHardwareEvent hardware_event;
     loopv(releaseactions)
     {
         releaseaction &ra = releaseactions[i];

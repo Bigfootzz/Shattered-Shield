@@ -227,6 +227,11 @@ UNUSED static bool forceinitidents = initidents();
 
 static const char *sourcefile = NULL, *sourcestr = NULL;
 
+// Add-on sandbox (Nov 14): counts nested hardware-event scopes. 0 at load
+// time and in timers, so gameplay commands called from there are blocked.
+// See require_hardware_event() and ScopedHardwareEvent.
+int hardware_event_depth = 0;
+
 static const char *debugline(const char *p, const char *fmt)
 {
     if(!sourcestr) return fmt;
@@ -2189,8 +2194,36 @@ bool executebool(const char *p)
     return b;
 }
 
+// Add-on sandbox (Nov 14): gameplay commands call this first. Returns true
+// inside a hardware event (button click, key binding, console input);
+// otherwise logs a sandbox violation naming the offending file (when
+// known) and returns false, and the caller does nothing.
+bool require_hardware_event(const char *cmdname)
+{
+    if(hardware_event_depth > 0) return true;
+    if(sourcefile) conoutf(CON_ERROR, "sandbox violation: \"%s\" can only be called from a hardware event (button click, key binding, or console input) (file: %s)", cmdname, sourcefile);
+    else conoutf(CON_ERROR, "sandbox violation: \"%s\" can only be called from a hardware event (button click, key binding, or console input)", cmdname);
+    return false;
+}
+
 bool execfile(const char *cfgfile, bool msg)
 {
+    // Add-on sandbox (Nov 14): an add-on may only exec files inside its own
+    // folder. Stops an add-on's addon.cfg from pulling in the game's own
+    // config, another add-on's files, or autoexec.cfg. The check uses
+    // sourcefile, which execfile() sets to the file currently running, so it
+    // only applies when the exec comes from an add-on. A ".." in the target
+    // path is always rejected (path traversal).
+    if(sourcefile && !strncmp(sourcefile, "data/addons/", 12))
+    {
+        const char *aname = sourcefile + 12;
+        const char *aslash = strchr(aname, '/');
+        if(!aslash || strncmp(cfgfile, "data/addons/", 12) || strncmp(cfgfile + 12, aname, (int)(aslash - aname)) || cfgfile[12 + (aslash - aname)] != '/' || strstr(cfgfile, ".."))
+        {
+            if(msg) conoutf(CON_ERROR, "sandbox violation: add-on may only exec files inside its own folder (tried \"%s\")", cfgfile);
+            return false;
+        }
+    }
     string s;
     copystring(s, cfgfile);
     char *buf = loadfile(path(s), NULL);

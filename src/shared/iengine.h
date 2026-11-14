@@ -143,6 +143,19 @@ extern int execute(const char *p);
 extern bool executebool(const uint *code);
 extern bool executebool(const char *p);
 extern bool execfile(const char *cfgfile, bool msg = true);
+
+// Add-on sandbox (Nov 14): a recursion counter for genuine hardware-event
+// execution. Gameplay commands require hardware_event_depth > 0, so they
+// only run from a button click, key binding, or console input -- never at
+// load time or from a timer. ScopedHardwareEvent is an RAII guard that
+// increments the counter for the scope it lives in.
+extern int hardware_event_depth;
+struct ScopedHardwareEvent
+{
+    ScopedHardwareEvent() { hardware_event_depth++; }
+    ~ScopedHardwareEvent() { hardware_event_depth--; }
+};
+extern bool require_hardware_event(const char *cmdname);
 extern void alias(const char *name, const char *action);
 extern void alias(const char *name, tagval &v);
 extern const char *getalias(const char *name);
