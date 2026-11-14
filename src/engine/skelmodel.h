@@ -1402,6 +1402,11 @@ struct skelmodel : animmodel
         }
     };
 
+    // Cape cloth simulation (Verlet solver) -- see engine/clothbone.h.
+    // Included here, after skeleton/boneinfo are defined and before
+    // skelmeshgroup::render uses cape_update().
+    #include "clothbone.h"
+
     struct skelmeshgroup : meshgroup
     {
         skeleton *skel;
@@ -1914,6 +1919,18 @@ struct skelmodel : animmodel
             // reads below use rsc so a model with a different bind pose
             // skins correctly under the shared skeleton's animation.
             skelcacheentry &rsc = *getcorrected(sc);
+            // Cape cloth simulation: if this is the rigged cape, run the
+            // Verlet solver and overwrite the cape bone DualQuats in
+            // rsc.bdata before skinning (CPU interpverts / GPU setgpubones).
+            if(rsc.bdata && cape_iscape(skel))
+            {
+                glmatrixf &gm = animmodel::matrixstack[animmodel::matrixpos];
+                matrix3x4 worldmat;
+                worldmat.a = vec4(gm.v[0], gm.v[4], gm.v[8], gm.v[12]);
+                worldmat.b = vec4(gm.v[1], gm.v[5], gm.v[9], gm.v[13]);
+                worldmat.c = vec4(gm.v[2], gm.v[6], gm.v[10], gm.v[14]);
+                cape_update(skel, rsc.bdata, worldmat, d);
+            }
             if(!(as->cur.anim&ANIM_NORENDER))
             {
                 int owner = &sc-&skel->skelcache[0];
