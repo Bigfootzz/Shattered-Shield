@@ -1130,13 +1130,14 @@ struct fpsent : dynent, fpsstate
     {
         dynent::reset();
         fpsstate::respawn();
-        // Walk speed -5% (Ed, Nov 13): the walk anim plays slow but the
-        // character moved fast, so the feet slid. Scaling the base speed
-        // here covers every fpsent (players, bots, monsters) because
-        // they all respawn through this path; updateEffects() derives
-        // maxspeed from initialSpeed, so the reduction carries through.
-        // 100 -> 95, 80 -> 76, 75 -> 71, 115 -> 109.
-        initialSpeed = maxspeed = int((!m_classes ? 100 : game::getplayerclassinfo(this).maxspeed) * 0.95f);
+        // Walk speed -5% (Ed, Nov 13) then another -5% (Ed, Nov 14):
+        // the walk anim plays slow but the character moved fast, so the
+        // feet slid. Scaling the base speed here covers every fpsent
+        // (players, bots, monsters) because they all respawn through
+        // this path; updateEffects() derives maxspeed from initialSpeed,
+        // so the reduction carries through. Total -10%: 100 -> 90,
+        // 80 -> 72, 75 -> 67, 115 -> 103.
+        initialSpeed = maxspeed = int((!m_classes ? 100 : game::getplayerclassinfo(this).maxspeed) * 0.90f);
         respawned = suicided = -1;
         lastaction = 0;
         lastattackgun = gunselect;
