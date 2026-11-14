@@ -190,6 +190,9 @@ extern void newgui(char *name, char *contents, char *header = NULL, char *init =
 extern void showgui(const char *name);
 extern bool guimenuskindisabled(); // true while the rendering menu suppressed its engine skin
 extern float guimenuyoff(); // v0.1.25: vertical lift (fraction of screen height) for the rendering 2D menu, 0 when unset
+extern float guimenuxoff(); // v0.1.103: horizontal shift (fraction of screen width) for the rendering 2D menu, 0 when unset
+extern float guimenudockw(); // Nov 13, Phase 2: dock target width in FONTW for the rendering 2D menu, 0 = no dock
+extern float guimenudockgap(); // Nov 13, Phase 2: dock gap in FONTW for the rendering 2D menu
 extern int cleargui(int n = 0);
 extern void settextscale(float scale);
 
@@ -582,6 +585,26 @@ struct g3d_gui
 
     virtual void pushlist() {}
     virtual void poplist() {}
+
+    // Scrollable list (Nov 13, spells panel): a fixed-height viewport
+    // whose content scrolls on the mouse wheel. Default no-ops so any
+    // other g3d_gui implementer keeps working unchanged; the real gui
+    // class in 3dgui.cpp overrides both. maxh is in FONTH units.
+    // Fixed-width frame (Nov 13, guiframe): maxw is an optional width
+    // cap in FONTW units (0 = no cap); the region is then a fixed-size
+    // frame, content wider than maxw clipped.
+    virtual void scrollbegin(const char *name, float maxh, float maxw = 0) {}
+    virtual void scrollend() {}
+
+    // Minimum-size box (Nov 13, Gemini-verified UI fix): enforces a
+    // minimum content size with NO scissor clipping and NO scroll.
+    // The parent reserves max(content, minimum), so a window holds
+    // one size across tabs (all tabs render at the minimum) and grows
+    // gracefully if content ever exceeds it, instead of clipping the
+    // footer. minw in FONTW, minh in FONTH. Default no-ops so any
+    // other g3d_gui implementer keeps working unchanged.
+    virtual void minboxbegin(float minw, float minh) {}
+    virtual void minboxend(float minw, float minh) {}
 
     virtual bool allowautotab(bool on) = 0;
     virtual bool shouldtab() { return false; }

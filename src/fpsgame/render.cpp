@@ -375,7 +375,7 @@ namespace game
         // model = substring of mdl.ffa the piece fits (NULL = any
         // model); the Ranger pieces only fit the Ranger skeleton.
         // hidden bits: Body_Head=1, Body_Torso=2, Body_Legs=4,
-        // Body_Feet=8 (see hiddenmeshbit in engine/skelmodel.h).
+        // Body_Feet=8, Hair=16 (see hiddenmeshbit in engine/skelmodel.h).
         // The client only knows the LOCAL player's equipment
         // (N_RPG_INV -> clequip via getclientinv), so this applies to
         // player1; other players/bots never wear armor here. Until the
@@ -403,8 +403,8 @@ namespace game
             // (hiddenmeshbit returns 0 for arms), so this row can never
             // match; it exists so the slot is represented in the table.
             { rpg::SLOT_NONE,  NULL, "ranger_male", NULL,        NULL, 0 },
-            // HEAD: Warrior great helm (live; hides NOTHING - full-face helm, face/eyes fill the eye slit naturally; hiding Body_Head would leave floating eyes since Eyes is a separate mesh the hide bit does not cover).
-            { rpg::SLOT_HEAD,  "iron_helm", "ranger_male", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 0 },
+            // HEAD: Warrior great helm (live; hides the Hair only - full-face helm, face/eyes fill the eye slit naturally; hiding Body_Head would leave floating eyes since Eyes is a separate mesh the hide bit does not cover. Hair = bit 16, Nov 13: it poked out of the helm).
+            { rpg::SLOT_HEAD,  "iron_helm", "ranger_male", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
             // TORSO: Warrior chainmail (live; hides Body_Torso). Same geometry as the Ranger tunic, chainmail texture.
             { rpg::SLOT_TORSO, "chain_tunic", "warrior_male", "tag_torso", "playermodels/attachments/armor/warrior_body", 2 },
             // LEGS: Warrior chainmail legs (live; hides Body_Legs).
@@ -412,8 +412,8 @@ namespace game
             // FEET: Warrior chainmail boots (live; hides Body_Feet). Boots need two attaches, one per foot.
             { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_l", "playermodels/attachments/armor/warrior_boots_l", 8 },
             { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
-            // HEAD: Warrior great helm (live; same helm as the Ranger row, model warrior_male so a Warrior equipping it sees it; hides NOTHING, same as Ranger).
-            { rpg::SLOT_HEAD, "iron_helm", "warrior_male", "tag_helm", "playermodels/attachments/armor/warrior_helm", 0 },
+            // HEAD: Warrior great helm (live; same helm as the Ranger row, model warrior_male so a Warrior equipping it sees it; hides the Hair only, same as Ranger).
+            { rpg::SLOT_HEAD, "iron_helm", "warrior_male", "tag_helm", "playermodels/attachments/armor/warrior_helm", 16 },
         };
         hiddenplayermeshes = 0;
         if(d == player1)

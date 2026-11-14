@@ -108,7 +108,7 @@ namespace rpg
         return item(id).name;
     }
 
-    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape" };
+    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape", "offhand" };
 
     const char *slotname(int slot)
     {

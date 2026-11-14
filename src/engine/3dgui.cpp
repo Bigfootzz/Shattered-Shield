@@ -52,6 +52,59 @@ VARP(guiiconcolorg, 0, 15, 255);
 VARP(guiiconcolorb, 0, 15, 255);
 ///RR
 
+// Scrollable GUI list (Nov 13, spells panel). The GUI is stateless, so a
+// scroll region's offset lives here, keyed by name (same pattern as the
+// named text editors). The viewport rect is recorded in GUI coords during
+// the render pass so the wheel handler in keypress() can hit-test it
+// against the last frame's cursor. A region only scrolls when its content
+// is taller than its viewport; otherwise the wheel falls through to the
+// stock window-cycling behaviour.
+struct scrollstate
+{
+    char *name;
+    int scroll;      // current offset in pixels, 0 = top
+    int contenth;    // total content height, pixels (layout pass)
+    int maxh;        // viewport cap, pixels (from the script's FONTH value)
+    int viewh;       // viewport height, pixels
+    int viewx, viewy, vieww; // viewport rect in GUI coords (render pass)
+    // Fixed-width frame (Nov 13, guiframe): maxw is the width cap in
+    // pixels (0 = no cap, the viewport is the content width, as for
+    // guiscroll); contentw is the total content width, pixels.
+    int maxw;
+    int contentw;
+    scrollstate() : name(NULL), scroll(0), contenth(0), maxh(0), viewh(0), viewx(0), viewy(0), vieww(0), maxw(0), contentw(0) {}
+};
+static vector<scrollstate> scrollstates;
+static scrollstate *getscrollstate(const char *name)
+{
+    loopv(scrollstates) if(scrollstates[i].name && !strcmp(scrollstates[i].name, name)) return &scrollstates[i];
+    scrollstate &s = scrollstates.add();
+    s.name = newstring(name);
+    return &s;
+}
+// The scroll regions currently open between scrollbegin/scrollend.
+// A stack, so a guiscroll nested inside a guiframe (the crafting
+// Materials/Gear lists live inside the crafting frame) restores the
+// outer region on close instead of losing it.
+static vector<scrollstate *> scrollstack;
+
+// Active scroll clip rects, in GUI coords (hitx/hity space). Pushed by
+// scrollbegin, popped by scrollend. ishit() rejects hits outside the
+// innermost clip so a child drawn below the fold can't steal a click
+// meant for a widget underneath the viewport.
+struct scrollclip { int x, y, w, h; };
+static vector<scrollclip> scrollclips;
+
+// Draggable scrollbar (Nov 13): which region's thumb is being dragged,
+// and the cursor's offset below the thumb top at grab time (so the thumb
+// doesn't jump to the cursor). scrollwasdown is the button state from
+// the previous frame's render, updated once per frame in g3d_render();
+// a drag only starts on a fresh press over the track, never when the
+// press began on another widget and the cursor drifted onto it.
+static scrollstate *dragscroll = NULL;
+static int draggraboff = 0;
+static bool scrollwasdown = false;
+
 struct gui : g3d_gui
 {
     struct list
@@ -228,6 +281,171 @@ struct gui : g3d_gui
         }
     }
 
+    // Scrollable list (Nov 13, spells panel). Wraps a vertical list in a
+    // fixed-height viewport: content taller than maxh is clipped to the
+    // viewport (glScissor, same GUI->screen conversion as the model
+    // previews) and offset by the scroll amount; the mouse wheel over the
+    // viewport moves it (see keypress). The parent only ever reserves the
+    // viewport height, so the window never grows past it. maxh is in
+    // FONTH units, matching guistrut usage in scripts. The content must
+    // be a single vertical guilist (the scroll list itself takes the
+    // opposite direction from its parent, so callers wrap the rows in
+    // one). The header/bar stay outside the scroll region, fixed.
+    // Fixed-width frame (Nov 13, guiframe): maxw is an optional width
+    // cap in FONTW units (0 = no cap, the viewport is the content
+    // width, as for guiscroll). When maxw > 0 the parent reserves the
+    // capped width too, so the region is a fixed-size frame: content
+    // wider than maxw is clipped to the frame (no horizontal scroll).
+    void scrollbegin(const char *name, float maxh, float maxw = 0)
+    {
+        scrollstate *st = getscrollstate(name);
+        scrollstack.add(st);
+        if(layoutpass)
+        {
+            st->maxh = int(maxh*FONTH);
+            st->maxw = int(maxw*FONTW);
+            pushlist();
+            return;
+        }
+        // Render pass: clamp the offset to the content measured in the
+        // layout pass, then clip + offset the children.
+        int maxscroll = max(st->contenth - st->viewh, 0);
+        if(st->scroll < 0) st->scroll = 0;
+        if(st->scroll > maxscroll) st->scroll = maxscroll;
+        pushlist();
+        st->viewx = curx;
+        st->viewy = cury;
+        st->vieww = xsize;
+        st->viewh = ysize;
+        // Clip when the content overflows the viewport in either
+        // dimension: taller than the height (scrolls) or, for a fixed
+        // width frame, wider than the width (clipped, no horizontal
+        // scroll in Phase 1). Without the width arm, wide content
+        // would draw outside the frame's box.
+        if(st->contenth > st->viewh || (st->maxw > 0 && st->contentw > st->vieww))
+        {
+            int x1 = int(floor(scr_w*(st->viewx*scale.x+origin.x))),
+                y1 = int(floor(scr_h*(1 - ((st->viewy+st->viewh)*scale.y+origin.y)))),
+                x2 = int(ceil(scr_w*((st->viewx+st->vieww)*scale.x+origin.x))),
+                y2 = int(ceil(scr_h*(1 - (st->viewy*scale.y+origin.y))));
+            glScissor(x1, y1, x2-x1, y2-y1);
+            glEnable(GL_SCISSOR_TEST);
+            scrollclip &c = scrollclips.add();
+            c.x = st->viewx; c.y = st->viewy; c.w = st->vieww; c.h = st->viewh;
+        }
+        cury -= st->scroll;
+    }
+
+    void scrollend()
+    {
+        // The region is the one scrollbegin opened; the stack restores
+        // the outer region when a guiscroll closes inside a guiframe.
+        scrollstate *st = NULL;
+        if(scrollstack.length()) st = scrollstack.pop();
+        if(!st) { poplist(); return; }
+        if(layoutpass)
+        {
+            st->contenth = ysize;
+            st->viewh = min(ysize, st->maxh);
+            ysize = st->viewh;
+            // Fixed-width frame: cap the width the same way, so the
+            // parent reserves the frame width, not the content width.
+            // The content width is recorded for diagnostics; the clip
+            // in the render pass cuts off anything wider than the frame.
+            st->contentw = xsize;
+            if(st->maxw > 0)
+            {
+                st->vieww = min(xsize, st->maxw);
+                xsize = st->vieww;
+            }
+            poplist();
+            return;
+        }
+        // The clip in scrollbegin fires on either dimension overflowing
+        // (height, or width for a fixed-width frame), so the pop +
+        // scissor disable must use the same condition; the scrollbar
+        // itself is vertical-only (height overflow).
+        bool clipped = st->contenth > st->viewh || (st->maxw > 0 && st->contentw > st->vieww);
+        bool overflowing = st->contenth > st->viewh;
+        if(clipped)
+        {
+            if(scrollclips.length()) scrollclips.pop();
+            glDisable(GL_SCISSOR_TEST);
+        }
+        // poplist() restores cury by the list height, so set it to the
+        // viewport bottom first (children advanced it by the full
+        // content height from the scrolled start).
+        cury = st->viewy + st->viewh;
+        if(overflowing)
+        {
+            // Scrollbar indicator on the viewport's right edge: track +
+            // thumb sized/placed by the scroll fraction. Drawn, not laid
+            // out, so it never moves the cursor. Wheel scrolls; the thumb
+            // is draggable (Nov 13): grab it on a fresh press, or jump
+            // the track to the cursor and grab from there.
+            int barw = 5;
+            int trackx = st->viewx + st->vieww - barw;
+            int thumbh = max(10, st->viewh * st->viewh / max(st->contenth, 1));
+            int maxscroll = max(st->contenth - st->viewh, 1);
+            int thumby = st->viewy + (st->viewh - thumbh) * st->scroll / maxscroll;
+            glDisable(GL_TEXTURE_2D);
+            notextureshader->set();
+            glColor3f(0.12f, 0.12f, 0.12f);
+            rect_(trackx, st->viewy, barw, st->viewh);
+            glColor3f(0.65f, 0.65f, 0.65f);
+            rect_(trackx, thumby, barw, thumbh);
+            glEnable(GL_TEXTURE_2D);
+            defaultshader->set();
+            bool isdown = (mousebuttons & G3D_PRESSED) != 0;
+            if(dragscroll == st)
+            {
+                if(isdown)
+                {
+                    int newscroll = int((gui::hity - draggraboff - st->viewy) * maxscroll / max(st->viewh - thumbh, 1));
+                    st->scroll = clamp(newscroll, 0, maxscroll);
+                }
+                else dragscroll = NULL;
+            }
+            else if(isdown && !scrollwasdown && !dragscroll)
+            {
+                if(gui::hitx >= trackx && gui::hitx < trackx + barw && gui::hity >= st->viewy && gui::hity < st->viewy + st->viewh)
+                {
+                    if(gui::hity >= thumby && gui::hity < thumby + thumbh)
+                        draggraboff = int(gui::hity - thumby);
+                    else
+                    {
+                        st->scroll = clamp(int((gui::hity - st->viewy - thumbh/2) * maxscroll / max(st->viewh - thumbh, 1)), 0, maxscroll);
+                        draggraboff = thumbh/2;
+                    }
+                    dragscroll = st;
+                }
+            }
+        }
+        poplist();
+    }
+
+    // Minimum-size box (Nov 13, Gemini-verified UI fix): enforces a
+    // minimum content size with NO scissor clipping and NO scroll. The
+    // parent reserves max(content, minimum), so a window holds one size
+    // across tabs (all tabs render at the minimum) and grows gracefully
+    // if content ever exceeds it, instead of clipping the footer.
+    // Uses pushlist()/poplist() so the depth parity matches guiframe
+    // exactly (callers keep the same guilist nesting). minw in FONTW,
+    // minh in FONTH.
+    void minboxbegin(float minw, float minh)
+    {
+        pushlist();
+    }
+    void minboxend(float minw, float minh)
+    {
+        if(layoutpass)
+        {
+            xsize = max(xsize, int(minw*FONTW));
+            ysize = max(ysize, int(minh*FONTH));
+        }
+        poplist();
+    }
+
     // RR: Add minimum width var
     int text  (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, false, minwidth); }
     int button(const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, true, false, minwidth); }
@@ -314,7 +532,24 @@ struct gui : g3d_gui
         if(shouldmergehits) return windowhit==this && (ishorizontal() ? hitx>=x && hitx<x+w : hity>=y && hity<y+h);
         if(ishorizontal()) h = ysize;
         else w = xsize;
-        return windowhit==this && hitx>=x && hity>=y && hitx<x+w && hity<y+h;
+        if(!(windowhit==this && hitx>=x && hity>=y && hitx<x+w && hity<y+h)) return false;
+        // Scrolled-out: the cursor must also be inside every active scroll
+        // viewport, or a child drawn below the fold could steal a click
+        // meant for a widget underneath the viewport.
+        loopv(scrollclips)
+        {
+            scrollclip &c = scrollclips[i];
+            if(!(hitx>=c.x && hitx<c.x+c.w && hity>=c.y && hity<c.y+c.h)) return false;
+        }
+        // Scrollbar strip: an overflowing region's 5px track owns its
+        // right edge, so a click there drags the thumb (see scrollend)
+        // instead of reaching the row widget underneath it.
+        loopv(scrollstates)
+        {
+            scrollstate &st = scrollstates[i];
+            if(st.contenth > st.viewh && hitx>=st.viewx+st.vieww-5 && hitx<st.viewx+st.vieww && hity>=st.viewy && hity<st.viewy+st.viewh) return false;
+        }
+        return true;
     }
 
     // RR: Colorizable images
@@ -684,6 +919,14 @@ struct gui : g3d_gui
     // no tab-switch center shift, with no per-state size modeling.
     // Tint mirrors icon_() (white lerped to light, which is white for
     // 2D menus), so the parchment looks exactly as it did via guiimage.
+    // 3-slice vertical draw (Nov 13, Gemini-verified UI fix): the steel
+    // texture is a plain stretch, so a variable-height window squashed
+    // or stretched the title plaque. Draw it in 3 vertical bands so the
+    // plaque and bottom border keep a fixed height and only the middle
+    // body stretches. UV splits: plaque v=[0,0.18], body v=[0.18,0.90],
+    // border v=[0.90,1.0]. Top plaque 3.5 FONTH (matches the header
+    // guilist: 0.9 top margin + ~1.0 title + 1.6 bottom margin);
+    // bottom border 1.5 FONTH.
     void backgroundtex(Texture *t)
     {
         if(layoutpass) return;
@@ -691,7 +934,39 @@ struct gui : g3d_gui
         glBindTexture(GL_TEXTURE_2D, t->id);
         vec color = colorfromhex(0xFFFFFF).lerp(light, 1.f);
         glColor3fv(color.v);
-        rect_(curx, cury, xsize, ysize, 0);
+        const float v_top = 0.18f;
+        const float v_bot = 0.90f;
+        int top_h = min(ysize, int(3.5f * FONTH));
+        int bot_h = min(max(0, ysize - top_h), int(1.5f * FONTH));
+        int mid_h = max(0, ysize - top_h - bot_h);
+        float x0 = curx, x1 = curx + xsize;
+        float y0 = cury;
+        float y1 = y0 + top_h;
+        float y2 = y1 + mid_h;
+        float y3 = y2 + bot_h;
+        glBegin(GL_QUADS);
+        // 1. Top title plaque (fixed height, never squashes)
+        glTexCoord2f(0.0f, 0.0f);  glVertex2f(x0, y0);
+        glTexCoord2f(1.0f, 0.0f);  glVertex2f(x1, y0);
+        glTexCoord2f(1.0f, v_top); glVertex2f(x1, y1);
+        glTexCoord2f(0.0f, v_top); glVertex2f(x0, y1);
+        // 2. Middle body (stretches to fit window height)
+        if(mid_h > 0)
+        {
+            glTexCoord2f(0.0f, v_top); glVertex2f(x0, y1);
+            glTexCoord2f(1.0f, v_top); glVertex2f(x1, y1);
+            glTexCoord2f(1.0f, v_bot); glVertex2f(x1, y2);
+            glTexCoord2f(0.0f, v_bot); glVertex2f(x0, y2);
+        }
+        // 3. Bottom border (fixed height)
+        if(bot_h > 0)
+        {
+            glTexCoord2f(0.0f, v_bot); glVertex2f(x0, y2);
+            glTexCoord2f(1.0f, v_bot); glVertex2f(x1, y2);
+            glTexCoord2f(1.0f, 1.0f);  glVertex2f(x1, y3);
+            glTexCoord2f(0.0f, 1.0f);  glVertex2f(x0, y3);
+        }
+        glEnd();
     }
 
     // RR -> colorizable icons
@@ -1025,18 +1300,48 @@ struct gui : g3d_gui
 
     void adjustscale()
     {
-        int w = xsize + (skinx[2]-skinx[1])*SKIN_SCALE + (skinx[10]-skinx[9])*SKIN_SCALE, h = ysize + (skiny[9]-skiny[7])*SKIN_SCALE;
-        if(tcurrent) h += ((skiny[5]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE + FONTH-2*INSERT;
-        else h += (skiny[6]-skiny[3])*SKIN_SCALE;
+        // Skinless menus (guinoskin, e.g. all RPG windows) draw no engine
+        // skin, so the skin margins must be zero here too. Previously
+        // adjustscale() always added the skinx/skiny margins even for
+        // noskin menus, so w/h (and the origin derived from them) were
+        // computed for a larger box than the one actually drawn, shifting
+        // the window left/up. (Nov 13, Gemini-verified UI fix.)
+        bool noskin = guimenuskindisabled();
+        int skinw = noskin ? 0 : (skinx[2]-skinx[1])*SKIN_SCALE + (skinx[10]-skinx[9])*SKIN_SCALE;
+        int skinh = noskin ? 0 : (skiny[9]-skiny[7])*SKIN_SCALE;
+        int skinhead = noskin ? 0 : (skiny[6]-skiny[3])*SKIN_SCALE;
+        int skintab = noskin ? 0 : ((skiny[5]-skiny[1])-(skiny[3]-skiny[2]))*SKIN_SCALE;
+        int w = xsize + skinw, h = ysize + skinh;
+        if(tcurrent) h += skintab + FONTH-2*INSERT;
+        else h += skinhead;
 
         float aspect = forceaspect ? 1.0f/forceaspect : float(scr_h)/float(scr_w), fit = 1.0f;
         if(w*aspect*basescale>1.0f) fit = 1.0f/(w*aspect*basescale);
         if(h*basescale*fit>maxscale) fit *= maxscale/(h*basescale*fit);
-        origin = vec(0.5f-((w-xsize)/2 - (skinx[2]-skinx[1])*SKIN_SCALE)*aspect*scale.x*fit, 0.5f + (0.5f*h-(skiny[9]-skiny[7])*SKIN_SCALE)*scale.y*fit, 0);
+        origin = vec(0.5f-((w-xsize)/2 - (noskin ? 0 : (skinx[2]-skinx[1])*SKIN_SCALE))*aspect*scale.x*fit, 0.5f + (0.5f*h-(noskin ? 0 : (skiny[9]-skiny[7])*SKIN_SCALE))*scale.y*fit, 0);
         // v0.1.25: per-menu vertical lift for 2D menus (guilift init command).
         // Normalized y grows downward (glOrtho 0,1,1,0), so subtracting moves
         // the menu UP. Only the dialogue uses it today (0.15 = 15% of screen).
         if(gui2d) origin.y -= guimenuyoff();
+        // v0.1.103: per-menu horizontal shift for 2D menus (guishiftx init
+        // command). Normalized x grows rightward, so adding moves the menu
+        // RIGHT. The spells floating panel uses it to dock right of the
+        // character sheet.
+        // Phase 2 dock (Nov 13): if the menu docks (guidockright), its
+        // center is computed from the real widths instead of a magic
+        // fraction: the target is a centered window of dockw FONTW, so
+        // this window's left content edge sits at the target's right
+        // content edge plus a dockgap FONTW gap. The skin extends a few
+        // pixels into the gap on both sides, which the gap absorbs.
+        // Dock replaces guishiftx when set; otherwise the shift applies.
+        if(gui2d)
+        {
+            float dockw = guimenudockw();
+            if(dockw > 0)
+                origin.x = 0.5f + ((dockw*FONTW)/2 + guimenudockgap()*FONTW + xsize/2) * aspect * scale.x * fit;
+            else
+                origin.x += guimenuxoff();
+        }
         scale = vec(aspect*scale.x*fit, scale.y*fit, 1);
     }
 
@@ -1311,8 +1616,31 @@ bool menukey(int code, bool isdown, int cooked)
 
     if(fieldmode == FIELDSHOW || !e)
     {
-        if(windowhit) switch(code)
+        if(windowhit)
         {
+            // Mouse wheel over a scrollable list scrolls it instead of
+            // cycling the window stack (Nov 13, spells panel). Only when
+            // the cursor is over a viewport whose content overflows; the
+            // viewport rects are in GUI coords, same as hitx/hity from
+            // the last render pass. Wheel up shows earlier content,
+            // wheel down shows later content, two text lines per notch.
+            if(isdown && (code==-4 || code==-5))
+            {
+                loopv(scrollstates)
+                {
+                    scrollstate &st = scrollstates[i];
+                    if(st.contenth > st.viewh && gui::hitx>=st.viewx && gui::hitx<st.viewx+st.vieww && gui::hity>=st.viewy && gui::hity<st.viewy+st.viewh)
+                    {
+                        int maxscroll = st.contenth - st.viewh;
+                        st.scroll += (code==-4 ? -1 : 1) * FONTH*2;
+                        if(st.scroll < 0) st.scroll = 0;
+                        if(st.scroll > maxscroll) st.scroll = maxscroll;
+                        return true;
+                    }
+                }
+            }
+            switch(code)
+            {
             case -4: // window "management"
                 if(isdown)
                 {
@@ -1348,6 +1676,7 @@ bool menukey(int code, bool isdown, int cooked)
                     else windowhit->savedorigin->sub(vec(camdir).mul(guipushdist));
                 }
                 return true;
+            }
         }
 
         // Shattered Shield battlegrounds (v0.1.41): the queue Cancel
@@ -1539,6 +1868,9 @@ void g3d_render()
         keyrepeat(fieldmode!=FIELDSHOW || editmode);
     }
 
+    // Scrollbar drag edge detection (Nov 13): record this frame's button
+    // state so a drag only starts on a fresh press over the track.
+    scrollwasdown = (mousebuttons & G3D_PRESSED) != 0;
     mousebuttons = 0;
 }
 

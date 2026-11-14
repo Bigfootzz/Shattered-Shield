@@ -33,8 +33,27 @@ struct menu : g3d_callback
     // the dialogue window, which Ed reports has never sat in the right
     // place (it overlapped the bottom HUD strip). 0 = default centering.
     float yoff;
+    // v0.1.103: horizontal shift for 2D menus, in fractions of screen
+    // width (0.30 = 30% right). Set by the guishiftx init-script command;
+    // used by the spells floating panel, which docks right of the
+    // character sheet. 0 = default centering.
+    float xoff;
+    // Panel slot (Nov 13, UI enhancement Phase 2, WoW UIPanel): menus
+    // sharing a slot are mutually exclusive - opening one closes the
+    // others in that slot, so only one main panel is open at a time.
+    // Set by the guipanel init-script command (e.g. "main"). NULL =
+    // no slot (floating companion panels like the spells panel).
+    const char *panel;
+    // Dock (Nov 13, UI enhancement Phase 2): dock this window's left
+    // edge to the right edge of a centered window of dockw FONTW,
+    // plus a dockgap FONTW gap. Set by the guidockright init-script
+    // command. 0 = no dock (plain centering + guishiftx). Replaces the
+    // guishiftx guess for the spells panel: the sheet is a fixed 34
+    // FONTW (guiframe), the panel a fixed 20, so the dock is computed
+    // from the real widths and the current scale, not a magic fraction.
+    float dockw, dockgap;
 
-    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true), noskin(false), yoff(0) {}
+    menu() : name(NULL), header(NULL), contents(NULL), initscript(NULL), onclear(NULL), showtab(true), noskin(false), yoff(0), xoff(0), panel(NULL), dockw(0), dockgap(0) {}
 
     void gui(g3d_gui &g, bool firstpass)
     {
@@ -171,6 +190,17 @@ void pushgui(menu *m, int pos = -1)
         menustart = totalmillis;
     }
     if(m->initscript) execute(m->initscript);
+    // Panel manager: opening a menu closes any other open menu in the
+    // same slot (set by guipanel in the init script, above). Reverse
+    // order so removals do not shift the indices still to visit.
+    if(m->panel)
+    {
+        loopvrev(guistack)
+        {
+            menu *o = guistack[i];
+            if(o != m && o->panel && !strcmp(o->panel, m->panel)) removegui(o);
+        }
+    }
 }
 
 void restoregui(int pos)
@@ -291,6 +321,56 @@ void guilift(float *off)
 float guimenuyoff()
 {
     return currentMenu ? currentMenu->yoff : 0;
+}
+
+// v0.1.103: same pattern as guilift, for the per-menu horizontal shift.
+// Intended for a menu's init script (e.g. "guishiftx 0.30" shifts the
+// menu 30% of screen width right). 3dgui's adjustscale() applies it
+// to 2D menus.
+void guishiftx(float *off)
+{
+    if(guistack.empty()) return;
+    guistack.last()->xoff = *off;
+}
+
+// 3dgui render path asks this per frame: horizontal shift of the menu
+// being rendered.
+float guimenuxoff()
+{
+    return currentMenu ? currentMenu->xoff : 0;
+}
+
+// Panel slot (Nov 13, UI enhancement Phase 2): marks the menu being
+// opened as occupying a named slot (e.g. "main"). pushgui closes any
+// other open menu in the same slot after the init script runs, so only
+// one main panel is open at a time. Companion panels (spells) use no
+// slot and stay open alongside the main panel.
+void guipanel(char *slot)
+{
+    if(guistack.empty()) return;
+    guistack.last()->panel = slot;
+}
+
+// Dock (Nov 13, UI enhancement Phase 2): dock the menu being opened
+// to the right of a centered window of <width> FONTW, with a <gap>
+// FONTW gap. 3dgui's adjustscale() applies it to 2D menus.
+void guidockright(float *width, float *gap)
+{
+    if(guistack.empty()) return;
+    guistack.last()->dockw = *width;
+    guistack.last()->dockgap = *gap;
+}
+
+// 3dgui render path asks this per frame: dock target of the menu being
+// rendered (width in FONTW, 0 = no dock), and the gap in FONTW.
+float guimenudockw()
+{
+    return currentMenu ? currentMenu->dockw : 0;
+}
+
+float guimenudockgap()
+{
+    return currentMenu ? currentMenu->dockgap : 0;
 }
 
 void guistayopen(uint *contents)
@@ -607,6 +687,48 @@ void guilist(uint *contents)
     cgui->poplist();
 }
 
+// Scrollable list (Nov 13, spells panel): wraps content in a
+// fixed-height viewport that clips and scrolls on the mouse wheel.
+// maxh is in FONTH units. The content must be a single vertical
+// guilist (the scroll list takes the opposite direction from its
+// parent, so callers wrap the rows in one). Header/bar stay
+// outside the scroll region, fixed.
+void guiscroll(char *name, float *maxh, uint *contents)
+{
+    if(!cgui) return;
+    cgui->scrollbegin(name, *maxh);
+    execute(contents);
+    cgui->scrollend();
+}
+
+// Fixed-size frame (Nov 13, UI enhancement): a fixed-width, fixed-height
+// viewport. Same engine machinery as guiscroll (clip + wheel scroll +
+// draggable scrollbar), but the parent reserves the fixed width too, so
+// the region never grows with content. w is in FONTW units, h in FONTH.
+// The content must be a single vertical guilist (the frame list takes
+// the opposite direction from its parent, so callers wrap the rows in
+// one), exactly as for guiscroll.
+void guiframe(char *name, float *w, float *h, uint *contents)
+{
+    if(!cgui) return;
+    cgui->scrollbegin(name, *h, *w);
+    execute(contents);
+    cgui->scrollend();
+}
+// Minimum-size box (Nov 13, Gemini-verified UI fix): enforces a minimum
+// content size with NO scissor clipping and NO scroll. The parent
+// reserves max(content, minimum), so a window holds one size across
+// tabs and grows gracefully if content exceeds it. Replaces guiframe
+// as the outer window wrapper; guiscroll stays for inner lists only.
+// w in FONTW, h in FONTH.
+void guiminbox(float *w, float *h, uint *contents)
+{
+    if(!cgui) return;
+    cgui->minboxbegin(*w, *h);
+    execute(contents);
+    cgui->minboxend(*w, *h);
+}
+
 void guialign(int *align, uint *contents)
 {
     if(!cgui) return;
@@ -678,11 +800,15 @@ COMMAND(guitext, "ssi");
 COMMAND(guiheader, "s");
 ICOMMAND(cleargui, "i", (int *n), intret(cleargui(*n)));
 COMMAND(showgui, "s");
+ICOMMAND(guishowing, "s", (char *name), intret(guishowing(name) ? 1 : 0));
 COMMAND(hidegui, "s");
 COMMAND(togglegui, "s"); // RR
 COMMAND(guionclear, "s");
 COMMAND(guinoskin, "");
 COMMAND(guilift, "f");
+COMMAND(guishiftx, "f");
+COMMAND(guipanel, "s");
+COMMAND(guidockright, "ff");
 COMMAND(guistayopen, "e");
 COMMAND(guinopressed, "e");
 COMMAND(guinoautotab, "e");
@@ -690,6 +816,9 @@ COMMAND(guitextscale, "fe");
 COMMAND(guimerge, "e");
 
 COMMAND(guilist, "e");
+COMMAND(guiscroll, "sfe");
+COMMAND(guiframe, "sffe");
+COMMAND(guiminbox, "ffe");
 COMMAND(guialign, "ie");
 COMMAND(guititle, "si");
 COMMAND(guibar,"");

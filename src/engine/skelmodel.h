@@ -10,6 +10,8 @@ VAR(testtags, 0, 0, 1);
 
 // Armor swap (Nov 10): which bit hides a body-part mesh by name.
 // 0 = not a hideable body part (arms, face, attachments, ...).
+// Hair = 16 (Nov 13): a helm hides the hair so it cannot poke out
+// of the helmet; the face and eyes stay visible (eye slit).
 static inline int hiddenmeshbit(const char *name)
 {
     if(!name) return 0;
@@ -17,6 +19,7 @@ static inline int hiddenmeshbit(const char *name)
     if(!strcmp(name, "Body_Torso")) return 2;
     if(!strcmp(name, "Body_Legs")) return 4;
     if(!strcmp(name, "Body_Feet")) return 8;
+    if(!strcmp(name, "Hair")) return 16;
     return 0;
 }
 
@@ -1894,17 +1897,6 @@ struct skelmodel : animmodel
                         {
                             skelmesh *m = (skelmesh *)meshes[i];
                             if(meshdrawingorder(m->name) != j) continue;
-                            // Diagnostic (Nov 11): log mesh name + skip decision
-                            // when armor hide bits are set. Remove before the
-                            // next real release.
-                            {
-                                static int diag_meshlog = 0;
-                                if(hiddenplayermeshes && diag_meshlog < 60)
-                                {
-                                    diag_meshlog++;
-                                    conoutf("[DIAG] mesh name='%s' hiddenbit=%d hiddenbits=%d skip=%d", m->name ? m->name : "(null)", hiddenmeshbit(m->name), hiddenplayermeshes, (hiddenmeshbit(m->name) & hiddenplayermeshes) ? 1 : 0);
-                                }
-                            }
                             if(hiddenplayermeshes && (hiddenmeshbit(m->name) & hiddenplayermeshes)) continue;
                             p->skins[i].bind(m, as);
                             m->render(as, p->skins[i], *vbocache);
@@ -1967,17 +1959,6 @@ struct skelmodel : animmodel
                     {
                         skelmesh *m = (skelmesh *)meshes[i];
                         if(meshdrawingorder(m->name) != j) continue;
-                        // Diagnostic (Nov 11): log mesh name + skip decision
-                        // when armor hide bits are set. Remove before the
-                        // next real release.
-                        {
-                            static int diag_meshlog = 0;
-                            if(hiddenplayermeshes && diag_meshlog < 60)
-                            {
-                                diag_meshlog++;
-                                conoutf("[DIAG] mesh name='%s' hiddenbit=%d hiddenbits=%d skip=%d", m->name ? m->name : "(null)", hiddenmeshbit(m->name), hiddenplayermeshes, (hiddenmeshbit(m->name) & hiddenplayermeshes) ? 1 : 0);
-                            }
-                        }
                         if(hiddenplayermeshes && (hiddenmeshbit(m->name) & hiddenplayermeshes)) continue;
                         p->skins[i].bind(m, as);
                         if(skel->usegpuskel) skel->setgpubones(rsc, bc, vblends);

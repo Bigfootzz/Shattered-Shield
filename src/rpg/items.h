@@ -43,6 +43,16 @@ namespace rpg
         SLOT_RING1,
         SLOT_RING2,
         SLOT_CAPE,
+        // Off Hand (Nov 13 rework, Ed's word): Warrior holds a shield here,
+        // Magi an orb. Ranger has no off-hand item (the bow is two-handed),
+        // so no off-hand item is ever gated to Ranger. The slot itself is
+        // class-agnostic — the gate lives on the item (armorclass), the same
+        // mechanism as the armor gate, so a shield (armorclass Warrior) or
+        // orb (armorclass Magi) equips and sells only for its class. No
+        // shield/orb item defs exist yet; the slot reads empty until they do.
+        // The 3D attach (shield on tag_shield, orb in the left hand) is
+        // future work — the slot, paperdoll and sheet are wired now.
+        SLOT_OFFHAND,
         SLOT_COUNT,
         SLOT_NONE = -1
     };
@@ -123,7 +133,7 @@ namespace rpg
     const itemdef &item(int id);        // id in [0, itemcount())
     int finditem(const char *id);       // -1 when unknown
     const char *itemname(int id);       // display name, "" when invalid
-    const char *slotname(int slot);     // "mainhand".."cape", "" when invalid
+    const char *slotname(int slot);     // "mainhand".."offhand", "" when invalid
     int slotid(const char *name);       // SLOT_* or SLOT_NONE
 
     // --- content data layer (crafting build step 0) ---

@@ -1147,6 +1147,34 @@ namespace console
 
 VAR(numcpus, 1, 1, 16);
 
+// Add-on platform (Nov 13, UI enhancement Phase 3): load UI add-ons from
+// data/addons/<name>/addon.cfg at startup, after the base menus and game
+// config. Each add-on folder is a self-contained UI extension written in
+// CubeScript using the same GUI commands (guiframe, guibutton, ...).
+// Add-ons run at startup, not in response to a hardware event, so they
+// may only build UI and read game state; gameplay actions (equip, use,
+// cast, ...) are only valid inside a button/click callback, which IS a
+// hardware event (WoW's protected-function rule). Settings persist via
+// the stock `persist` command. A folder without addon.cfg is ignored;
+// a missing data/addons/ folder is not an error. Re-running is safe:
+// newgui overwrites an existing menu of the same name.
+void loadaddons()
+{
+    vector<char *> entries;
+    if(!listdir("data/addons", true, NULL, entries)) return;
+    loopv(entries)
+    {
+        char *name = entries[i];
+        if(!strcmp(name, ".") || !strcmp(name, "..")) continue;
+        defformatstring(path)("data/addons/%s/addon.cfg", name);
+        if(!findfile(path, "rb")) continue;
+        conoutf("loading add-on: %s", name);
+        execfile(path, false);
+    }
+    loopv(entries) delete[] entries[i];
+}
+ICOMMAND(loadaddons, "", (), loadaddons());
+
 #ifdef __APPLE__
 int real_main(int argc, char **argv)
 #else
@@ -1403,6 +1431,8 @@ int main(int argc, char **argv)
     execfile(gamecfgname);
 
     game::loadconfigs();
+
+    loadaddons();
 
     identflags |= IDF_PERSIST;
 

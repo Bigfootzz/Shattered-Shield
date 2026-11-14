@@ -1540,6 +1540,25 @@ namespace game
     // Ability description (Nov 13): one-line text for the HUD tooltip and
     // the character-sheet Spells tab. "" when the id is invalid.
     ICOMMAND(rpgabdesc, "i", (int *i), { result(rpg::validability(*i) && rpg::ability(*i).desc ? rpg::ability(*i).desc : ""); });
+    // Ability icon (Nov 13 rework): HUD icon path for an ability id, for
+    // the character-sheet Spells side panel. Same table as the HUD's
+    // abiconfiles (fps.cpp); Basic Attack (id 2) has no icon and falls
+    // back to icon_empty.png, same as rpgeqicon. The table lives outside
+    // the ICOMMAND because the commas in a brace-initializer would split
+    // the macro arguments.
+    static const char *rpgabiconfiles[8] = {
+        "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
+        "packages/ui/rpg/hud/icon_sparkbolt.png",   // 1 Spark Bolt
+        "",                                          // 2 Basic (right-click)
+        "packages/ui/rpg/hud/icon_arcanebolt.png",  // 3 Arcane Bolt
+        "packages/ui/rpg/hud/icon_icebolt.png",     // 4 Ice Bolt
+        "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
+        "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot
+        "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend
+    };
+    ICOMMAND(rpgabicon, "i", (int *i), {
+        result(rpg::validability(*i) && *i >= 0 && *i < 8 && rpgabiconfiles[*i] && rpgabiconfiles[*i][0] ? rpgabiconfiles[*i] : "packages/ui/rpg/icons/icon_empty.png");
+    });
     // Spells tab (Nov 13): ability id at position <slot> in the player's
     // class list (rpg::classabilities), or -1 when the slot is empty.
     // Lets the sheet list class spells without hardcoding ability ids;
