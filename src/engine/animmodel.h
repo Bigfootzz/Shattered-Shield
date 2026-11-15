@@ -938,6 +938,14 @@ struct animmodel : model
                     continue;
                 }
                 part *p = m->parts[0];
+                {   // DIAGNOSTIC v0.1.124: log attach linktype (first 60). linktype: 0=LINK_TAG 1=LINK_COOP 2=LINK_REUSE 3=LINK_SKIN (animmodel.h enum).
+                    static int diag_attach_n = 0;
+                    if(diag_attach_n < 60)
+                    {
+                        conoutf("rpg: attach #%d tag='%s' name='%s' loaded=%d linktype=%d", diag_attach_n, a[i].tag ? a[i].tag : "(null)", a[i].name ? a[i].name : "(null)", (m && m->loaded) ? 1 : 0, (int)linktype(m));
+                        diag_attach_n++;
+                    }
+                }
                 switch(linktype(m))
                 {
                     case LINK_TAG:
