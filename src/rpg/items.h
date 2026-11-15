@@ -88,7 +88,7 @@ namespace rpg
                            // set it with ss_item_buff; buff items must not heal.
         // Phase 3 gear enhancement: persistent equipped bonus, armor only,
         // deliberately separate from buffattr (consumables + timed path).
-        // gearstat -1 = unenhanced; gearbonus 1..5 raw points (pre-weighting);
+        // gearstat -1 = unenhanced; gearbonus 1..6 raw points (pre-weighting);
         // enhbase = base gear id this enhanced piece derives from (NULL when unenhanced).
         int gearstat = -1; // Phase 3 default: unenhanced (positional fallback
                            // initializers predate these fields and rely on it)

@@ -244,7 +244,7 @@ namespace rpg
         if(c == "ss_item_gearbonus")
         {
             if(argc != 1 || !parseintarg(cmd, argv[0], curitem.gearbonus, err)) return false;
-            if(curitem.gearbonus < 0 || curitem.gearbonus > 5) { err = "ss_item_gearbonus out of range 0..5"; return false; }
+            if(curitem.gearbonus < 0 || curitem.gearbonus > 6) { err = "ss_item_gearbonus out of range 0..6"; return false; }
             return true;
         }
         if(c == "ss_item_enhbase") { if(argc != 1) { err = "ss_item_enhbase: expected 1 argument (base gear id)"; return false; } curitem.enhbase = argv[0]; return true; }
@@ -463,8 +463,8 @@ namespace rpg
             { err = "item '" + b.id + "' has an out-of-range gear attribute"; return false; }
             if(b.gearstat >= 0 && type != ITEM_ARMOR)
             { err = "item '" + b.id + "' sets a gear bonus but is not armor"; return false; }
-            if(b.gearstat >= 0 && (b.gearbonus < 1 || b.gearbonus > 5))
-            { err = "item '" + b.id + "' sets a gear attribute but no gear bonus 1..5"; return false; }
+            if(b.gearstat >= 0 && (b.gearbonus < 1 || b.gearbonus > 6))
+            { err = "item '" + b.id + "' sets a gear attribute but no gear bonus 1..6"; return false; }
             if(b.gearstat >= 0 && b.enhbase.empty())
             { err = "item '" + b.id + "' sets a gear bonus but no ss_item_enhbase"; return false; }
             if(b.gearstat < 0 && (b.gearbonus != 0 || !b.enhbase.empty()))

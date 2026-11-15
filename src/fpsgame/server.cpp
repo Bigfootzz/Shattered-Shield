@@ -7730,6 +7730,27 @@ namespace server
                 // Idempotent: a same-name switch just reloads the same
                 // character and re-sends the same state.
                 rpg::onconnect(cq->name);
+                // RPG character switch (Nov 15, Note 116 Warrior model):
+                // the server is the authority on appearance. Re-resolve
+                // the playermodel from the new character's stored model
+                // dir and broadcast it, so the client's render agrees
+                // with the character it just loaded. Without this the
+                // server keeps the previous character's playermodel and
+                // its spawn/init messages overwrite the client's correct
+                // model: the Warrior rendered as a Ranger (weapon in the
+                // left hand, no Warrior armor) after switching from one.
+                {
+                    char modeldir[64]; modeldir[0] = '\0';
+                    if(rpg::charmodel(cq->name, modeldir, sizeof(modeldir)) && modeldir[0])
+                    {
+                        int pm = rpg_modelidx(modeldir);
+                        if(pm >= 0)
+                        {
+                            cq->state.playermodel = pm;
+                            rpg_sendappear(cq, pm);
+                        }
+                    }
+                }
                 rpg_sendvwep(cq);
                 rpg_sendarmor(cq);
                 break;
