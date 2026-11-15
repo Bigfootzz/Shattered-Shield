@@ -1961,9 +1961,18 @@ namespace game
 
     // --- character select (ITEM 5): CubeScript bindings for the menu ---
     // rpg_charlist populates aliases: rpg_charn (count), rpg_charname0..2, rpg_charlevel0..2, rpg_chararch0..2, rpg_charmodel0..2 (dir name) and rpg_charmodelidx0..2 (playermodel INDEX; resolved data-driven from data/game_fps.cfg playermodeldir<i> aliases, so new archetypes only need playermodeldir entries to resolve)
+    // Separate-model rule (Ed, Nov 15): each class loads ONLY its own
+    // model from its own folder. A model dir that is not registered in
+    // game_fps.cfg playermodeldir must NEVER silently fall back to
+    // index 0 (ranger_male) — that is the "one model for both" bug
+    // (Note 112): a Warrior whose dir fails to resolve renders as a
+    // Ranger, and its Warrior armor then mismatches the Ranger body
+    // (sameskeleton FALSE -> LINK_TAG, broken body). Return -1 on
+    // failure, mirroring the server-side rpg_modelidx, so callers
+    // must handle the miss explicitly instead of loading Ranger.
     static int rpg_modelidx(const char *modeldir)
     {
-        if(!modeldir || !modeldir[0]) return 0;
+        if(!modeldir || !modeldir[0]) return -1;
         for(int i = 0; i < 16; i++)
         {
             defformatstring(an)("playermodeldir%d", i);
@@ -1971,7 +1980,7 @@ namespace game
             if(!d || !d[0]) break;
             if(!strcmp(modeldir, d)) return i;
         }
-        return 0;
+        return -1;
     }
     // v0.1.8: current character's archetype (for class-aware HUD)
     ICOMMAND(rpg_myarch, "", (),
@@ -1992,7 +2001,7 @@ namespace game
             defformatstring(al)("alias rpg_charlevel%d %d", i, i < n ? levels[i] : 0); execute(al);
             defformatstring(aa)("alias rpg_chararch%d (concatword \"%s\")", i, i < n ? archs[i] : ""); execute(aa);
             defformatstring(am)("alias rpg_charmodel%d (concatword \"%s\")", i, i < n ? models[i] : ""); execute(am);
-            defformatstring(mi)("alias rpg_charmodelidx%d %d", i, i < n ? rpg_modelidx(models[i]) : 0); execute(mi);
+            defformatstring(mi)("alias rpg_charmodelidx%d %d", i, i < n ? rpg_modelidx(models[i]) : -1); execute(mi);
         }
     });
     ICOMMAND(rpg_createchar, "ss", (char *name, char *model),
@@ -2044,8 +2053,14 @@ namespace game
             if(rpg::charmodel(cname, modeldir, sizeof(modeldir)) && modeldir[0])
             {
                 int idx = rpg_modelidx(modeldir);
-                // rpg_modelidx returns 0 if not found; only set if valid
-                playermodel = idx;
+                // Separate-model rule (Ed, Nov 15): only set playermodel
+                // when the dir resolves to a registered index. A failed
+                // lookup returns -1 and must NOT set playermodel to 0
+                // (ranger_male) — that silent fallback is the "one model
+                // for both" bug (Note 112). Leave playermodel unchanged
+                // and log the bad dir so the problem is visible.
+                if(idx >= 0) playermodel = idx;
+                else conoutf("rpg: WARNING: character '%s' has unregistered model dir '%s', keeping playermodel %d", cname, modeldir, playermodel);
             }
             diaglog("rpg_enterworld: charmodel modeldir='%s' playermodel=%d", modeldir, playermodel);
         }
