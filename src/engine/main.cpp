@@ -1174,7 +1174,6 @@ void loadaddons()
         if(!strcmp(name, ".") || !strcmp(name, "..")) continue;
         defformatstring(path)("data/addons/%s/addon.cfg", name);
         if(!findfile(path, "rb")) continue;
-        conoutf("loading add-on: %s", name);
         execfile(path, false);
     }
     loopv(entries) delete[] entries[i];

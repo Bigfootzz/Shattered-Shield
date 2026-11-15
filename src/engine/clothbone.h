@@ -60,6 +60,8 @@
 struct CapeJoint
 {
     int boneidx;    // interpindex into bdata (skeleton bone slot)
+    dualquat invbase; // inverse absolute bind transform: bdata is a DELTA
+                    // (pose_abs * invbase), not an absolute pose
     int parentidx;  // index into the joints array, -1 for the root joint
     vec pos;        // current world-space position
     vec oldpos;     // previous-frame world-space position
@@ -229,6 +231,7 @@ static void cape_update(skeleton *skel, dualquat *bdata, const matrix3x4 &worldm
             if(b.interpindex < 0) continue;
             CapeJoint j;
             j.boneidx = b.interpindex;
+            j.invbase = b.invbase;
             j.parentidx = -1;
             j.restlen = 0;
             j.pos = j.oldpos = vec(0, 0, 0);
@@ -321,7 +324,13 @@ static void cape_update(skeleton *skel, dualquat *bdata, const matrix3x4 &worldm
         simdir.normalize();
         quat rot = cape_quatfromvectors(cape.restaxis[i], simdir);
         quat neworient = quat(rot).mul(cape.restorient[i]);
-        bdata[j.boneidx] = dualquat(neworient, localPos);
+        // bdata is a DELTA (pose_abs * invbase), not an absolute pose.
+        // Writing the simulated absolute transform straight in collapses
+        // the whole cape into a band at the neck (Note 103: shoulder
+        // flair). Multiply by the bone's inverse bind transform.
+        dualquat dq(neworient, localPos);
+        dq.mul(j.invbase);
+        bdata[j.boneidx] = dq;
         bdata[j.boneidx].normalize();
     }
 }
