@@ -2032,6 +2032,13 @@ namespace game
     {
         if(!name || !name[0]) return;
         diaglog("rpg_enterworld(%s): entry", name);
+        // Presentation-cache reset (Nov 15, Note 113 phantom cape): the
+        // vwep/armor/cape maps survive a character switch, so the client
+        // keeps rendering the previous character's gear. Clear them here,
+        // BEFORE switchname sends the new name to the server, so the
+        // server's fresh weapon + armor state (sent on the name change)
+        // refills the caches and the render can never show stale gear.
+        rpg::clearpresentation();
         // Load-path profiling (Oct 22, fix-list item 1): gated, silent by
         // default. The heavy work lands in changemapserv/load_world (client)
         // and rpg::onconnect (server); those log their own stages.

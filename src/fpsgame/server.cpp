@@ -7721,6 +7721,17 @@ namespace server
                 filtertext(cq->name, text, NAMEALLOWSPACES, MAXNAMELEN);
                 if(!cq->name[0]) copystring(cq->name, "unnamed");
                 QUEUE_STR(cq->name);
+                // RPG character switch (Nov 15, Note 113 phantom cape):
+                // the name IS the character key, so a switch loads the new
+                // character's state from the DB and re-broadcasts its
+                // equipped weapon and armor. Without this the server keeps
+                // the old character's state and never re-sends, so clients
+                // keep rendering the old character's cape and armor.
+                // Idempotent: a same-name switch just reloads the same
+                // character and re-sends the same state.
+                rpg::onconnect(cq->name);
+                rpg_sendvwep(cq);
+                rpg_sendarmor(cq);
                 break;
             }
 

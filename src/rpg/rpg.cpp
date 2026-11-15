@@ -1397,6 +1397,23 @@ namespace rpg
         return it == capemap.end() ? NULL : it->second.c_str();
     }
 
+    // --- Presentation-cache reset (Nov 15, Note 113 phantom cape) ---
+    // The vwep/armor/cape maps are filled only by N_RPG_* messages and
+    // are keyed by clientnum, so they survive a character switch: the
+    // client keeps rendering the previous character's cape and armor
+    // while the sheet (which re-syncs on every open) shows the truth.
+    // World entry clears all three maps so the render starts from a
+    // clean slate and is refilled only by the server's authoritative
+    // state (the server re-sends weapon + armor on every character
+    // change). Never authoritative: this only drops stale client state.
+    void clearpresentation()
+    {
+        initclient();
+        vwepmap.clear();
+        loopi(4) armormap[i].clear();
+        capemap.clear();
+    }
+
     // --- PvP weapon glow registry (Oct 31, Ed's call: ALL PvP weapons share
     // ONE signature glow so players recognize PvP gear from afar). ---
     // The client only ever learns the equipped vwep PATH (N_RPG_VWEP),

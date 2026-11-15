@@ -218,6 +218,7 @@ namespace rpg
     const char *armorfor(int clientnum, int slot);    // NULL = no attach for that slot
     void setcape(int clientnum, const char *path); // "" clears the cape attach
     const char *capefor(int clientnum);    // NULL = no cape equipped
+    void clearpresentation(); // world entry: drop all stale vwep/armor/cape cache entries
     bool vwep_has_pvpglow(const char *path);          // client: true when the vwep path is a PvP weapon (data/rpg/pvpglow.cfg)
     void setmana(int mana, int maxmana);
     bool getclientmana(int &mana, int &maxmana);
