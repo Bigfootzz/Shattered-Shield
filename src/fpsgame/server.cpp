@@ -6931,6 +6931,30 @@ namespace server
 
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         rpg::onconnect(ci->name);
+        // RPG character connect (Nov 15, Note 116/117 Warrior model):
+        // the server is the authority on appearance. On a FRESH launch the
+        // client is not connected yet when rpg_enterworld calls switchname,
+        // so N_SWITCHNAME is never sent and the switch handler's re-resolve
+        // never fires. Re-resolve the playermodel here too, from the
+        // character's stored model dir, so the spawn/init messages carry the
+        // right model on every connect. Without this the server keeps the
+        // default/stale playermodel (0, Ranger) and its spawn/init messages
+        // overwrite the client's correct model: the Warrior rendered as a
+        // Ranger (weapon in the left hand, no Warrior armor).
+        {
+            char modeldir[64]; modeldir[0] = '\0';
+            if(rpg::charmodel(ci->name, modeldir, sizeof(modeldir)) && modeldir[0])
+            {
+                int pm = rpg_modelidx(modeldir);
+                if(pm >= 0)
+                {
+                    ci->state.playermodel = pm;
+                    rpg_sendappear(ci, pm);
+                }
+                else conoutf("rpg: appear: model '%s' for '%s' not registered, keeping playermodel %d", modeldir, ci->name, ci->state.playermodel);
+            }
+            else conoutf("rpg: appear: no model dir for '%s', keeping playermodel %d", ci->name, ci->state.playermodel);
+        }
         // --- RPG: Shattered Shield stats (milestone step 5, additive) ---
         // The inline spawn inside sendinitclient() ran BEFORE the character was
         // loaded, so a fresh connect on an RPG map left the client at the engine
