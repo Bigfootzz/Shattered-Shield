@@ -7749,7 +7749,9 @@ namespace server
                             cq->state.playermodel = pm;
                             rpg_sendappear(cq, pm);
                         }
+                        else conoutf("rpg: appear: model '%s' for '%s' not registered, keeping playermodel %d", modeldir, cq->name, cq->state.playermodel);
                     }
+                    else conoutf("rpg: appear: no model dir for '%s', keeping playermodel %d", cq->name, cq->state.playermodel);
                 }
                 rpg_sendvwep(cq);
                 rpg_sendarmor(cq);
