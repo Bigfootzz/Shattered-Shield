@@ -2095,6 +2095,32 @@ struct skelmodel : animmodel
         skeleton *mskel = ((skelmeshgroup *)m->parts[0]->meshes)->skel;
         if(skel == mskel) return LINK_REUSE;
         if(sameskeleton(skel, mskel)) return LINK_SKIN;
+        {   // DIAGNOSTIC v0.1.125: why sameskeleton failed (first 20).
+            static int diag_skel_n = 0;
+            if(diag_skel_n < 20)
+            {
+                int pn = skel ? skel->numbones : -1, mn = mskel ? mskel->numbones : -1;
+                int firstbad = -1, pp = -1, mp = -1;
+                const char *pnm = "", *mnm = "";
+                if(skel && mskel && skel->bones && mskel->bones && pn == mn)
+                {
+                    loopi(pn)
+                    {
+                        if(!skel->bones[i].name || !mskel->bones[i].name || strcmp(skel->bones[i].name, mskel->bones[i].name) || skel->bones[i].parent != mskel->bones[i].parent)
+                        {
+                            firstbad = i;
+                            pnm = skel->bones[i].name ? skel->bones[i].name : "(null)";
+                            mnm = mskel->bones[i].name ? mskel->bones[i].name : "(null)";
+                            pp = skel->bones[i].parent;
+                            mp = mskel->bones[i].parent;
+                            break;
+                        }
+                    }
+                }
+                conoutf("rpg: skel mismatch parent='%s' attach='%s' pnumbones=%d mnumbones=%d firstbad=%d pname='%s' mname='%s' pparent=%d mparent=%d", loadname ? loadname : "(null)", m->loadname ? m->loadname : "(null)", pn, mn, firstbad, pnm, mnm, pp, mp);
+                diag_skel_n++;
+            }
+        }
         return LINK_TAG;
     }
 
