@@ -7469,6 +7469,7 @@ namespace server
                 }
                 cq->state.playerclass = pc;
                 cq->state.playermodel = pm;
+                conoutf("rpg: N_TRYSPAWN from '%s': client sent pm=%d, server now playermodel=%d", cq->name, pm, cq->state.playermodel);
                 if(cq->state.deadflush)
                 {
                     flushevents(cq, cq->state.deadflush);

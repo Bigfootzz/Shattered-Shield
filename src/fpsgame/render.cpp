@@ -461,7 +461,7 @@ namespace game
             case 1: mdlname = mdl.blueteam; break;
             case 2: mdlname = mdl.redteam; break;
         }
-        if(diag_rp_log) diaglog("renderplayer: before renderclient clientnum=%d hiddenbits=%d", d->clientnum, hiddenplayermeshes);
+        if(diag_rp_log) diaglog("renderplayer: model clientnum=%d d->playermodel=%d global playermodel=%d mdl.ffa=%s mdl.vwep=%s hiddenbits=%d", d->clientnum, d->playermodel, playermodel, mdl.ffa ? mdl.ffa : "(null)", mdl.vwep ? mdl.vwep : "(null)", hiddenplayermeshes);
         renderclient(d, mdlname, a[0].tag ? a : NULL, hold, attack, delay, lastaction, intermission && d->state!=CS_DEAD ? 0 : showpain, fade, ragdoll && mdl.ragdoll, d==player1);
         if(diag_rp_log) diaglog("renderplayer: after renderclient clientnum=%d", d->clientnum);
         hiddenplayermeshes = 0;

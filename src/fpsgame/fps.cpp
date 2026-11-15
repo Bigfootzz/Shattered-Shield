@@ -620,6 +620,7 @@ namespace game
         {
             if(isMapstart || player1->respawned!=player1->lifesequence)
             {
+                diaglog("client: N_TRYSPAWN sending playerclass=%d playermodel=%d (global) player1->playermodel=%d", playerclass, playermodel, player1->playermodel);
                 addmsg(N_TRYSPAWN, "rcii", player1, playerclass, playermodel);
                 player1->respawned = player1->lifesequence;
             }
