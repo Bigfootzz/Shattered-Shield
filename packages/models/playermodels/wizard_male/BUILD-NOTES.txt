@@ -62,3 +62,28 @@ VERIFICATION (struct-based IQM decode, 2026-10-21)
 - All iqmskin meshes exist in char.iqm; all PNGs on disk.
 - Cycles idle render: /tmp/wiz/male_idle.png — boots on feet, staff in right
   hand, pouch at hip, shoulderpads placed, proportions sane.
+
+## SPLIT-BODY REBUILD (.131, Nov 16, Ed: armor system is built so any class can
+## swap armor as new models are made — no reason to limit it to one class)
+- char.iqm is now the elf SKIN body only (Body_Head/Torso/Arms/Legs/Feet +
+  Eyes/Hair/Horns, 8 meshes, 6918 verts, 66 joints). He starts in underwear
+  like the Warrior/Ranger males. Render verified (wizard_male_splitbody.png).
+- The blue Ranger outfit is now 5 Magi armor attach models in
+  packages/models/playermodels/attachments/armor/:
+  magi_male_body (tunic+belts+pauldron, 6889 verts), magi_male_legs (644),
+  magi_male_boots_l (5651) / magi_male_boots_r (5653, split by dominant blend
+  joint), magi_male_hood (1240). All 66 joints identical to the body (LINK_SKIN).
+  Extracted from the .130 char.iqm by extract_magi_male_armor.py.
+- Equips via cloth_tunic/leggings/boots/helm (render.cpp rows, wizard_male).
+  Hide bits: torso 2, legs 4, feet 8, hair 16 (hood).
+- tag_weapon PRESERVED: parent hand_r, translate (0,0,0), identical to .130.
+- Old baked-in char.iqm backed up: ~/workspace/bg-verify/magi/wizard_male_char_130_backup.iqm (MD5 3524dd9c3f070c8930ac713ce6974aa6).
+- Build: build_wizard_male_splitbody.py (from magi_grip.blend, keeps the curled
+  armature + tag_weapon, re-imports the elf for the full body, splits by
+  dominant bone weight) + export_wizard_male_splitbody.py.
+- NOTE (Nov 16): a standalone g++ -fsyntax-only check on render.cpp/rpg.cpp
+  FAILS with 20 pre-existing errors (missing CMake defines: ident, dbghitbox,
+  swaystep, firstpersonyaw, etc.) — identical errors in the unmodified HEAD
+  version. That check cannot validate these files; the full CMake build is the
+  real verification. An earlier "syntax OK" claim was misread (exit code came
+  from the pipe, not the compiler) — do not repeat it.

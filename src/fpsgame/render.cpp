@@ -423,6 +423,43 @@ namespace game
             { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
             // HEAD: Warrior great helm (live; same helm as the Ranger row, model warrior_male so a Warrior equipping it sees it; hides the Hair only, same as Ranger).
             { rpg::SLOT_HEAD, "iron_helm", "warrior_male", "tag_helm", "playermodels/attachments/armor/warrior_helm", 16 },
+            // NOTE 128 (.131): the female models had NO rows at all - the
+            // table only matched "ranger_male" / "warrior_male", so equipping
+            // armor on a female Warrior/Ranger showed nothing in game.
+            // Same attach models and hide bits as the males (the tags are
+            // identical; the female is slightly smaller but the attaches
+            // position by tag, so they land correctly).
+            // TORSO/LEGS/FEET/HEAD: Ranger female (same ranger armor).
+            { rpg::SLOT_TORSO, "ranger_tunic", "ranger_female", "tag_torso", "playermodels/attachments/armor/ranger_body", 2 },
+            { rpg::SLOT_LEGS,  "ranger_pants", "ranger_female", "tag_legs",  "playermodels/attachments/armor/ranger_legs", 4 },
+            { rpg::SLOT_FEET,  "ranger_boots", "ranger_female", "tag_boot_l", "playermodels/attachments/armor/ranger_boots_l", 8 },
+            { rpg::SLOT_FEET,  "ranger_boots", "ranger_female", "tag_boot_r", "playermodels/attachments/armor/ranger_boots_r", 8 },
+            { rpg::SLOT_HEAD,  "iron_helm", "ranger_female", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
+            // TORSO/LEGS/FEET/HEAD: Warrior female (same warrior armor).
+            { rpg::SLOT_TORSO, "chain_tunic", "warrior_female", "tag_torso", "playermodels/attachments/armor/warrior_body", 2 },
+            { rpg::SLOT_LEGS, "iron_leggings", "warrior_female", "tag_legs", "playermodels/attachments/armor/warrior_legs", 4 },
+            { rpg::SLOT_FEET, "iron_boots", "warrior_female", "tag_boot_l", "playermodels/attachments/armor/warrior_boots_l", 8 },
+            { rpg::SLOT_FEET, "iron_boots", "warrior_female", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
+            { rpg::SLOT_HEAD,  "iron_helm", "warrior_female", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
+            // NOTE 130 / SPLIT-BODY (.131): the female Magi now starts in
+            // underwear like the others (Ed: "she should start like the others").
+            // Her blue Ranger outfit is Magi armor attach models, equipped via
+            // the cloth_* items. Same tags and hide bits as the other females.
+            // TORSO/LEGS/FEET/HEAD: Magi female (cloth armor).
+            { rpg::SLOT_TORSO, "cloth_tunic", "sorceress_female", "tag_torso", "playermodels/attachments/armor/magi_body", 2 },
+            { rpg::SLOT_LEGS,  "cloth_leggings", "sorceress_female", "tag_legs",  "playermodels/attachments/armor/magi_legs", 4 },
+            { rpg::SLOT_FEET,  "cloth_boots", "sorceress_female", "tag_boot_l", "playermodels/attachments/armor/magi_boots_l", 8 },
+            { rpg::SLOT_FEET,  "cloth_boots", "sorceress_female", "tag_boot_r", "playermodels/attachments/armor/magi_boots_r", 8 },
+            { rpg::SLOT_HEAD,  "cloth_helm", "sorceress_female", "tag_helm",  "playermodels/attachments/armor/magi_hood", 16 },
+            // MALE Magi (.131, Ed: the armor system is built so any class can
+            // swap armor as new models are made): same cloth_* items, male
+            // attach models (magi_male_*). The pauldron rides with the tunic.
+            // TORSO/LEGS/FEET/HEAD: Magi male (cloth armor).
+            { rpg::SLOT_TORSO, "cloth_tunic", "wizard_male", "tag_torso", "playermodels/attachments/armor/magi_male_body", 2 },
+            { rpg::SLOT_LEGS,  "cloth_leggings", "wizard_male", "tag_legs",  "playermodels/attachments/armor/magi_male_legs", 4 },
+            { rpg::SLOT_FEET,  "cloth_boots", "wizard_male", "tag_boot_l", "playermodels/attachments/armor/magi_male_boots_l", 8 },
+            { rpg::SLOT_FEET,  "cloth_boots", "wizard_male", "tag_boot_r", "playermodels/attachments/armor/magi_male_boots_r", 8 },
+            { rpg::SLOT_HEAD,  "cloth_helm", "wizard_male", "tag_helm",  "playermodels/attachments/armor/magi_male_hood", 16 },
         };
         hiddenplayermeshes = 0;
         if(d == player1)

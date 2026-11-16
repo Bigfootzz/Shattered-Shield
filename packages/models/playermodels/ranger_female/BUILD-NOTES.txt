@@ -63,3 +63,14 @@ GARMENT-REFIT FIX (2026-10-18/19):
 - Recomputed normals + tangents for all meshes (were mostly zero).
 - char.iqm patched in place (POS/NRM/TAN only); joints/weights/UVs/tris unchanged.
 - Verified: tight front/side renders + posed attack/walk (ranger_male), clean headless boot.
+
+---
+## v0.1.131-test fix (Note 127, Nov 16)
+- Long hair: replaced the buzzed "Hair" mesh (466 verts) with Hair_Long
+  (3080 verts, 2906 tris) grafted from ss-model-fix/v019/<model>.iqm via
+  iqm_rw.append_mesh, with the eyes-delta shift to align it to this head
+  (same method as ss-model-fix/fix_models.py, without the eye flip).
+  Hair mesh was LAST in the file so removal was a clean truncate.
+  iqm.cfg now skins "Hair_Long" with T_Hair_2_BaseColor.png.
+  Verified: graft is a pure translation (shape diff 0.0), hair Z 52.1-63.1
+  overlaps the head (52.4-62.6) and hangs just below the chin.

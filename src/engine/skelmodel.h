@@ -20,6 +20,7 @@ static inline int hiddenmeshbit(const char *name)
     if(!strcmp(name, "Body_Legs")) return 4;
     if(!strcmp(name, "Body_Feet")) return 8;
     if(!strcmp(name, "Hair")) return 16;
+    if(!strcmp(name, "Hair_Long")) return 16; // Note 127 (.131): female long hair hides with a helm, same as Hair
     return 0;
 }
 

@@ -39,3 +39,42 @@ NOTES
 - The Magi finger-grip (male has it baked into his bind pose for the book) is NOW in the female v1 too (Nov 16, Ed: "fix her fingers please") — same curl values as the male, baked into her rest pose, char.iqm re-exported.
 - NO SKIRT (Ed, Nov 16: "Dont use this crappy dress on her"). She wears the Female Ranger Legs (pants) like the male Magi — pants for now until new outfit models are made (Ed, Nov 16).
 - Old files left in this folder (Wizard_Texture.png, Wizard_Staff_Texture.png, T_Eye_Brown.png) are unused leftovers from the Oct 21 Sorceress.
+
+---
+## v0.1.131-test fixes (Notes 122-124, Nov 16)
+- NOTE 124 (pants green): Female_Ranger_Legs now uses magi_robe_blue.png
+  (solid blue) instead of T_Magi_BaseColor.png — its UVs landed on a green
+  region of the atlas. Verified blue in render.
+- NOTE 123 (hair clips hood bottom): 122 hair verts tucked up inside the hood
+  (blend: hood bottom Z 1.4737m, hair tucked to >=1.4937m). Verified 0 hair
+  verts below hood bottom in re-exported char.iqm.
+- NOTE 122 (staff/book/finger): ROOT CAUSE FOUND — tag_weapon and tag_offhand
+  bones were ~1.4m away from the hands (tag_weapon head (-1.4,-0.602,0.155)
+  vs hand at origin), a leftover from the build when the tags were added before
+  the finger-curl armature_apply moved the hands. Repositioned both tags to the
+  current hand head positions (tag_weapon at (-0.584,0.026,1.4), tag_offhand at
+  (0.584,0.026,1.4)). Staff now attaches at the hand. Book uses hand_l directly
+  (iqmtag), so its fit needs Ed's in-game check; the finger sticking out may
+  also resolve now the staff is at the hand. char.iqm MD5 after re-export:
+  6248fc468617a9c1976e8d0103bdf492.
+
+## SPLIT-BODY REBUILD (.131, Nov 16, Ed: "she should start like the others")
+- char.iqm is now the elf SKIN body only (Body_Head/Torso/Arms/Legs/Feet +
+  Eyes/Hair/Horns, 8 meshes, 7695 verts, 67 joints). She starts in underwear
+  like the Warrior/Ranger females. Render verified (female_magi_splitbody.png).
+- The blue Ranger outfit is now 5 Magi armor attach models in
+  packages/models/playermodels/attachments/armor/:
+  magi_body (tunic+belts, 5607 verts), magi_legs (pants, 685),
+  magi_boots_l (5487) / magi_boots_r (5499, split by dominant blend joint),
+  magi_hood (1240). All 67 joints identical to the body (LINK_SKIN).
+  Extracted from the .131 char.iqm by extract_magi_armor.py.
+- Equips via cloth_tunic/leggings/boots/helm (render.cpp rows, sorceress_female).
+  Hide bits: torso 2, legs 4, feet 8, hair 16 (hood; hair is tucked, Note 123).
+- .131 tag fix PRESERVED: tag_weapon/tag_offhand identical to the .131 char.iqm
+  (parent hand_r/hand_l, translate (+/-0, 0.197, 1.182)).
+- Old baked-in char.iqm backed up: ~/workspace/bg-verify/magi/sorceress_female_char_131_backup.iqm (MD5 6248fc468617a9c1976e8d0103bdf492).
+- Build: build_female_magi_splitbody.py (from female_magi.blend, keeps the
+  curled armature + tucked hair, re-imports the elf for the full body, splits
+  by dominant bone weight) + export_female_magi_splitbody.py.
+- NOTE: the male Magi (wizard_male) still starts dressed (outfit baked in).
+  Ed asked whether to fix him too — awaiting his word.

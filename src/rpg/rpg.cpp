@@ -940,6 +940,23 @@ namespace rpg
     // ability gating use (ranger_male -> Ranger, wizard_male and
     // sorceress_female -> Magi). False when neither source yields a known
     // class, and the gate then fails closed.
+    // Prefix match, case-insensitive: true when raw equals word, or raw
+    // starts with word followed by '_'. Used by classfor so outfit model
+    // dirs (warrior_female_ranger) still resolve to their class.
+    static bool classprefix(const char *raw, const char *word)
+    {
+        if(!raw || !word) return false;
+        while(*word)
+        {
+            if(!*raw) return false;
+            char a = *raw >= 'A' && *raw <= 'Z' ? *raw + 32 : *raw;
+            char b = *word >= 'A' && *word <= 'Z' ? *word + 32 : *word;
+            if(a != b) return false;
+            raw++; word++;
+        }
+        return *raw == '\0' || *raw == '_';
+    }
+
     static bool classfor(const char *name, char *out, int max)
     {
         if(out && max > 0) out[0] = '\0';
@@ -947,11 +964,18 @@ namespace rpg
         char raw[64]; raw[0] = '\0';
         if((!chararchetype(name, raw, sizeof(raw)) || !raw[0]) &&
            (!charmodel(name, raw, sizeof(raw)) || !raw[0])) return false;
-        char *u = strrchr(raw, '_'); // model dirs carry a sex suffix
-        if(u) *u = '\0';
-        if(classmatch(raw, "ranger")) copystring(out, "Ranger", max);
-        else if(classmatch(raw, "warrior")) copystring(out, "Warrior", max);
-        else if(classmatch(raw, "magi") || classmatch(raw, "wizard") || classmatch(raw, "sorceress")) copystring(out, "Magi", max);
+        // NOTE 129 (.131): the old code stripped only the LAST "_" suffix,
+        // so an outfit model dir (warrior_female_ranger, ranger_female,
+        // etc.) reduced to "warrior_female" / "ranger_female" — which
+        // matches no class, so classfor failed and the character saw the
+        // wrong shop (or no class shop at all). The vendor setup must be
+        // the same for ALL characters, so derive the class from the PREFIX
+        // instead: every model dir starts with its class base name
+        // (warrior_*, ranger_*, wizard_*, sorceress_*), and a clean
+        // archetype ("Warrior") is just the prefix with nothing after it.
+        if(classprefix(raw, "ranger")) copystring(out, "Ranger", max);
+        else if(classprefix(raw, "warrior")) copystring(out, "Warrior", max);
+        else if(classprefix(raw, "magi") || classprefix(raw, "wizard") || classprefix(raw, "sorceress")) copystring(out, "Magi", max);
         else return false;
         return true;
     }
