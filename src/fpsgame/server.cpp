@@ -5606,8 +5606,8 @@ namespace server
     // Called on every equip/unequip so all clients render the new armor.
     static void rpg_sendarmor(clientinfo *cq)
     {
-        static const int slots[5] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE };
-        loopi(5)
+        static const int slots[6] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE, rpg::SLOT_OFFHAND };
+        loopi(6)
         {
             const char *path = rpg::equippedattach(cq->name, slots[i]);
             sendf(-1, 1, "riiis", N_RPG_ARMOR, cq->clientnum, slots[i], path ? path : "");

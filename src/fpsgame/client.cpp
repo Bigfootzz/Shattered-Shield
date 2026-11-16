@@ -3700,6 +3700,7 @@ namespace game
                 string path; getstring(path, p);
                 diaglog("N_RPG_ARMOR: clientnum=%d slot=%d path='%s'", cn, slot, path);
                 if(slot == rpg::SLOT_CAPE) rpg::setcape(cn, path);
+                else if(slot == rpg::SLOT_OFFHAND) rpg::setoffhand(cn, path);
                 else rpg::setarmor(cn, slot, path);
                 break;
             }

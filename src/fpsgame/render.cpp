@@ -362,6 +362,15 @@ namespace game
         {
             const char *cape = rpg::capefor(d->clientnum);
             if(cape && cape[0]) a[ai++] = modelattach("tag_cape", cape);
+            // --- Off hand (Nov 15, Ed: "an off hand") --- Magi orb /
+            // Warrior shield, attached to tag_offhand on the left hand.
+            // Same pattern as the cape: gated on an equipped off-hand
+            // item (rpg::offhandfor, filled by N_RPG_ARMOR with slot
+            // SLOT_OFFHAND); a character with nothing equipped renders
+            // no off-hand item. Fail-safe: link() returns false when
+            // tag_offhand is missing and the entry is skipped.
+            const char *offhand = rpg::offhandfor(d->clientnum);
+            if(offhand && offhand[0]) a[ai++] = modelattach("tag_offhand", offhand);
         }
         // --- RPG armor (table-driven, Phase 1c): attach equipped armor
         // pieces to body tags and hide the body meshes underneath.

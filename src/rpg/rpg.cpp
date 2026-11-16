@@ -397,6 +397,13 @@ namespace rpg
                 ? "wooden_staff" : "puglin_stick";
             additem(name, starter, 1);
             equipitem(name, starter);
+            // Magi also start with the Liber Umbrarum in the off-hand
+            // (Ed, Nov 15): the spellbook is part of the Magi from level 1.
+            if(!strcmp(arch, "Magi") && finditem("pvp_magi_book") >= 0)
+            {
+                additem(name, "pvp_magi_book", 1);
+                equipitem(name, "pvp_magi_book");
+            }
             additem(name, "health_potion", 2);
         }
         // v0.1.8 fix 9 (migration): rangers created before the bow starter
@@ -441,6 +448,21 @@ namespace rpg
                     additem(name, "wooden_staff", 1);
                     if(equipitem(name, "wooden_staff"))
                         conoutf("rpg: '%s' (Magi) issued a Wooden Staff", name);
+                }
+            }
+            // Liber Umbrarum migration (mirror of the staff migration):
+            // Magi created before the book starter kit keep everything
+            // they own; grant + equip a Liber Umbrarum only if they
+            // don't have one. Nothing is ever removed.
+            if(!strcmp(march, "Magi") &&
+               finditem("pvp_magi_book") >= 0 && itemcount(name, "pvp_magi_book") <= 0)
+            {
+                int offhand = equippeditem(name, SLOT_OFFHAND);
+                if(offhand < 0 || strcmp(item(offhand).id, "pvp_magi_book"))
+                {
+                    additem(name, "pvp_magi_book", 1);
+                    if(equipitem(name, "pvp_magi_book"))
+                        conoutf("rpg: '%s' (Magi) issued a Liber Umbrarum", name);
                 }
             }
         }
@@ -1397,6 +1419,28 @@ namespace rpg
         return it == capemap.end() ? NULL : it->second.c_str();
     }
 
+    // --- Off-hand attach map (Nov 15, Ed: "an off hand") --- Client-side
+    // cache of each client's equipped off-hand attach model (Magi orb,
+    // Warrior shield), filled by N_RPG_ARMOR with slot SLOT_OFFHAND.
+    // Mirrors capemap; the render code reads it via offhandfor() and only
+    // renders the off-hand item when one is actually equipped. The tag is
+    // tag_offhand on the left hand (hand_l) in each player model's iqm.cfg.
+    static std::map<int, std::string> offhandmap; // clientnum -> model path
+
+    void setoffhand(int clientnum, const char *path)
+    {
+        initclient();
+        if(!path || !path[0]) offhandmap.erase(clientnum);
+        else offhandmap[clientnum] = path;
+    }
+
+    const char *offhandfor(int clientnum)
+    {
+        initclient();
+        std::map<int, std::string>::iterator it = offhandmap.find(clientnum);
+        return it == offhandmap.end() ? NULL : it->second.c_str();
+    }
+
     // --- Presentation-cache reset (Nov 15, Note 113 phantom cape) ---
     // The vwep/armor/cape maps are filled only by N_RPG_* messages and
     // are keyed by clientnum, so they survive a character switch: the
@@ -1412,6 +1456,7 @@ namespace rpg
         vwepmap.clear();
         loopi(4) armormap[i].clear();
         capemap.clear();
+        offhandmap.clear();
     }
 
     // --- PvP weapon glow registry (Oct 31, Ed's call: ALL PvP weapons share
