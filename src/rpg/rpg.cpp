@@ -1970,11 +1970,15 @@ namespace rpg
     bool repeatableroll(const char *name, int qid)
     {
         const questdef *qd = questdefbyid(qid);
+        // DIAGNOSTIC ONLY (v0.1.128, Maren crash): log the fetch roll.
+        conoutf("rpg: dlgdiag: repeatableroll qid %d qd %s npool %d poolmin %d poolmax %d",
+                qid, qd ? "ok" : "NULL", qd ? qd->npool : -1, qd ? qd->poolmin : -1, qd ? qd->poolmax : -1);
         if(!qd || qd->npool <= 0 || qd->poolmax < qd->poolmin) return false;
         rprow r;
         copystring(r.item, qd->pool[rnd(qd->npool)], sizeof(r.item));
         r.amount = qd->poolmin + rnd(qd->poolmax - qd->poolmin + 1);
         r.readyat = 0;
+        conoutf("rpg: dlgdiag: repeatableroll qid %d rolled '%s' x%d", qid, r.item, r.amount);
         rpcache[std::string(name)][qid] = r;
         rpsave(name, qid);
         return true;
