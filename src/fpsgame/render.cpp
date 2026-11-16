@@ -115,45 +115,39 @@ namespace game
             loopi(rpg::itemcount())
             {
                 const rpg::itemdef &def = rpg::item(i);
-                if(!def.attach || !def.attach[0]) continue;
-                if(!strcmp(def.attach, "playermodels/attachments/cape")) continue;
-                if(def.slot == rpg::SLOT_FEET)
+                // Armor attach (female default) and male variant (.132):
+                // boots split into _l/_r, same as the render code. The
+                // cape is already queued above, so it is skipped.
+                const char *attaches[2] = { def.attach, def.attach_male };
+                loopj(2)
                 {
-                    defformatstring(bootl)("%s_l", def.attach);
-                    defformatstring(bootr)("%s_r", def.attach);
-                    diaglog("preloadplayermodel: loading armor attach '%s'", bootl);
-                    preloadmodel(bootl);
-                    diaglog("preloadplayermodel: loading armor attach '%s'", bootr);
-                    preloadmodel(bootr);
+                    const char *apath = attaches[j];
+                    if(!apath || !apath[0]) continue;
+                    if(!strcmp(apath, "playermodels/attachments/cape")) continue;
+                    if(def.slot == rpg::SLOT_FEET)
+                    {
+                        defformatstring(bootl)("%s_l", apath);
+                        defformatstring(bootr)("%s_r", apath);
+                        diaglog("preloadplayermodel: loading armor attach '%s'", bootl);
+                        preloadmodel(bootl);
+                        diaglog("preloadplayermodel: loading armor attach '%s'", bootr);
+                        preloadmodel(bootr);
+                    }
+                    else
+                    {
+                        diaglog("preloadplayermodel: loading armor attach '%s'", apath);
+                        preloadmodel(apath);
+                    }
                 }
-                else
+                // Weapon model (vwep, .132): the RPG item's hand weapon
+                // path. Same first-equip hitch as armor had; preload it
+                // here so the cost lands on the loading screen.
+                if(def.vwep && def.vwep[0])
                 {
-                    diaglog("preloadplayermodel: loading armor attach '%s'", def.attach);
-                    preloadmodel(def.attach);
+                    diaglog("preloadplayermodel: loading weapon '%s'", def.vwep);
+                    preloadmodel(def.vwep);
                 }
             }
-        }
-        // Warrior armor preload (Nov 12, bots armor port): the Warrior
-        // attach models have no ss_item_attach line on any item def, so
-        // the data-driven loop above never queues them and the first
-        // Warrior equip would load each piece synchronously in the
-        // render thread (~3s freeze per piece, same as the Nov 11 fix).
-        // Queue the five table paths explicitly. RPG maps only
-        // (attaches never render on FPS maps). Ranger paths are covered
-        // by the loop above via ranger_tunic / leather_leggings /
-        // leather_boots attach lines.
-        if(rpgmap)
-        {
-            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_body'");
-            preloadmodel("playermodels/attachments/armor/warrior_body");
-            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_legs'");
-            preloadmodel("playermodels/attachments/armor/warrior_legs");
-            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_boots_l'");
-            preloadmodel("playermodels/attachments/armor/warrior_boots_l");
-            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_boots_r'");
-            preloadmodel("playermodels/attachments/armor/warrior_boots_r");
-            diaglog("preloadplayermodel: loading warrior armor attach 'playermodels/attachments/armor/warrior_helm'");
-            preloadmodel("playermodels/attachments/armor/warrior_helm");
         }
         loopi(NUMPLAYERMODELS)
         {
@@ -315,7 +309,7 @@ namespace game
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
         // entry. New class vweps go in their class folder.
-        static const char * const vweps[] = {"playermodels/vwep/ranger/bow", "playermodels/vwep/warrior/mace", "playermodels/vwep/stick"};
+        static const char * const vweps[] = {"playermodels/vwep/ranger/bow/01", "playermodels/vwep/warrior/mace/01", "playermodels/vwep/stick"};
         int ai = 0;
         // --- RPG: Shattered Shield inventory (milestone step 4, additive; see src/rpg) ---
         // An equipped RPG weapon is always shown (even with fists selected, the normal RPG state).
@@ -372,117 +366,55 @@ namespace game
             const char *offhand = rpg::offhandfor(d->clientnum);
             if(offhand && offhand[0]) a[ai++] = modelattach("tag_offhand", offhand);
         }
-        // --- RPG armor (table-driven, Phase 1c): attach equipped armor
-        // pieces to body tags and hide the body meshes underneath.
-        // One entry per piece; lookup is by BASE item id, so enhanced
-        // variants resolve through def.enhbase (ranger_tunic_enh and
-        // _t1-_t4 all resolve to ranger_tunic). A different torso item
-        // (e.g. chain_tunic) matches no entry. Stubs (baseid/path NULL)
-        // attach nothing and hide nothing until Phase 2 fills them in:
-        // adding pants/boots (or Warrior/Magi pieces) is a table row,
-        // not code. Boots need two attaches, so FEET has two rows.
-        // model = substring of mdl.ffa the piece fits (NULL = any
-        // model); the Ranger pieces only fit the Ranger skeleton.
-        // hidden bits: Body_Head=1, Body_Torso=2, Body_Legs=4,
-        // Body_Feet=8, Hair=16 (see hiddenmeshbit in engine/skelmodel.h).
-        // The client only knows the LOCAL player's equipment
-        // (N_RPG_INV -> clequip via getclientinv), so this applies to
-        // player1; other players/bots never wear armor here. Until the
-        // first N_RPG_INV sync clequip is all -1, so nothing is hidden
-        // and the bare body shows (fail closed).
-        struct armorattach
-        {
-            int slot;            // SLOT_* the piece equips to (SLOT_NONE = no equip slot yet)
-            const char *baseid;  // base item id, NULL = stub, no item yet
-            const char *model;   // mdl.ffa substring the piece fits, NULL = any model
-            const char *tag;     // body tag to attach to, NULL = no attach point yet
-            const char *path;    // attach model DIRECTORY (loadmodel appends /iqm.cfg), NULL = no model yet
-            int hidden;          // body-mesh hide bits, applied only when the piece attaches
-        };
-        static const armorattach armorattaches[] =
-        {
-            // TORSO: Ranger tunic (live). Enhanced variants resolve via enhbase.
-            { rpg::SLOT_TORSO, "ranger_tunic", "ranger_male", "tag_torso", "playermodels/attachments/armor/ranger_body", 2 },
-            // LEGS: Ranger pants (live; hides Body_Legs).
-            { rpg::SLOT_LEGS,  "ranger_pants", "ranger_male", "tag_legs",  "playermodels/attachments/armor/ranger_legs", 4 },
-            // FEET: Ranger boots (live; hides Body_Feet). Boots need two attaches, one per foot.
-            { rpg::SLOT_FEET,  "ranger_boots", "ranger_male", "tag_boot_l", "playermodels/attachments/armor/ranger_boots_l", 8 },
-            { rpg::SLOT_FEET,  "ranger_boots", "ranger_male", "tag_boot_r", "playermodels/attachments/armor/ranger_boots_r", 8 },
-            // ARMS: no SLOT_ARMS in rpg/items.h and no hideable arm mesh
-            // (hiddenmeshbit returns 0 for arms), so this row can never
-            // match; it exists so the slot is represented in the table.
-            { rpg::SLOT_NONE,  NULL, "ranger_male", NULL,        NULL, 0 },
-            // HEAD: Warrior great helm (live; hides the Hair only - full-face helm, face/eyes fill the eye slit naturally; hiding Body_Head would leave floating eyes since Eyes is a separate mesh the hide bit does not cover. Hair = bit 16, Nov 13: it poked out of the helm).
-            { rpg::SLOT_HEAD,  "iron_helm", "ranger_male", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
-            // TORSO: Warrior chainmail (live; hides Body_Torso). Same geometry as the Ranger tunic, chainmail texture.
-            { rpg::SLOT_TORSO, "chain_tunic", "warrior_male", "tag_torso", "playermodels/attachments/armor/warrior_body", 2 },
-            // LEGS: Warrior chainmail legs (live; hides Body_Legs).
-            { rpg::SLOT_LEGS, "iron_leggings", "warrior_male", "tag_legs", "playermodels/attachments/armor/warrior_legs", 4 },
-            // FEET: Warrior chainmail boots (live; hides Body_Feet). Boots need two attaches, one per foot.
-            { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_l", "playermodels/attachments/armor/warrior_boots_l", 8 },
-            { rpg::SLOT_FEET, "iron_boots", "warrior_male", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
-            // HEAD: Warrior great helm (live; same helm as the Ranger row, model warrior_male so a Warrior equipping it sees it; hides the Hair only, same as Ranger).
-            { rpg::SLOT_HEAD, "iron_helm", "warrior_male", "tag_helm", "playermodels/attachments/armor/warrior_helm", 16 },
-            // NOTE 128 (.131): the female models had NO rows at all - the
-            // table only matched "ranger_male" / "warrior_male", so equipping
-            // armor on a female Warrior/Ranger showed nothing in game.
-            // Same attach models and hide bits as the males (the tags are
-            // identical; the female is slightly smaller but the attaches
-            // position by tag, so they land correctly).
-            // TORSO/LEGS/FEET/HEAD: Ranger female (same ranger armor).
-            { rpg::SLOT_TORSO, "ranger_tunic", "ranger_female", "tag_torso", "playermodels/attachments/armor/ranger_body", 2 },
-            { rpg::SLOT_LEGS,  "ranger_pants", "ranger_female", "tag_legs",  "playermodels/attachments/armor/ranger_legs", 4 },
-            { rpg::SLOT_FEET,  "ranger_boots", "ranger_female", "tag_boot_l", "playermodels/attachments/armor/ranger_boots_l", 8 },
-            { rpg::SLOT_FEET,  "ranger_boots", "ranger_female", "tag_boot_r", "playermodels/attachments/armor/ranger_boots_r", 8 },
-            { rpg::SLOT_HEAD,  "iron_helm", "ranger_female", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
-            // TORSO/LEGS/FEET/HEAD: Warrior female (same warrior armor).
-            { rpg::SLOT_TORSO, "chain_tunic", "warrior_female", "tag_torso", "playermodels/attachments/armor/warrior_body", 2 },
-            { rpg::SLOT_LEGS, "iron_leggings", "warrior_female", "tag_legs", "playermodels/attachments/armor/warrior_legs", 4 },
-            { rpg::SLOT_FEET, "iron_boots", "warrior_female", "tag_boot_l", "playermodels/attachments/armor/warrior_boots_l", 8 },
-            { rpg::SLOT_FEET, "iron_boots", "warrior_female", "tag_boot_r", "playermodels/attachments/armor/warrior_boots_r", 8 },
-            { rpg::SLOT_HEAD,  "iron_helm", "warrior_female", "tag_helm",  "playermodels/attachments/armor/warrior_helm", 16 },
-            // NOTE 130 / SPLIT-BODY (.131): the female Magi now starts in
-            // underwear like the others (Ed: "she should start like the others").
-            // Her blue Ranger outfit is Magi armor attach models, equipped via
-            // the cloth_* items. Same tags and hide bits as the other females.
-            // TORSO/LEGS/FEET/HEAD: Magi female (cloth armor).
-            { rpg::SLOT_TORSO, "cloth_tunic", "sorceress_female", "tag_torso", "playermodels/attachments/armor/magi_body", 2 },
-            { rpg::SLOT_LEGS,  "cloth_leggings", "sorceress_female", "tag_legs",  "playermodels/attachments/armor/magi_legs", 4 },
-            { rpg::SLOT_FEET,  "cloth_boots", "sorceress_female", "tag_boot_l", "playermodels/attachments/armor/magi_boots_l", 8 },
-            { rpg::SLOT_FEET,  "cloth_boots", "sorceress_female", "tag_boot_r", "playermodels/attachments/armor/magi_boots_r", 8 },
-            { rpg::SLOT_HEAD,  "cloth_helm", "sorceress_female", "tag_helm",  "playermodels/attachments/armor/magi_hood", 16 },
-            // MALE Magi (.131, Ed: the armor system is built so any class can
-            // swap armor as new models are made): same cloth_* items, male
-            // attach models (magi_male_*). The pauldron rides with the tunic.
-            // TORSO/LEGS/FEET/HEAD: Magi male (cloth armor).
-            { rpg::SLOT_TORSO, "cloth_tunic", "wizard_male", "tag_torso", "playermodels/attachments/armor/magi_male_body", 2 },
-            { rpg::SLOT_LEGS,  "cloth_leggings", "wizard_male", "tag_legs",  "playermodels/attachments/armor/magi_male_legs", 4 },
-            { rpg::SLOT_FEET,  "cloth_boots", "wizard_male", "tag_boot_l", "playermodels/attachments/armor/magi_male_boots_l", 8 },
-            { rpg::SLOT_FEET,  "cloth_boots", "wizard_male", "tag_boot_r", "playermodels/attachments/armor/magi_male_boots_r", 8 },
-            { rpg::SLOT_HEAD,  "cloth_helm", "wizard_male", "tag_helm",  "playermodels/attachments/armor/magi_male_hood", 16 },
-        };
+        // --- RPG armor (class-based, .132): attach equipped armor pieces
+        // to body tags and hide the body meshes underneath. The server
+        // sends each client's equipped armor attach path per slot via
+        // N_RPG_ARMOR (rpg::equippedattach reads the item's
+        // ss_item_attach, with the male variant for the Magi cloth set
+        // and enhbase resolution for enhanced pieces); the client caches
+        // it in armorfor(). The tag and hide bits come from the SLOT,
+        // not the item name or the model dir, so new armor needs only an
+        // ss_item_attach line and new character models need nothing.
+        // Class enforcement is in the equip gate (armorclass); the render
+        // code never checks class. Boots split into _l/_r, same as the
+        // preload. Hidden bits: Body_Torso=2, Body_Legs=4, Body_Feet=8,
+        // Hair=16 (see hiddenmeshbit in engine/skelmodel.h). HEAD hides
+        // the Hair only (full-face helm; hiding Body_Head would leave
+        // floating eyes since Eyes is a separate mesh). Works for every
+        // client, not just player1: the server broadcasts armor for all
+        // clients, so other players and bots render their armor too.
+        // Boot paths must outlive the loop: modelattach keeps the pointer.
         hiddenplayermeshes = 0;
-        if(d == player1)
+        if(rpg::mapactive(getclientmap()))
         {
-            rpg::itemstack inv[64]; int n = 0; int eq[rpg::SLOT_COUNT];
-            if(rpg::getclientinv(inv, 64, n, eq))
+            static const struct { int slot; const char *tag; int hidden; } armorslots[] =
             {
-                loopi(sizeof(armorattaches)/sizeof(armorattaches[0]))
+                { rpg::SLOT_HEAD,  "tag_helm",   16 },
+                { rpg::SLOT_TORSO, "tag_torso",  2 },
+                { rpg::SLOT_LEGS,  "tag_legs",   4 },
+                { rpg::SLOT_FEET,  "tag_boot_l", 8 },
+                { rpg::SLOT_FEET,  "tag_boot_r", 8 },
+            };
+            string bootl, bootr;
+            loopi(sizeof(armorslots)/sizeof(armorslots[0]))
+            {
+                const char *path = rpg::armorfor(d->clientnum, armorslots[i].slot);
+                if(!path || !path[0]) continue;
+                if(armorslots[i].slot == rpg::SLOT_FEET)
                 {
-                    const armorattach &e = armorattaches[i];
-                    if(!e.baseid || !e.path || !e.tag) continue; // stub: no model yet
-                    if(e.slot < 0 || e.slot >= rpg::SLOT_COUNT) continue;
-                    if(e.model && (!mdl.ffa || !strstr(mdl.ffa, e.model))) continue;
-                    int idx = eq[e.slot];
-                    if(idx < 0) continue; // slot empty (also the pre-sync clequip -1 state)
-                    const rpg::itemdef &def = rpg::item(idx);
-                    const char *baseid = def.enhbase ? def.enhbase : def.id;
-                    if(baseid && !strcmp(baseid, e.baseid))
+                    if(!strcmp(armorslots[i].tag, "tag_boot_l"))
                     {
-                        a[ai++] = modelattach(e.tag, e.path);
-                        hiddenplayermeshes |= e.hidden;
+                        formatstring(bootl)("%s_l", path);
+                        a[ai++] = modelattach(armorslots[i].tag, bootl);
+                    }
+                    else
+                    {
+                        formatstring(bootr)("%s_r", path);
+                        a[ai++] = modelattach(armorslots[i].tag, bootr);
                     }
                 }
+                else a[ai++] = modelattach(armorslots[i].tag, path);
+                hiddenplayermeshes |= armorslots[i].hidden;
             }
         }
         if(d->state==CS_ALIVE)

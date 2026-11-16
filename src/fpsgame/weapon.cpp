@@ -67,54 +67,54 @@ namespace game
     static const playermodelinfo playermodels[] =
     {
         {
-            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
+            "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/ranger_male",  "playermodels/ranger_male",  "playermodels/ranger_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
+            "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/ranger_female",  "playermodels/ranger_female",  "playermodels/ranger_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_male",  "playermodels/warrior_male",  "playermodels/warrior_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_female",  "playermodels/warrior_female",  "playermodels/warrior_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
+            "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/wizard_male",  "playermodels/wizard_male",  "playermodels/wizard_male",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace",   NULL,
+            "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/mace/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/sorceress_female",  "playermodels/sorceress_female",  "playermodels/sorceress_female",  NULL,   false,  true,   3.0f,   15.0f,   1.0f
         },
         // Outfit variants (indices 6-9; NOT selectable at character creation).
         // Same vwep/hudguns as the base Warrior; only the model dir differs.
         {
-            "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  "playermodels/warrior_male_ranger",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  "playermodels/warrior_male_peasant",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  "playermodels/warrior_female_ranger",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
         },
         {
-            "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword",   NULL,
+            "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/advent/hudguns",  "playermodels/vwep/warrior/sword/01",   NULL,
             { NULL, NULL, NULL },
             "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  "playermodels/warrior_female_peasant",  NULL,   false,  false,   3.0f,   15.0f,   1.0f
         },

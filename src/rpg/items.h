@@ -122,11 +122,17 @@ namespace rpg
         const char *armorclass = NULL; // armor-class default: any class
         // Armor attach (Nov 10, Ed's "true armor swapping"): model path
         // attached to the wearer's body when this armor piece is equipped,
-        // e.g. "playermodels/attachments/armor/ranger_hood". NULL = no
+        // e.g. "playermodels/attachments/armor/ranger/female/head/01". NULL = no
         // visual attach (stats only). Data files set it with
         // ss_item_attach. The attach renders via the modelattach array in
         // renderclient, same pattern as the cape (tag_cape) and vwep.
         const char *attach = NULL; // armor-attach default: no visual model
+        // Male-variant attach (.132, class-based armor): model path used
+        // when the wearer's model is male and this is set, e.g. the male
+        // Magi cloth set (magi/male/torso/01) vs the female default (magi/female/torso/01).
+        // NULL = use attach for both sexes. Data files set it with
+        // ss_item_attach_male.
+        const char *attach_male = NULL;
     };
 
     int itemcount();                    // number of defs in the ACTIVE table

@@ -43,8 +43,8 @@ namespace rpg
     static const itemdef FALLBACK_ITEMS[] =
     {
         // id              name            type            slot           icon                                        vwep                         wcat     dmg  arm  heal  stack  value mana
-        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace",     "mace",  15,  0,   0,   false, 60,   0 , 0, -1 },
-        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/warrior/sword",    "sword", 15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace/01",     "mace",  15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_sword.png",    "playermodels/vwep/warrior/sword/01",    "sword", 15,  0,   0,   false, 60,   0 , 0, -1 },
         { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    NULL,    8,   0,   0,   false, 10,   0 , 0, -1 },
         { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          NULL,    0,  3,   0,   false, 30,   0 , 0, -1 },
         { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          NULL,    0,  1,   0,   false, 15,   0 , 0, -1 },
@@ -58,8 +58,8 @@ namespace rpg
         { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          NULL,    0,  4,   0,   false, 45,   0 , 0, -1 },
         { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          NULL,    0,  1,   0,   false, 12,   0 , 0, -1 },
         { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          NULL,    0,  0,   40,  true,  10,   0 , 0, -1 },
-        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow",      "bow",   12,  0,   0,   false, 25,   0 , 0, -1 },
-        { "wooden_staff",  "Wooden Staff", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_empty.png",    "playermodels/vwep/magi/staff",     "staff", 12,  0,   0,   false, 25,   0 , 0, -1 },
+        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow/01",      "bow",   12,  0,   0,   false, 25,   0 , 0, -1 },
+        { "wooden_staff",  "Wooden Staff", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_staff.png",    "playermodels/vwep/magi/staff/01",     "staff", 12,  0,   0,   false, 25,   0 , 0, -1 },
         { "cape",          "Cape",         ITEM_ARMOR,     SLOT_CAPE,     "packages/ui/rpg/icons/icon_cape.png",     NULL,                          NULL,    0,  1,   0,   false, 20,   0 , 0, -1 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
@@ -137,6 +137,7 @@ namespace rpg
         std::string outfit; // outfit model-dir suffix (e.g. "_ranger"), "" = none
         std::string armorclass; // class that may wear this armor, "" = any class
         std::string attach; // armor attach model path, "" = no visual model
+        std::string attach_male; // male-variant attach path, "" = use attach
         bool stack = false;
     };
     static itembuild curitem;
@@ -296,6 +297,7 @@ namespace rpg
             return true;
         }
         if(c == "ss_item_attach") { if(argc != 1) { err = "ss_item_attach: expected 1 argument (model path)"; return false; } curitem.attach = argv[0]; return true; }
+        if(c == "ss_item_attach_male") { if(argc != 1) { err = "ss_item_attach_male: expected 1 argument (model path)"; return false; } curitem.attach_male = argv[0]; return true; }
         err = "unknown content command '" + c + "'";
         return false;
     }
@@ -522,6 +524,7 @@ namespace rpg
             d.outfit = b.outfit.empty() ? NULL : poolstr(b.outfit);
             d.armorclass = b.armorclass.empty() ? NULL : poolstr(b.armorclass);
             d.attach = b.attach.empty() ? NULL : poolstr(b.attach);
+            d.attach_male = b.attach_male.empty() ? NULL : poolstr(b.attach_male);
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
             // findfile "e" alone misses package files when no -k package dir is given (packagedirs empty); also try a direct existence check, like the path check above

@@ -1304,7 +1304,24 @@ namespace rpg
     {
         int id = equippeditem(name, slot);
         if(id < 0) return NULL;
-        return item(id).attach; // NULL when the armor piece has no model path
+        // Enhanced variants share their base item's attach model: an
+        // enhanced piece carries no ss_item_attach of its own.
+        const itemdef *def = &item(id);
+        if(!def->attach && !def->attach_male && def->enhbase)
+        {
+            int baseid = finditem(def->enhbase);
+            if(baseid >= 0) def = &item(baseid);
+        }
+        // Male variant (.132, class-based armor): the male Magi cloth set
+        // uses magi_male_* models; the female default is magi_*. The
+        // character's model dir carries the sex (_male/_female suffix).
+        if(def->attach_male)
+        {
+            char modeldir[64]; modeldir[0] = '\0';
+            if(charmodel(name, modeldir, sizeof(modeldir)) && strstr(modeldir, "_male"))
+                return def->attach_male;
+        }
+        return def->attach; // NULL when the armor piece has no model path
     }
 
     // --- loot drops v1 (milestone step 4): server-side, session-only ---
