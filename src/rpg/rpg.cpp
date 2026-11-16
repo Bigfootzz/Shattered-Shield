@@ -1441,6 +1441,29 @@ namespace rpg
         return it == offhandmap.end() ? NULL : it->second.c_str();
     }
 
+    // --- Off-hand sheet sync (Note 119, v0.1.130) --- The character sheet
+    // reads the off-hand from clequip (filled only by N_RPG_INV), while the
+    // world render reads it from offhandmap (filled by N_RPG_ARMOR). The
+    // two can diverge: the book rendered in the world while the sheet's
+    // Off Hand slot stayed empty. When the local player's off-hand attach
+    // arrives, mirror it into clequip by matching the attach path to the
+    // item def, so the sheet and the world can never disagree. An empty
+    // path clears the slot. Unknown paths leave clequip untouched.
+    void setclientoffhand(const char *path)
+    {
+        initclient();
+        if(!path || !path[0]) { clequip[SLOT_OFFHAND] = -1; return; }
+        loopi(itemcount())
+        {
+            const itemdef &d = item(i);
+            if(d.attach && !strcmp(d.attach, path) && d.slot == SLOT_OFFHAND)
+            {
+                clequip[SLOT_OFFHAND] = i;
+                return;
+            }
+        }
+    }
+
     // --- Presentation-cache reset (Nov 15, Note 113 phantom cape) ---
     // The vwep/armor/cape maps are filled only by N_RPG_* messages and
     // are keyed by clientnum, so they survive a character switch: the

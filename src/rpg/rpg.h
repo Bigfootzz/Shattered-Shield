@@ -220,6 +220,7 @@ namespace rpg
     const char *capefor(int clientnum);    // NULL = no cape equipped
     void setoffhand(int clientnum, const char *path); // "" clears the off-hand attach
     const char *offhandfor(int clientnum); // NULL = no off-hand item equipped
+    void setclientoffhand(const char *path); // local sheet cache: mirror an off-hand attach path into clequip (Note 119)
     void clearpresentation(); // world entry: drop all stale vwep/armor/cape cache entries
     bool vwep_has_pvpglow(const char *path);          // client: true when the vwep path is a PvP weapon (data/rpg/pvpglow.cfg)
     void setmana(int mana, int maxmana);
