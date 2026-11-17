@@ -526,6 +526,25 @@ namespace game
     // without a drag fires the classic right-click (select + auto-attack),
     // release after a drag just ends steering and NEVER attacks.
     static float rpg_turnrate = 150.0f; // deg/sec, MMO-standard smooth turn
+    // Playtest fix (Nov 17, Note 161): the combat facing turn was an instant
+    // snap - the character flipped to the target yaw in one frame and snapped
+    // back when the attack ended, which read as the camera flipping around.
+    // Steer the yaw toward the desired heading at a fast but finite rate
+    // (720 deg/sec: a full 180 in 250ms) so the turn is a quick turn, not a
+    // flip. Wraps the short way around 0/360.
+    static float rpg_faceturn = 720.0f; // deg/sec, combat facing turn
+    static float rpg_steeryaw(float cur, float target, float maxstep)
+    {
+        float diff = target - cur;
+        while(diff > 180.0f) diff -= 360.0f;
+        while(diff < -180.0f) diff += 360.0f;
+        if(diff > maxstep) diff = maxstep;
+        else if(diff < -maxstep) diff = -maxstep;
+        float nyaw = cur + diff;
+        while(nyaw < 0.0f) nyaw += 360.0f;
+        while(nyaw >= 360.0f) nyaw -= 360.0f;
+        return nyaw;
+    }
     static bool rpg_rmbheld = false, rpg_rmbdrag = false;
     static float rpg_rmbpx = 0, rpg_rmbpy = 0; // press point, screen px
     static float rpg_rmblx = 0, rpg_rmbly = 0; // last steered sample, screen px
@@ -1126,10 +1145,10 @@ namespace game
                 {
                     float fyaw, fpitch;
                     vectoyawpitch(delta, fyaw, fpitch);
-                    player1->yaw = fyaw;
+                    player1->yaw = rpg_steeryaw(player1->yaw, fyaw, rpg_faceturn * (curtime/1000.0f));
                 }
             }
-            else player1->yaw = camera1->yaw;
+            else player1->yaw = rpg_steeryaw(player1->yaw, camera1->yaw, rpg_faceturn * (curtime/1000.0f));
         }
 
         // auto-attack: repeated Basic Attack (ability 2, CLEANUP item 8)
