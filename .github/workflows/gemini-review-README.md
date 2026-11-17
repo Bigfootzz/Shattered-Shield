@@ -30,7 +30,7 @@ there is no third-party action to trust.
 ## What it does
 
 - On every PR open, update, or reopen, it reviews the diff with
-  `gemini-2.5-flash` and posts a short comment: real bugs, crashes,
+  `gemini-flash-latest` and posts a short comment: real bugs, crashes,
   memory errors, logic errors, security issues, and correctness
   problems only. No style or formatting nitpicks.
 - If nothing is wrong it says "No issues found."
@@ -56,7 +56,7 @@ there is no third-party action to trust.
   deliberately not used.
 - Model and endpoint were verified against Google's Gemini API docs
   (Nov 17, 2026): `POST
-  https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`.
+  https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`.
   The classic `generateContent` REST API is now labelled legacy by
   Google in favour of a newer Interactions API, but it remains
   supported and is the right fit for this simple stateless job.

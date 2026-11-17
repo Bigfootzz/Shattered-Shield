@@ -8,7 +8,7 @@ to install.
 What it does:
   1. Fetches the PR diff from the GitHub API (GITHUB_TOKEN).
   2. Sends the diff to the Gemini API (GEMINI_API_KEY, model from
-     GEMINI_MODEL, default gemini-2.5-flash) and asks for a short review
+     GEMINI_MODEL, default gemini-flash-latest) and asks for a short review
      focused on real bugs, security, and correctness - no style nitpicks.
   3. Posts the review as a PR comment. On later pushes to the same PR it
      updates its own comment instead of posting a new one.
@@ -18,7 +18,7 @@ Environment (set by the workflow):
   PR_NUMBER          pull request number
   GITHUB_TOKEN       secrets.GITHUB_TOKEN (post/update the comment)
   GEMINI_API_KEY     secrets.GEMINI_API_KEY (free key from Google AI Studio)
-  GEMINI_MODEL       optional, defaults to gemini-2.5-flash
+  GEMINI_MODEL       optional, defaults to gemini-flash-latest
 
 Limits:
   - Diffs over MAX_DIFF_CHARS are truncated to the first 12,000
@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 
 MARKER = "<!-- gemini-review-bot -->"
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 MAX_DIFF_CHARS = 12000
 MAX_REVIEW_TOKENS = 2048
 GEMINI_URL = (
