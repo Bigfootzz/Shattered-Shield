@@ -1482,6 +1482,28 @@ namespace rpg
         return it == offhandmap.end() ? NULL : it->second.c_str();
     }
 
+    // --- Shoulder attach map (Nov 16, Ed: shoulders replace the visible
+    // cape) --- Client-side cache of each client's equipped shoulder attach
+    // model (pauldron pair), filled by N_RPG_ARMOR with slot SLOT_SHOULDER.
+    // Mirrors capemap; the render code reads it via shoulderfor() and only
+    // renders the shoulders when a shoulder item is actually equipped. The
+    // tag is tag_shoulder on spine_03 in each player model's iqm.cfg.
+    static std::map<int, std::string> shouldermap; // clientnum -> model path
+
+    void setshoulder(int clientnum, const char *path)
+    {
+        initclient();
+        if(!path || !path[0]) shouldermap.erase(clientnum);
+        else shouldermap[clientnum] = path;
+    }
+
+    const char *shoulderfor(int clientnum)
+    {
+        initclient();
+        std::map<int, std::string>::iterator it = shouldermap.find(clientnum);
+        return it == shouldermap.end() ? NULL : it->second.c_str();
+    }
+
     // --- Off-hand sheet sync (Note 119, v0.1.130) --- The character sheet
     // reads the off-hand from clequip (filled only by N_RPG_INV), while the
     // world render reads it from offhandmap (filled by N_RPG_ARMOR). The
@@ -1521,6 +1543,7 @@ namespace rpg
         loopi(4) armormap[i].clear();
         capemap.clear();
         offhandmap.clear();
+        shouldermap.clear();
     }
 
     // --- PvP weapon glow registry (Oct 31, Ed's call: ALL PvP weapons share

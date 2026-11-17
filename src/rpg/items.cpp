@@ -61,6 +61,7 @@ namespace rpg
         { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow/01",      "bow",   12,  0,   0,   false, 25,   0 , 0, -1 },
         { "wooden_staff",  "Wooden Staff", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_staff.png",    "playermodels/vwep/magi/staff/01",     "staff", 12,  0,   0,   false, 25,   0 , 0, -1 },
         { "cape",          "Cape",         ITEM_ARMOR,     SLOT_CAPE,     "packages/ui/rpg/icons/icon_cape.png",     NULL,                          NULL,    0,  1,   0,   false, 20,   0 , 0, -1 },
+        { "pauldron",      "Pauldron",     ITEM_ARMOR,     SLOT_SHOULDER, "packages/ui/rpg/icons/icon_pauldron.png", NULL,                          NULL,    0,  2,   0,   false, 50,   0 , 0, -1 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
@@ -108,7 +109,7 @@ namespace rpg
         return item(id).name;
     }
 
-    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape", "offhand" };
+    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape", "offhand", "shoulder" };
 
     const char *slotname(int slot)
     {

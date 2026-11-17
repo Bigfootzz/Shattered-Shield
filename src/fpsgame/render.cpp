@@ -94,12 +94,11 @@ namespace game
         // (mdl->quad) is never drawn there - skip it (load-time fix, Oct 22).
         // The vwep (hand weapon) IS drawn in third person; keep it.
         bool rpgmap = rpg::mapactive(getincomingmapname());
-        // Cape (Nov 10, re-applied from Nov 1): attached to every player model in renderplayer
-        // below, so warm it once here (loadmodel caches by name) instead
-        // of paying a first-frame load hitch like the old vwep path did.
-        diaglog("preloadplayermodel: loading cape");
-        preloadmodel("playermodels/attachments/cape");
-        diaglog("preloadplayermodel: cape loaded");
+        // Shoulder (Nov 16, Ed: shoulders replace the visible cape):
+        // the pauldron pair is preloaded by the data-driven loop below
+        // (it reads every item's attach path), so no explicit preload
+        // is needed here. The cape is stats-only now and renders nothing,
+        // so it is no longer preloaded either.
         // Armor attach preload (Nov 11, Ed's equip-freeze fix): the
         // armor attach models were NOT preloaded, so the first equip of
         // each piece loaded its IQM + textures synchronously in the
@@ -109,21 +108,19 @@ namespace game
         // as the render code. Data-driven: when Warrior mail / Magi
         // cloth gain attach models, they preload automatically with no
         // code change. RPG maps only (attaches never render on FPS
-        // maps). The cape is already queued above, so it is skipped.
+        // maps). The shoulder pauldron preloads here the same way.
         if(rpgmap)
         {
             loopi(rpg::itemcount())
             {
                 const rpg::itemdef &def = rpg::item(i);
                 // Armor attach (female default) and male variant (.132):
-                // boots split into _l/_r, same as the render code. The
-                // cape is already queued above, so it is skipped.
+                // boots split into _l/_r, same as the render code.
                 const char *attaches[2] = { def.attach, def.attach_male };
                 loopj(2)
                 {
                     const char *apath = attaches[j];
                     if(!apath || !apath[0]) continue;
-                    if(!strcmp(apath, "playermodels/attachments/cape")) continue;
                     if(def.slot == rpg::SLOT_FEET)
                     {
                         defformatstring(bootl)("%s_l", apath);
@@ -304,7 +301,7 @@ namespace game
             hold = attack = ANIM_TAUNT;
             delay = 1000;
         }
-        modelattach a[12]; // 11 entries max (weapon, tip, powerup, shield, cape, muzzle, helm, torso, legs, boot_l, boot_r) + terminator
+        modelattach a[13]; // 12 entries max (weapon, tip, powerup, shield, shoulder, offhand, muzzle, helm, torso, legs, boot_l, boot_r) + terminator
         // v0.1.16: Revelade FPS vweps removed (Ed). Vweps organized by class:
         // ranger/bow, warrior/mace, magi/ (empty, for future staff). The array
         // is sized for the weapon slots; unused slots fall back to the first
@@ -337,28 +334,32 @@ namespace game
                 a[ai++] = modelattach("tag_tip", &d->pvpglowpos);
             }
         }
-        // --- Cape (Nov 11, Ed's cape rule: no character starts with a
-        // cape) --- One design for all classes, a rigid drape skinned to
-        // a single root joint and baked in neck-local space (see
-        // packages/models/playermodels/attachments/cape/iqm.cfg). The tag
-        // is defined with IDENTITY offset in each player model's iqm.cfg
-        // (neck_01 on the ranger/warrior rig, Neck on the Magi rig); any
-        // offset would shift the drape off the back. Default anim (-1):
-        // the cape has no frames, so it renders in bind pose at the
-        // animated neck tag - the same static-attach pattern as the bow
-        // vwep. Gated on an equipped cape (rpg::capefor, filled by
-        // N_RPG_ARMOR with slot SLOT_CAPE): a character with no cape
-        // equipped renders no cape. Fail-safe: link() returns false when
-        // tag_cape is missing (infected / zombie models carry no such
-        // tag) and the entry is skipped with the body still rendering; a
-        // missing cape file is skipped the same way by rendermodel.
+        // --- Shoulder (Nov 16, Ed: shoulders replace the visible cape)
+        // --- The pauldron pair (base for shoulder designs) is a rigid
+        // static model baked in spine_03-local space (see
+        // packages/models/playermodels/attachments/shoulder/01/iqm.cfg).
+        // The tag is defined with IDENTITY offset in each player model's
+        // iqm.cfg (spine_03); any offset would shift the pauldrons off
+        // the shoulders. Default anim (-1): the shoulders have no frames,
+        // so they render in bind pose at the animated spine tag - the
+        // same static-attach pattern as the bow vwep. Gated on an
+        // equipped shoulder item (rpg::shoulderfor, filled by N_RPG_ARMOR
+        // with slot SLOT_SHOULDER): a character with no shoulder item
+        // equipped renders no pauldrons. Fail-safe: link() returns false
+        // when tag_shoulder is missing and the entry is skipped with the
+        // body still rendering; a missing shoulder file is skipped the
+        // same way by rendermodel.
+        // The cape is stats-only now (Nov 16, Ed): it still equips to
+        // SLOT_CAPE and gives its stats, but no cape model is attached,
+        // so nothing renders. The cape and the shoulders can be worn at
+        // the same time (more stat options).
         if(rpg::mapactive(getclientmap()))
         {
-            const char *cape = rpg::capefor(d->clientnum);
-            if(cape && cape[0]) a[ai++] = modelattach("tag_cape", cape);
+            const char *shoulder = rpg::shoulderfor(d->clientnum);
+            if(shoulder && shoulder[0]) a[ai++] = modelattach("tag_shoulder", shoulder);
             // --- Off hand (Nov 15, Ed: "an off hand") --- Magi orb /
             // Warrior shield, attached to tag_offhand on the left hand.
-            // Same pattern as the cape: gated on an equipped off-hand
+            // Same pattern as the shoulder: gated on an equipped off-hand
             // item (rpg::offhandfor, filled by N_RPG_ARMOR with slot
             // SLOT_OFFHAND); a character with nothing equipped renders
             // no off-hand item. Fail-safe: link() returns false when

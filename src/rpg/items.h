@@ -30,8 +30,10 @@ namespace rpg
     // Equipment slots (SLOT_NONE = not equippable, e.g. consumables)
     // Neck/rings are stats-only: no 3D model or vwep is shown for them on
     // the character (Ed, Oct 24) — they exist to add stats and balance to
-    // the character sheet. Ring slots are distinct: a ring1 item equips
-    // only to ring1, a ring2 item only to ring2 (no first-free-slot logic).
+    // the character sheet. The cape joined them (Nov 16, Ed: shoulders
+    // replace the visible cape; the cape gives stats only, renders nothing).
+    // Ring slots are distinct: a ring1 item equips only to ring1, a ring2
+    // item only to ring2 (no first-free-slot logic).
     enum
     {
         SLOT_MAINHAND = 0,
@@ -53,6 +55,11 @@ namespace rpg
         // The 3D attach (shield on tag_shield, orb in the left hand) is
         // future work — the slot, paperdoll and sheet are wired now.
         SLOT_OFFHAND,
+        // Shoulder (Nov 16, Ed: shoulders replace the visible cape).
+        // The pauldron (base for shoulder designs) equips here and renders
+        // via tag_shoulder on spine_03. The cape stays in SLOT_CAPE for
+        // stats only, so both can be worn at once (more stat options).
+        SLOT_SHOULDER,
         SLOT_COUNT,
         SLOT_NONE = -1
     };

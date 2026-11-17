@@ -5624,8 +5624,8 @@ namespace server
     // Called on every equip/unequip so all clients render the new armor.
     static void rpg_sendarmor(clientinfo *cq)
     {
-        static const int slots[6] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE, rpg::SLOT_OFFHAND };
-        loopi(6)
+        static const int slots[7] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE, rpg::SLOT_OFFHAND, rpg::SLOT_SHOULDER };
+        loopi(7)
         {
             const char *path = rpg::equippedattach(cq->name, slots[i]);
             sendf(-1, 1, "riiis", N_RPG_ARMOR, cq->clientnum, slots[i], path ? path : "");
@@ -6994,8 +6994,8 @@ namespace server
             if(other == ci) continue;
             const char *path = rpg::equippedvwep(other->name);
             sendf(ci->clientnum, 1, "riis", N_RPG_VWEP, other->clientnum, path ? path : "");
-            static const int aslots[5] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE };
-            loopj(5)
+            static const int aslots[6] = { rpg::SLOT_HEAD, rpg::SLOT_TORSO, rpg::SLOT_LEGS, rpg::SLOT_FEET, rpg::SLOT_CAPE, rpg::SLOT_SHOULDER };
+            loopj(6)
             {
                 const char *apath = rpg::equippedattach(other->name, aslots[j]);
                 sendf(ci->clientnum, 1, "riiis", N_RPG_ARMOR, other->clientnum, aslots[j], apath ? apath : "");
