@@ -38,7 +38,7 @@ namespace rpg
         { "tomas", "Tomas", "npcs/male_peasant_static", 2220.0f, 1980.0f, 2116.0f, 115.0f, "tomas_main", "questgiver" },
         { "corvin", "Corvin", "npcs/male_peasant_static", 3062.0f, 2612.0f, 2116.0f, 270.0f, "corvin_main", "questgiver" },
         { "glimmer", "Glimmer", "npcs/imp_vendor", 3030.0f, 2590.0f, 2116.0f, 180.0f, "vendor_main", "vendor" },
-        { "blasque", "Blasque", "npcs/imp_vendor_gold_staff", 1777.0f, 2087.0f, 2145.9f, 263.0f, "vendor_pvp", "vendor" },
+        { "blasque", "Blasque", "npcs/imp_vendor_gold_staff", 1756.0f, 2087.0f, 2145.9f, 263.0f, "vendor_pvp", "vendor" },
         { "board", "Call to Arms", "objects/notice_board", 1778.0f, 2052.0f, 2182.0f, 0.0f, "board_main", "questgiver" },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_NPCS)/sizeof(FALLBACK_NPCS[0]);

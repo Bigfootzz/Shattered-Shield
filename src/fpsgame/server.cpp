@@ -2782,11 +2782,12 @@ namespace server
         if(winnerteam < 1 || winnerteam > 2) return; // draw or invalid: no grant
         // Call to Arms win recording (Nov 1): rides the same once-per-game
         // funnel as the Embers win grant (checkintermission's !interm guard),
-        // so a win can never double-record. Mode key: CTF is gamemode 7
-        // today; when KOTH/TFF land, their intermission paths call this same
-        // funnel and this mapping grows ("koth"/"tff") — a win with an
-        // unknown mode records no quest progress (never a wrong mode).
-        const char *mode = m_ctf ? "ctf" : NULL;
+        // so a win can never double-record. Mode key maps the battleground
+        // gamemode (7/17/18) to its quest key; a win with an unknown mode
+        // records no quest progress (never a wrong mode).
+        const char *mode = gamemode == BG_MODE_CTF ? "ctf"
+                         : gamemode == BG_MODE_KOTH ? "koth"
+                         : gamemode == BG_MODE_TFF ? "tff" : NULL;
         loopv(clients)
         {
             clientinfo *ci = clients[i];
@@ -3266,7 +3267,7 @@ namespace server
             // the monster-kill block's party credit (Ed can override).
             // questonbgkill is separate from questonkill because questonkill
             // is monster-gated and never runs for player kills.
-            if(rpg::connected() && m_ctf && rpg::mapactive(smapname) &&
+            if(rpg::connected() && (m_ctf || m_koth || m_tff) && rpg::mapactive(smapname) &&
                bg_match_active && !bg_start_active && interm <= 0 &&
                actor && actor != target && actor->state.ai.type == ai::AI_TYPE_NONE &&
                (target->state.ai.type == ai::AI_TYPE_NONE || target->state.ai.type == ai::AI_TYPE_BOT) &&
