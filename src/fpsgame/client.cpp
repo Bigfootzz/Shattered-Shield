@@ -322,7 +322,18 @@ namespace game
     {
         if(!player1 || !rpg::mapactive(getclientmap())) return;
         fpsent *sel = rpg_selmon();
-        if(!sel) return;
+        if(!sel)
+        {
+            // Nov 18 (.139, Notes 194/197): no target selected. The old code
+            // returned here, so a manual cast went out with whatever yaw the
+            // character happened to have, and the Ranger attacked sideways
+            // (body turned away from the mob he was shooting). Snap the
+            // character to the camera yaw instead, so a cast without a
+            // click-selected target still faces where the player is looking.
+            player1->yaw = camera1->yaw;
+            rpg_facetill = totalmillis + 1000;
+            return;
+        }
         vec delta(sel->o); delta.sub(player1->o); delta.z = 0;
         if(delta.magnitude() < 0.01f) return;
         float yaw, pitch;
@@ -995,6 +1006,26 @@ namespace game
             if(rpg::clientqueststate(4) == 1) return rpg::RPG_HOVER_QUEST; // waiting for the letter
             return rpg::RPG_HOVER_DEFAULT;
         }
+        if(npci == 6) // Call to Arms board (Nov 18, Note 193): it is a
+        // questgiver (quests 9-11) but had no hover case, so it never showed
+        // the quest ! / turn-in ? icon like the other quest givers. Mirror
+        // the Maren case: turn-in when the active board quest is complete,
+        // quest ! when any board quest is unstarted.
+        {
+            int qid = 0, st = -1, kills = 0, need = 0;
+            if(rpg::getclientquest(qid, st, kills, need))
+            {
+                const rpg::questdef *qd = rpg::questdefbyid(qid);
+                if(qd && qd->giver == 6 && need > 0 && kills >= need) return rpg::RPG_HOVER_TURNIN;
+            }
+            int nq = rpg::questdefcount();
+            loopi(nq)
+            {
+                const rpg::questdef *qd = rpg::questdefbyindex(i);
+                if(qd && qd->giver == 6 && rpg::clientqueststate(qd->qid) <= 0) return rpg::RPG_HOVER_QUEST;
+            }
+            return rpg::RPG_HOVER_DEFAULT;
+        }
         return rpg::RPG_HOVER_DEFAULT;
     }
 
@@ -1159,11 +1190,19 @@ namespace game
                     // turned. Steering the camera yaw to the same target
                     // yaw, at the same rate, swings it around behind the
                     // player so the fight plays out over the shoulder.
-                    // A/D still steers the camera (above); this only pulls
-                    // it back behind the player while a target is selected.
-                    camera1->yaw = rpg_steeryaw(camera1->yaw, fyaw, rpg_faceturn * (curtime/1000.0f));
-                    while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
-                    while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+                    // Nov 18 (.139, Note 202): A/D turning BREAKS the lock.
+                    // The old code steered the camera back to the target
+                    // every frame, so A/D could not look away — the steer
+                    // fought the turn and the player felt stuck on the
+                    // target. While the player holds A/D (turndir != 0),
+                    // skip the pull-back; the camera follows the turn.
+                    // Releasing A/D lets the lock re-engage.
+                    if(!turndir)
+                    {
+                        camera1->yaw = rpg_steeryaw(camera1->yaw, fyaw, rpg_faceturn * (curtime/1000.0f));
+                        while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
+                        while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
+                    }
                 }
             }
             else player1->yaw = rpg_steeryaw(player1->yaw, camera1->yaw, rpg_faceturn * (curtime/1000.0f));
@@ -1178,6 +1217,13 @@ namespace game
         // the first frame. Bounds must match the isintown / isforest
         // ICOMMANDs in fps.cpp (town: X 1000-2400, Y 1800-2800;
         // forest: X 1000-2400, Y 2800-4096).
+        // Nov 18 (.139, Notes 201/203): RPG map ONLY. rpg::mapactive is
+        // true on battleground maps too (ctf/koth/tff), so this zone check
+        // ran there as well, and the battleground's X/Y crossed the rpg_01
+        // town/forest bounds as the player moved between forts, calling
+        // playASong and restarting battleThemeA at every crossing. On a
+        // battleground the theme must loop untouched for the whole match.
+        if(!strcmp(getclientmap(), "rpg_01"))
         {
             static int rpg_zone = 1; // 0 = elsewhere, 1 = town, 2 = forest
             int nowzone = 0;

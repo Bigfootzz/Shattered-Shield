@@ -3711,6 +3711,18 @@ namespace server
                 {
                     if(!rpg::equipitem(name, "wooden_staff")) conoutf("bg: WARNING: bot '%s' (Magi) could not equip wooden_staff: %s", name, rpg::equipdeny());
                 }
+                // Starter armor (Nov 18, .139 Note 200): bots spawned with
+                // only the starter weapon, so they fought naked (bare chest
+                // and legs, just underwear). Give each class its basic armor
+                // set and equip it, so battleground bots look dressed.
+                const char *botarmor[3] = { NULL, NULL, NULL };
+                if(!strcmp(botarch, "Ranger")) { botarmor[0] = "ranger_tunic"; botarmor[1] = "ranger_pants"; botarmor[2] = "ranger_boots"; }
+                else if(!strcmp(botarch, "Warrior")) { botarmor[0] = "chain_tunic"; botarmor[1] = "iron_leggings"; botarmor[2] = "iron_boots"; }
+                else if(!strcmp(botarch, "Magi")) { botarmor[0] = "cloth_tunic"; botarmor[1] = "cloth_leggings"; botarmor[2] = "cloth_boots"; }
+                loopi(3) if(botarmor[i] && rpg::additem(name, botarmor[i], 1))
+                {
+                    if(!rpg::equipitem(name, botarmor[i])) conoutf("bg: WARNING: bot '%s' (%s) could not equip %s: %s", name, botarch, botarmor[i], rpg::equipdeny());
+                }
             }
             conoutf("bg: bot '%s' (%s, cn %d) joins the battleground", name, botarch, bi->clientnum);
         }
@@ -6105,7 +6117,7 @@ namespace server
                 rpg_syncinv(cq);
                 rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials were lost.");
             }
-            else rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials are safe.");
+            else rpg_craftresult(cq, 0, "That combination doesn't craft anything.");
             conoutf("rpg: '%s' failed craft %s + %s (fail_lose %d)", cq->name, itema, itemb, craft_fail_lose);
             return;
         }
@@ -6117,7 +6129,7 @@ namespace server
             // so a refused enhance loses nothing.
             int gearidx = rpg::finditem(gearid), matidx = rpg::finditem(matid);
             if(gearidx < 0 || matidx < 0 || rpg::item(matidx).type != rpg::ITEM_MATERIAL)
-            { rpg_craftresult(cq, 0, "That combination doesn't craft anything. Your materials are safe."); return; }
+            { rpg_craftresult(cq, 0, "That combination doesn't craft anything."); return; }
             // No equipped guard is needed here, deliberately: the count
             // check above already refuses when no inventory copy exists
             // (an equipped-only piece is not in inventory), and when a
@@ -6221,7 +6233,10 @@ namespace server
 
     void rpg_sell(clientinfo *cq, const char *itemid)
     {
-        if(!rpg_checkinv(cq)) return;
+        // Nov 18 (.139, Note 204): the old silent return here made a failed
+        // sale look like nothing happened (no funds, no message), especially
+        // for stacks. Report the failure so the player sees why.
+        if(!rpg_checkinv(cq)) { rpg_qmsg(cq, "Sale did not go through. Your character is not loaded right now, try again."); return; }
         if(cq->state.state != CS_ALIVE) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2You must be alive to trade."); return; }
         int id = rpg::finditem(itemid);
         if(id < 0) { sendf(cq->clientnum, 1, "ris", N_SERVMSG, "\f2Unknown item."); return; }
@@ -6258,20 +6273,32 @@ namespace server
         // verified to have dropped by exactly one — if removal does not
         // stick, no copper is granted and the player is told, instead of
         // money appearing while the item stays.
+        // Nov 18 (.139, Note 204): sell the WHOLE stack in one atomic
+        // transaction. The old code sold exactly one item per click, so a
+        // stack needed a click per item (re-selecting each time, since the
+        // UI clears the selection), and a stack sale often looked like
+        // nothing happened. Selling the full stack at once is what the
+        // player expects from a Sell button on a stack, and it is atomic:
+        // the count must drop to zero and the full price (price x count)
+        // is granted only then.
         int beforecount = rpg::itemcount(cq->name, itemid);
-        if(!rpg::removeitem(cq->name, itemid, 1)) { rpg_qmsg(cq, "You don't have that."); return; }
+        if(beforecount <= 0) { rpg_qmsg(cq, "You don't have that."); return; }
+        if(!rpg::removeitem(cq->name, itemid, beforecount)) { rpg_qmsg(cq, "You don't have that."); return; }
         int aftercount = rpg::itemcount(cq->name, itemid);
-        if(aftercount != beforecount - 1)
+        if(aftercount != 0)
         {
             rpg_qmsg(cq, "Sale did not go through. Your items are unchanged.");
             conoutf("rpg: sell verification failed for '%s' item %s (before %d, after %d)", cq->name, itemid, beforecount, aftercount);
             rpg_syncinv(cq);
             return;
         }
-        rpg::addcopper(cq->name, price);
-        defformatstring(msg)("%s sold for %d copper.", rpg::itemname(id), price);
+        int total = price * beforecount;
+        rpg::addcopper(cq->name, total);
+        string msg;
+        if(beforecount > 1) { defformatstring(tmp)("%s x%d sold for %d copper.", rpg::itemname(id), beforecount, total); copystring(msg, tmp); }
+        else { defformatstring(tmp)("%s sold for %d copper.", rpg::itemname(id), total); copystring(msg, tmp); }
         rpg_qmsg(cq, msg);
-        conoutf("rpg: '%s' sells %s for %dc", cq->name, rpg::itemname(id), price);
+        conoutf("rpg: '%s' sells %s x%d for %dc", cq->name, rpg::itemname(id), beforecount, total);
         rpg_sendvwep(cq);
         rpg_syncinv(cq);
     }

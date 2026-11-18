@@ -364,10 +364,13 @@ namespace ai
                     // The spawnstate pipeline parks remote ents at a player
                     // spawn; the server anchor (N_RPG_MOBHOME) is the truth.
                     // As the movement authority for this mob, place it home.
-                    // The anchor z is a feet level; the origin rides at eye
-                    // height. Placing at the raw anchor would embed the mob
-                    // in the terrain and it would fall through the world.
-                    d->o = vec(ai->rpghome.x, ai->rpghome.y, ai->rpghome.z + d->eyeheight + 2.0f);
+                    // Nov 18 (.139, Note 196): the anchor z is the EYE
+                    // position, not a feet level (the server sends sp->z,
+                    // which is ground + eyeheight, and its own reset adds
+                    // only +2.0f). The old code added eyeheight again, so
+                    // the mob floated eyeheight above the ground (the giant
+                    // floated ~52u). Only the +2.0f lift stays.
+                    d->o = vec(ai->rpghome.x, ai->rpghome.y, ai->rpghome.z + 2.0f);
                     d->resetinterp(); // moveplayer(local) snaps o to newpos: keep them in sync
                     d->vel = vec(0, 0, 0);
                     d->falling = vec(0, 0, 0);
@@ -394,7 +397,10 @@ namespace ai
                 {
                     ai->rpgsteeroffset = rnd(2) ? 60 : -60;
                     ai->rpgwanderyaw = rnd(360);
-                    d->jumping = true;
+                    // Nov 18 (.139, Note 198): no jumping on RPG maps (Ed:
+                    // mobs should not jump at all). The steer offset alone
+                    // turns the mob off the obstacle; the hop is dropped.
+                    if(!rpg::mapactive(getclientmap())) d->jumping = true;
                 }
                 ai->rpgstuckpos = d->o;
                 ai->rpgstucktimer = lastmillis + 1000;
@@ -420,9 +426,12 @@ namespace ai
             if(ai->enemy && ai->enemy->state != CS_ALIVE) { ai->enemy = NULL; ai->transition(d, M_SLEEP, 0, 100, 100); }
 
             // Leash: either side past the line from home breaks the fight.
+            // Silent (Nov 18, Note 190): the leash message used conoutf and
+            // spammed the screen every tick on load, because the foe (player)
+            // is far from the mob's home even when the mob never left it.
+            // Other mobs' leashes are silent; this one is too now.
             if(ai->enemy && (RPGDH(d->o) > rpg::MOB_LEASH_RANGE || RPGDH(ai->enemy->o) > rpg::MOB_LEASH_RANGE))
             {
-                conoutf("rpgbehav: '%s' leashes (mob %.0f / foe %.0f from home, limit %.0f)", d->name, RPGDH(d->o), RPGDH(ai->enemy->o), rpg::MOB_LEASH_RANGE);
                 ai->enemy = NULL;
                 ai->rpgfoe = NULL;
                 ai->transition(d, M_SEARCH, 1, 100, 100); // M_SEARCH here = returning home
@@ -499,7 +508,7 @@ namespace ai
                 // active; the direction is random so it does not always
                 // turn the same way into a corner.
                 if(!ai->rpgsteeroffset) ai->rpgsteeroffset = rnd(2) ? 45 : -45;
-                if(!rnd(20000/max(monsterType.classInfo.maxspeed/4, 1))) d->jumping = true;
+                if(!rpg::mapactive(getclientmap()) && !rnd(20000/max(monsterType.classInfo.maxspeed/4, 1))) d->jumping = true;
                 // v0.1.26 (item 5): idle wander hopped "like on drugs".
                 // Was !rnd(3): while blocked on uneven ground, an idle
                 // imp jumped on ~1 in 3 think ticks — machine-gun hopping
@@ -507,7 +516,7 @@ namespace ai
                 // still clears a genuine step within about a second of
                 // trying, but no longer bounces constantly. Combat hop
                 // (first branch, chasing a foe) is untouched.
-                else if(!ai->enemy && !rnd(30)) d->jumping = true;
+                else if(!ai->enemy && !rpg::mapactive(getclientmap()) && !rnd(30)) d->jumping = true;
             }
 
             float dist = ai->enemy ? ai->enemy->o.dist(d->o) : 0;
@@ -620,13 +629,20 @@ namespace ai
             // (M_SEARCH). Aggression (aggro on sight) is untouched here;
             // the M_SLEEP visual-contact gate below stops it re-engaging
             // while the player is outside its perimeter.
-            if(d->state==CS_ALIVE && rpg::mapactive(getclientmap()) && ai->rpghomeknown && ai->enemy)
+            // Silent leash (Nov 18, Note 190): no conoutf. The old message
+            // spammed the screen every tick on load: the giant sits at home
+            // (mob 0) while the player spawns ~1700 away, so the foe-side
+            // check fired on every tick and the text lived on screen.
+            // Also skipped while the mob is asleep (M_SLEEP): it is not in
+            // a fight, the player is only its potential target, so there is
+            // nothing to leash. Without this the stock think re-acquires the
+            // player as enemy every tick and the leash fires again.
+            if(d->state==CS_ALIVE && ai->monsterstate != M_SLEEP && rpg::mapactive(getclientmap()) && ai->rpghomeknown && ai->enemy)
             {
                 float mobdh = vec(d->o.x - ai->rpghome.x, d->o.y - ai->rpghome.y, 0).magnitude();
                 float foedh = vec(ai->enemy->o.x - ai->rpghome.x, ai->enemy->o.y - ai->rpghome.y, 0).magnitude();
                 if(mobdh > rpg::MOB_LEASH_RANGE || foedh > rpg::MOB_LEASH_RANGE)
                 {
-                    conoutf("rpgbehav: '%s' leashes (mob %.0f / foe %.0f from home, limit %.0f)", d->name, mobdh, foedh, rpg::MOB_LEASH_RANGE);
                     ai->enemy = NULL;
                     ai->rpgfoe = NULL;
                     ai->transition(d, M_SEARCH, 1, 100, 100);
@@ -700,14 +716,15 @@ namespace ai
                     if(d->blocked)                                                              // special case: if we run into scenery
                     {
                         d->blocked = false;
-                        if(!rnd(20000/(monsterType.classInfo.maxspeed/4)))                            // try to jump over obstackle (rare)
+                        if(!rpg::mapactive(getclientmap()) && !rnd(20000/(monsterType.classInfo.maxspeed/4)))  // try to jump over obstackle (rare; never on RPG maps, Note 198)
                         {
                             d->jumping = true;
                         }
                         else if(!ai->wproute.empty())
                         {
                             // following a waypoint route: the blocker is usually a step or lip the graph crosses, so hop again rather than spinning off course
-                            if(!rnd(3)) d->jumping = true;
+                            // (never on RPG maps, Note 198: mobs do not jump)
+                            if(!rpg::mapactive(getclientmap()) && !rnd(3)) d->jumping = true;
                         }
                         else if(ai->trigger < lastmillis && (ai->monsterstate != M_HOME || !rnd(5)))  // search for a way around (common)
                         {

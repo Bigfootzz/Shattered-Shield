@@ -41,6 +41,11 @@ namespace rpg
         for(int i = 1; i < n; i++) { if(tiers[i] < lo) lo = tiers[i]; if(tiers[i] > hi) hi = tiers[i]; }
         if(lo < 0) lo = 0;
         if(hi > 4) hi = 4;
+        // Gemini review (PR #1, Nov 18): clamp lo too. If every input tier
+        // is > 4 (e.g. {5,6}), hi clamped to 4 while lo stayed 5, so lo >
+        // hi and the function returned 5, an out-of-range tier (valid 0-4;
+        // crafttiername(5) is ''). Clamping lo keeps the result in range.
+        if(lo > 4) lo = 4;
         if(lo >= hi) return lo;
         // Triangular weights over [lo, hi]: weight(t) = span+1 - |2*(t-lo)-span|.
         // span 3 -> 1,3,3,1; span 4 -> 1,3,5,3,1; span 1 -> 1,1. Peak at the
