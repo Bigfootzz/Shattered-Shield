@@ -106,7 +106,20 @@ namespace rpg
     const char *itemname(int id)
     {
         if(id < 0 || id >= itemcount()) return "";
-        return item(id).name;
+        // Nov 18 (.141): the name carries its rarity tier color so the tier
+        // is distinguishable at a glance (Ed: name color is enough, no
+        // border needed). Common white, uncommon green, rare blue, epic
+        // purple, legendary orange. Wrapped in \fs...\fS so the color
+        // does not bleed into following text. Rotating buffers so two names
+        // in one message do not clobber each other.
+        static const char *TIERCOL[5] = { "\f7", "\f0", "\f1", "\fp", "\f6" };
+        static string bufs[4];
+        static int n = 0;
+        const itemdef &d = item(id);
+        int t = d.tier < 0 ? 0 : (d.tier > 4 ? 4 : d.tier);
+        string &b = bufs[n++ & 3];
+        formatstring(b)("\fs%s%s\fS", TIERCOL[t], d.name);
+        return b;
     }
 
     static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape", "offhand", "shoulder" };

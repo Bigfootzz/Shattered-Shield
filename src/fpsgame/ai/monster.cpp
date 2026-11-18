@@ -2,6 +2,7 @@
 #include "game.h"
 #include <cstring>
 #include "rpg/rpg.h" // Shattered Shield: RPG map gate + mob-behaviour constants
+#include "../diaglog.h" // TEMP diagnostics (Nov 18 .141): bite/spawn logging, remove when bugs are closed
 
 extern int physsteps;
 
@@ -785,6 +786,20 @@ namespace ai
                             {
                                 d->attacking = true;
                                 if(rnd(100) < 20*aiSkillToLevel(d->ai.skill)) ai->attacktarget = ai->enemy->headpos();
+                                // TEMP diagnostic (Nov 18 .141, Note 229): log
+                                // melee bites so the giant fix can be verified
+                                // from diaglog.txt. Throttled to 1/sec globally
+                                // so a biting mob does not flood the log.
+                                if(d->gunselect == WEAP_BITE || d->gunselect == WEAP_FIST)
+                                {
+                                    static int diag_bite_last = 0;
+                                    if(totalmillis - diag_bite_last >= 1000)
+                                    {
+                                        diag_bite_last = totalmillis;
+                                        float hd = ai->enemy ? vec(d->o.x - ai->enemy->o.x, d->o.y - ai->enemy->o.y, 0).magnitude() : -1;
+                                        diaglog("rpg: bite '%s' hdist=%.1f enemy='%s'", monsterType.classInfo.name ? monsterType.classInfo.name : "?", hd, ai->enemy ? ai->enemy->name : "?");
+                                    }
+                                }
                                 shoot(d, ai->attacktarget);
                                 ai->transition(d, M_ATTACKING, !monsterType.loyalty, 600, 0);
                                 ai->lastshot = lastmillis;
@@ -845,8 +860,20 @@ namespace ai
                                         case WEAP_SNIPER: longrange = true; break;
                                     }
 
+                                    // Nov 18 (.141, Note 229): melee range is
+                                    // horizontal, not 3D. The Forest Giant's
+                                    // eye is 50u up vs the player's 15u, so
+                                    // the 3D eye-to-eye distance is >=35u even
+                                    // when the bodies touch (19.1u apart at
+                                    // collision: giant radius 15 + player
+                                    // 4.1) — the dist<20 gate could never fire
+                                    // and the bite ray could never reach. The
+                                    // horizontal gap is the real closing
+                                    // distance; the bite ray (range 48) covers
+                                    // the 3D eye-to-eye span.
+                                    float hdist = vec(d->o.x - ai->enemy->o.x, d->o.y - ai->enemy->o.y, 0).magnitude();
                                     // the closer the monster is the more likely he wants to shoot, 
-                                    if((!melee || dist<20) && !rnd(longrange ? (int)dist/12+1 : min((int)dist/12+1,6)) && ai->enemy->state==CS_ALIVE)      // get ready to fire
+                                    if((!melee || hdist<20) && !rnd(longrange ? (int)dist/12+1 : min((int)dist/12+1,6)) && ai->enemy->state==CS_ALIVE)      // get ready to fire
                                     { 
                                         ai->attacktarget = target;
                                         ai->transition(d, M_AIMING, 0, monsterType.lag, 10);

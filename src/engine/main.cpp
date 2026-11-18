@@ -424,8 +424,26 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
     // gold fill (ember-gold), inset within the track
     float bh = fh - 8, by = fy + 4;
     float bx = fx + 4, bw = fw - 8;
-    // CLEANUP item 3: the per-file loading text is no longer drawn in the
-    // bar (callers still pass it; it is simply not rendered).
+    // Nov 18 (.141, Note 227): the per-file loading text is drawn UNDER
+    // the bar again (CLEANUP item 3 had removed it, so a slow load showed
+    // only a bare bar and read as a hang). Clean and simple: one short
+    // status line, light gray, centered under the bar - what is loading
+    // right now ("loading textures...", "remipping...", ...). Ed: "Something
+    // clean and not crazy."
+    if(text && text[0])
+    {
+        glEnable(GL_TEXTURE_2D);
+        int tw = text_width(text);
+        float tsz = 0.028f*min(w, h)/FONTH;
+        float tx = 0.5f*(w - tw*tsz);
+        float ty = fy + fh + 0.012f*min(w, h);
+        glPushMatrix();
+        glTranslatef(tx, ty, 0);
+        glScalef(tsz, tsz, 1);
+        draw_text(text, 0, 0, 200, 200, 200, 255);
+        glPopMatrix();
+        glDisable(GL_TEXTURE_2D);
+    }
     if(bar > 0)
     {
         float fillw = bw * (bar > 1 ? 1 : bar);
