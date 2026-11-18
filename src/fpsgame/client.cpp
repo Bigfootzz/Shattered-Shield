@@ -1132,12 +1132,17 @@ namespace game
         }
         camera1->pitch = rpg_campitch; // follow-cam elevation, applied every frame (see rpg_campitch note)
 
-        // Follow-camera facing (user design, Oct 19): the character faces the
-        // camera's forward direction; while fighting a selected target (auto-
-        // attack, or 1s after a manual cast) it faces the target instead, so
-        // strikes visibly play out toward the mob on screen.
+        // Follow-camera facing (user design, Oct 19; Note 165 fix, Nov 18):
+        // the character faces the camera's forward direction; while a target
+        // is selected it faces the target instead, so strikes visibly play
+        // out toward the mob on screen. The old gate (auto-attack, or 1s
+        // after a manual cast) left the Ranger facing sideways between
+        // attacks whenever auto-attack was off, because the selection alone
+        // did not count as fighting. A selected target IS the fight, so
+        // face it whenever sel is set; deselect (or the target dying)
+        // returns the character to camera-facing.
         {
-            fpsent *facesel = (sel && (rpg::autoattacking() || totalmillis < rpg_facetill)) ? sel : NULL;
+            fpsent *facesel = sel;
             if(facesel)
             {
                 vec delta(facesel->o); delta.sub(player1->o); delta.z = 0;
@@ -1146,9 +1151,43 @@ namespace game
                     float fyaw, fpitch;
                     vectoyawpitch(delta, fyaw, fpitch);
                     player1->yaw = rpg_steeryaw(player1->yaw, fyaw, rpg_faceturn * (curtime/1000.0f));
+                    // Combat camera (Nov 18): keep the camera behind the
+                    // player while a target is selected. The player turns
+                    // to face the target, but the camera yaw does not move
+                    // on its own, so without this the camera ends up beside
+                    // (or in front of) the player once the player has
+                    // turned. Steering the camera yaw to the same target
+                    // yaw, at the same rate, swings it around behind the
+                    // player so the fight plays out over the shoulder.
+                    // A/D still steers the camera (above); this only pulls
+                    // it back behind the player while a target is selected.
+                    camera1->yaw = rpg_steeryaw(camera1->yaw, fyaw, rpg_faceturn * (curtime/1000.0f));
+                    while(camera1->yaw < 0.0f) camera1->yaw += 360.0f;
+                    while(camera1->yaw >= 360.0f) camera1->yaw -= 360.0f;
                 }
             }
             else player1->yaw = rpg_steeryaw(player1->yaw, camera1->yaw, rpg_faceturn * (curtime/1000.0f));
+        }
+
+        // Zone music (Nov 18): switch the music when the player crosses
+        // a zone boundary, so the change is immediate instead of waiting
+        // for the current track to end. playASong picks the right track
+        // for the zone (town = Old Tower Inn, forest = forest theme,
+        // elsewhere = normal playlist). The zone starts at town because
+        // the player spawns there, so the intro theme is not cut off on
+        // the first frame. Bounds must match the isintown / isforest
+        // ICOMMANDs in fps.cpp (town: X 1000-2400, Y 1800-2800;
+        // forest: X 1000-2400, Y 2800-4096).
+        {
+            static int rpg_zone = 1; // 0 = elsewhere, 1 = town, 2 = forest
+            int nowzone = 0;
+            if(player1->o.x >= 1000.0f && player1->o.x <= 2400.0f && player1->o.y >= 1800.0f && player1->o.y <= 2800.0f) nowzone = 1;
+            else if(player1->o.x >= 1000.0f && player1->o.x <= 2400.0f && player1->o.y > 2800.0f && player1->o.y <= 4096.0f) nowzone = 2;
+            if(nowzone != rpg_zone)
+            {
+                rpg_zone = nowzone;
+                execute("playASong");
+            }
         }
 
         // auto-attack: repeated Basic Attack (ability 2, CLEANUP item 8)
@@ -2048,6 +2087,15 @@ namespace game
         // NOT disabled. Gated on M_RPG so battleground/FPS loads keep their
         // existing console behavior.
         if(m_check(mode, M_RPG)) execute("clearconsole");
+        // Battleground music: entering a battleground starts the battle
+        // theme at once; leaving one resumes the normal playlist.
+        // bgprevmode holds the mode we came from (set above, before
+        // gamemode = mode). playASong re-checks isbattleground, so the
+        // theme loops for the whole match and normal music resumes after.
+        if(bg_isbgmode(mode) && !bg_isbgmode(bgprevmode))
+            execute("music \"packages/sounds/music/battleThemeA.ogg\" playASong");
+        else if(!bg_isbgmode(mode) && bg_isbgmode(bgprevmode))
+            execute("playASong");
     }
 
     int getmode() { return gamemode; };

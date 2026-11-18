@@ -1787,17 +1787,21 @@ namespace rpg
     // no anim, so the engine renders the bind pose standing still.
 
     // --- ambient monster spawns: static table for rpg_01 ---
-    // 12 points around the village outskirts — never on the player spawn at
+    // 9 points around the village outskirts — never on the player spawn at
     // (2220,1972) or on Maren at (2228,1980); a new player meets the first
     // imps a short walk out. z is the measured ground height at (x,y).
-    // Density: 12 live monsters with a 60s respawn comfortably feeds q1
+    // Density: 9 live monsters with a 60s respawn comfortably feeds q1
     // (5 kills) and q2 (8 kills) for 2-10 players sharing the world.
-    // Mix: 10 imp rows (the ambient zombie rows became imps on the user's
+    // Mix: 7 imp rows (the ambient zombie rows became imps on the user's
     // call, Oct 20 - the bestiary imp is the mob new players actually face;
     // questonkill counts any monster kill, so q1/q2 credit is unchanged)
     // and 2 puglin rows at the far west/northwest. The Rotting Champion
     // (quest 3) is NOT in this table and stays a zombie. Types resolve by
     // name in rpg_resolvespawntype.
+    // Nov 18 (Ed, .137 playtest): the 3 mountain imp spawns (3200,2400 /
+    // 2900,2900 / 2500,3100) were DELETED — the .137 height fix put them on
+    // the mountaintops where players cannot reach them, so they are not
+    // needed. 12 points -> 9, 10 imps -> 7.
     static const spawndef SPAWNS[] =
     {
         // v0.1.24: the five southern spawns were on high ground (z 2277-2383)
@@ -1806,8 +1810,6 @@ namespace rpg
         // (z 2116, the village ground level) in the east/north fields, clear
         // of the player spawn, NPCs, and existing spawn points.
         { "imp"   , 2800.0f, 2400.0f, 2116.0f, "east field" },
-        { "imp"   , 3200.0f, 2400.0f, 2300.0f, "east field north" }, // Nov 17: ground 2280 (measured from rpg_01.ogz); z 2116 buried the imp 164u under the terrain and it fell out of the world every ~65s (Notes 167/174)
-        { "imp"   , 2900.0f, 2900.0f, 2268.0f, "northeast field" }, // Nov 17: ground 2248; same fall-through as spawn 1
         { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
         { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
         { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
@@ -1815,7 +1817,6 @@ namespace rpg
         { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
         { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
         { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
-        { "imp"   , 2500.0f, 3100.0f, 2373.0f, "north field" }, // Nov 17: ground 2353; same fall-through as spawns 1/2
         { "imp"   , 2000.0f, 3000.0f, 2116.0f, "northwest field" },
         // Forest Giants (Nov 17, Ed): 4 in the clearing just outside the
         // village, reached by a cave path. GPS from Ed's playtest (Notes

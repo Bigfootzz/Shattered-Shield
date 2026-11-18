@@ -67,7 +67,7 @@ namespace monster
             // TUNING Oct 21 (user-approved): 90 HP, not 200 - the
             // weakest ambient mob and the q1 hunt target was unwinnable
             // for a level-1 character.
-            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 90,     0,          0,      130,        "imp",      0},
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 90,     0,          0,      116,        "imp",      0},
                0,       0,      100,    400,    1,          S_PAINB,    S_DEATHB, 0,
             { "playermodels/imp",               NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "imp",          NULL,       NULL,       "hudguns/zombie",   false,      true,       3.2f,   14.0f,      1.0f,       0 },
         },
@@ -610,6 +610,29 @@ namespace ai
                 return;
             }
 
+            // RPG leash for higher-level mobs (Nov 18, Notes 176/179):
+            // the Forest Giant (level 14) runs the stock hunt, which has
+            // no leash, so it chased the player ~1500 units to the
+            // starting area and only the server backstop (75) yanked it
+            // home, then it re-engaged and ran again. Apply the same
+            // MOB_LEASH_RANGE break as rpgthink: mob or foe past the
+            // line from home clears the fight and sends the mob home
+            // (M_SEARCH). Aggression (aggro on sight) is untouched here;
+            // the M_SLEEP visual-contact gate below stops it re-engaging
+            // while the player is outside its perimeter.
+            if(d->state==CS_ALIVE && rpg::mapactive(getclientmap()) && ai->rpghomeknown && ai->enemy)
+            {
+                float mobdh = vec(d->o.x - ai->rpghome.x, d->o.y - ai->rpghome.y, 0).magnitude();
+                float foedh = vec(ai->enemy->o.x - ai->rpghome.x, ai->enemy->o.y - ai->rpghome.y, 0).magnitude();
+                if(mobdh > rpg::MOB_LEASH_RANGE || foedh > rpg::MOB_LEASH_RANGE)
+                {
+                    conoutf("rpgbehav: '%s' leashes (mob %.0f / foe %.0f from home, limit %.0f)", d->name, mobdh, foedh, rpg::MOB_LEASH_RANGE);
+                    ai->enemy = NULL;
+                    ai->rpgfoe = NULL;
+                    ai->transition(d, M_SEARCH, 1, 100, 100);
+                }
+            }
+
             if(d->state==CS_ALIVE)
             {
                 if (!ai->enemy || ai->enemy->state==CS_DEAD)
@@ -708,12 +731,27 @@ namespace ai
                             if(editmode) break;
                             normalizeYaw(d->yaw, enemyyaw);
                             float angle = (float)fabs(enemyyaw-d->yaw);
-                            if(dist<32                   // the better the angle to the player, the further the monster can see/hear
+                            // RPG perimeter gate (Nov 18, Notes 176/179): on
+                            // RPG maps, a mob only aggros on sight while the
+                            // player is inside its perimeter (MOB_LEASH_RANGE
+                            // from its home). Without this the giant re-engages
+                            // the moment the backstop sends it home, because
+                            // the player is still visible from the clearing,
+                            // and it runs the whole way back to the village.
+                            // A mob that was damaged (monsterhurt) still
+                            // aggros, so retaliation is untouched.
+                            bool inperimeter = true;
+                            if(rpg::mapactive(getclientmap()) && ai->rpghomeknown && ai->enemy && !monsterhurt)
+                            {
+                                float foedh = vec(ai->enemy->o.x - ai->rpghome.x, ai->enemy->o.y - ai->rpghome.y, 0).magnitude();
+                                inperimeter = foedh <= rpg::MOB_LEASH_RANGE;
+                            }
+                            if(inperimeter && (dist<32                   // the better the angle to the player, the further the monster can see/hear
                                 ||(dist<64 && angle<135)
                                 ||(dist<128 && angle<90)
                                 ||(dist<256 && angle<45)
                                 || angle<10
-                                || (monsterhurt && d->o.dist(monsterhurtpos)<128))
+                                || (monsterhurt && d->o.dist(monsterhurtpos)<128)))
                             {
                                 vec target;
                                 if(raycubelos(d->o, ai->enemy->o, target))

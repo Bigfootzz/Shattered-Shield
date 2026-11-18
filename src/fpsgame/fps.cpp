@@ -323,6 +323,18 @@ namespace game
     }
 
     ICOMMAND(iszombiegame, "", (), intret(m_sp||m_survival));
+    ICOMMAND(isbattleground, "", (), intret(m_ctf||m_koth||m_tff));
+    // Town zone (Nov 18): the village / quest-givers area of rpg_01.
+    // Bounds cover the spawn, the board, and every quest-giver NPC
+    // (Abbott, Blasque, Maren, Tomas, Corvin, Glimmer). The giants
+    // clearing (Y 3400+) is well outside it. Only true on an RPG map,
+    // so battlegrounds never count as town.
+    ICOMMAND(isintown, "", (), intret(rpg::mapactive(getclientmap()) && player1 && player1->o.x >= 1000.0f && player1->o.x <= 2400.0f && player1->o.y >= 1800.0f && player1->o.y <= 2800.0f));
+    // Forest zone (Nov 18): the woods south of town, the cave path,
+    // and the giants clearing (Y 3400+). Same X span as town, Y from
+    // the town boundary (2800) to the map edge. Only true on an RPG
+    // map, so battlegrounds never count as forest.
+    ICOMMAND(isforest, "", (), intret(rpg::mapactive(getclientmap()) && player1 && player1->o.x >= 1000.0f && player1->o.x <= 2400.0f && player1->o.y > 2800.0f && player1->o.y <= 4096.0f));
 
     VAR(dbgisinfected, 0, 0, 1);
     bool isinfected()
