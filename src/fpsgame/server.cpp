@@ -63,6 +63,8 @@ namespace server
     static bool bg_match_active = false; // a match is running
     static void bg_deletebots(); // defined with bg_fillbots below; changemap() calls it
     static void bg_grantwin(int winnerteam); // Embers win reward, defined above checkintermission
+    static void rpg_sendvwep(clientinfo *cq); // defined with the RPG equip handlers below
+    static void rpg_sendarmor(clientinfo *cq); // defined with the RPG equip handlers below
     // --- Battlegrounds: KOTH/TFF capture points (Nov 6) ---
     // Shared state + prototypes. The point tables and logic live with
     // the point system below (before bg_queue_join); they are declared
@@ -3723,6 +3725,15 @@ namespace server
                 {
                     if(!rpg::equipitem(name, botarmor[i])) conoutf("bg: WARNING: bot '%s' (%s) could not equip %s: %s", name, botarch, botarmor[i], rpg::equipdeny());
                 }
+                // Nov 18 (.140, Note 223): the bot kit was equipped
+                // server-side but never broadcast. rpg::equipitem is the
+                // low-level equip; only the N_RPG_EQUIP handler calls
+                // rpg_sendvwep/rpg_sendarmor, so clients never learned
+                // the bots were wearing armor and rendered them naked
+                // (bare chest and legs). Broadcast the kit so every
+                // client renders the bot dressed.
+                rpg_sendvwep(bi);
+                rpg_sendarmor(bi);
             }
             conoutf("bg: bot '%s' (%s, cn %d) joins the battleground", name, botarch, bi->clientnum);
         }
@@ -3763,6 +3774,18 @@ namespace server
     bool bg_bot_held(int cn)
     {
         if(bg_match_active) return false;
+        // Nov 18 (.140, Note 224): the hold also released when a BG
+        // match is live even if bg_match_active was never set. The flag
+        // is only set inside if(bg_match_starting) at map-load time, so
+        // a match that started without the queue path (or whose flag was
+        // consumed before the load completed) left bg_match_active false
+        // while the CTF clock ran, and every bot stayed frozen in WAIT
+        // (ai::update skips a held bot's think and stopmoving()s it, so
+        // it never paths, even when bumped). A live BG match is the real
+        // gate: BG mode + BG map + countdown over + not intermission.
+        // Bots only exist on BG maps during a match (deleted on return
+        // to rpg_01), so this cannot release them early on the RPG map.
+        if(bg_isbgmode(gamemode) && rpg::bgmap(smapname) && !bg_start_active && interm <= 0) return false;
         loopv(bg_bots) if(bg_bots[i] == cn) return true;
         return false;
     }
@@ -6243,15 +6266,16 @@ namespace server
         const rpg::itemdef &d = rpg::item(id);
         // v0.1.31 (Ed, Oct 27): equipped items must NOT sell. The old
         // code silently unequipped then sold, so Ed sold worn gear
-        // without meaning to. Reject with a visible unequip-first
-        // message instead (rpg_qmsg -> System tab; SERVMSG only
-        // reaches the console, which is why the old rejections
-        // looked like nothing happened).
-        loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id)
-        {
-            rpg_qmsg(cq, "That is equipped. Unequip it first, then sell it.");
-            return;
-        }
+        // without meaning to. The equipped copy is never sold.
+        // Nov 18 (.140, Notes 212/213/214): the v0.1.31 guard rejected
+        // the WHOLE sale when the item type was equipped in any slot,
+        // even though the player had extra copies in the bag. The bag
+        // count (rpg::itemcount) already excludes equipped items
+        // (equipitem moves one copy out of the inv map into the slot),
+        // so selling the bag count never touches what is worn. The
+        // equipped check now only fires when there is nothing in the
+        // bag to sell (beforecount == 0), so the player is told to
+        // unequip first instead of selling the equipped copy.
         // v0.1.31 (Ed, Oct 27): non-gear is sellable too, not just
         // equippable weapons/armor. Consumables and materials all
         // carry a value (potion 10, moss 3, bone 2, horn 6, hide 4),
@@ -6282,7 +6306,16 @@ namespace server
         // the count must drop to zero and the full price (price x count)
         // is granted only then.
         int beforecount = rpg::itemcount(cq->name, itemid);
-        if(beforecount <= 0) { rpg_qmsg(cq, "You don't have that."); return; }
+        if(beforecount <= 0)
+        {
+            // Nothing in the bag. If the only copy is the worn one,
+            // say so (unequip first); otherwise the player has none.
+            bool worn = false;
+            loopi(rpg::SLOT_COUNT) if(rpg::equippeditem(cq->name, i) == id) { worn = true; break; }
+            if(worn) rpg_qmsg(cq, "That is equipped. Unequip it first, then sell it.");
+            else rpg_qmsg(cq, "You don't have that.");
+            return;
+        }
         if(!rpg::removeitem(cq->name, itemid, beforecount)) { rpg_qmsg(cq, "You don't have that."); return; }
         int aftercount = rpg::itemcount(cq->name, itemid);
         if(aftercount != 0)

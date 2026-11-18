@@ -1174,7 +1174,16 @@ namespace game
         // returns the character to camera-facing.
         {
             fpsent *facesel = sel;
-            if(facesel)
+            // Nov 18 (.140, Notes 218/219): A/D turning BREAKS the
+            // target lock. The old code steered the CHARACTER to the
+            // target every frame even while the player held A/D, so
+            // the character snapped back to the target and the player
+            // felt stuck locked (turning turned the camera, but the
+            // character would not stay turned). While A/D is held the
+            // character follows the camera instead, so the player can
+            // turn away and disengage; releasing A/D re-engages the
+            // lock and the character steers back to the target.
+            if(facesel && !turndir)
             {
                 vec delta(facesel->o); delta.sub(player1->o); delta.z = 0;
                 if(delta.magnitude() > 0.01f)
@@ -4019,7 +4028,15 @@ namespace game
                     mai->rpghomeknown = true;
                     if(d->ai.local && d->state == CS_ALIVE)
                     {
-                        d->o = vec((float)hx, (float)hy, (float)hz + d->eyeheight + 2.0f); // anchor z is feet level; origin rides at eye height
+                        // Nov 18 (.140, Note 208): the anchor z is the EYE
+                        // position, not feet level (the server sends the
+                        // spawn-table z, ground + eyeheight; the giant's
+                        // anchor is 2226 = ground 2176 + eyeheight 50).
+                        // The old code added eyeheight again, so the mob
+                        // floated eyeheight above the ground (the giant
+                        // floated ~52u). Same double-eyeheight bug as the
+                        // .139 monster.cpp rpgthink fix; only +2.0f stays.
+                        d->o = vec((float)hx, (float)hy, (float)hz + 2.0f);
                         d->resetinterp(); // moveplayer(local) snaps o to newpos: keep them in sync
                         d->vel = vec(0, 0, 0);
                         d->falling = vec(0, 0, 0);
