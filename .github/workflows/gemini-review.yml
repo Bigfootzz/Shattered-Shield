@@ -1,0 +1,29 @@
+name: Gemini Code Review
+
+# Automated code review on pull requests, using a free Gemini API key.
+# See gemini-review-README.md in this directory for setup.
+# The workflow file and script are inert until they are committed and pushed,
+# and they do nothing until the GEMINI_API_KEY secret is added to the repo.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Gemini code review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-flash-latest
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 .github/workflows/gemini-review.py
