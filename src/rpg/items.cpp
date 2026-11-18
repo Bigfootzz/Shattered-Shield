@@ -12,6 +12,8 @@
 // The server loads its own copy and is the only side whose numbers mean
 // anything; the client loads the same files for display.
 #include "items.h"
+#include "crafting.h"
+#include "stats.h"
 #include "cube.h"
 
 #include <cstdlib>
@@ -40,14 +42,26 @@ namespace rpg
     // Puglin stick) converted to IQM vweps on the tag_weapon path.
     static const itemdef FALLBACK_ITEMS[] =
     {
-        // id              name            type            slot           icon                                        vwep                         dmg  arm  heal  stack  value mana
-        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/mace",     15,  0,   0,   false, 60,   0 },
-        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    8,   0,   0,   false, 10,   0 },
-        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          0,  3,   0,   false, 30,   0 },
-        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          0,  1,   0,   false, 15,   0 },
-        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          0,  2,   0,   false, 20,   0 },
-        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          0,  0,   40,  true,  10,   0 },
-        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/bow",      12,  0,   0,   false, 25,   0 },
+        // id              name            type            slot           icon                                        vwep                         wcat     dmg  arm  heal  stack  value mana
+        { "imp_mace",      "Imp Mace",     ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_mace.png",     "playermodels/vwep/warrior/mace/01",     "mace",  15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "warrior_sword", "Warrior Sword",ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_sword.png",    "playermodels/vwep/warrior/sword/01",    "sword", 15,  0,   0,   false, 60,   0 , 0, -1 },
+        { "puglin_stick",  "Puglin Stick", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_stick.png",    "playermodels/vwep/stick",    NULL,    8,   0,   0,   false, 10,   0 , 0, -1 },
+        { "ranger_tunic",  "Ranger Tunic", ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          NULL,    0,  3,   0,   false, 30,   0 , 0, -1 },
+        { "leather_helm",  "Leather Helm", ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          NULL,    0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "iron_boots",    "Iron Boots",   ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          NULL,    0,  2,   0,   false, 20,   0 , 0, -1 },
+        { "copper_ring",   "Copper Ring",  ITEM_ARMOR,     SLOT_RING1,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          NULL,    0,  1,   0,   false, 12,   0 , 0, -1 },
+        { "silver_ring",   "Silver Ring",  ITEM_ARMOR,     SLOT_RING2,    "packages/ui/rpg/icons/icon_ring.png",     NULL,                          NULL,    0,  1,   0,   false, 18,   0 , 0, -1 },
+        { "copper_necklace","Copper Necklace",ITEM_ARMOR,   SLOT_NECK,     "packages/ui/rpg/icons/icon_necklace.png", NULL,                          NULL,    0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "leather_leggings","Leather Leggings",ITEM_ARMOR, SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          NULL,    0,  1,   0,   false, 15,   0 , 0, -1 },
+        { "iron_leggings", "Iron Leggings",ITEM_ARMOR,     SLOT_LEGS,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          NULL,    0,  2,   0,   false, 25,   0 , 0, -1 },
+        { "iron_helm",     "Iron Helm",    ITEM_ARMOR,     SLOT_HEAD,     "packages/ui/rpg/icons/icon_helm.png",     NULL,                          NULL,    0,  2,   0,   false, 25,   0 , 0, -1 },
+        { "chain_tunic",   "Chain Tunic",  ITEM_ARMOR,     SLOT_TORSO,    "packages/ui/rpg/icons/icon_tunic.png",    NULL,                          NULL,    0,  4,   0,   false, 45,   0 , 0, -1 },
+        { "leather_boots", "Leather Boots",ITEM_ARMOR,     SLOT_FEET,     "packages/ui/rpg/icons/icon_boots.png",    NULL,                          NULL,    0,  1,   0,   false, 12,   0 , 0, -1 },
+        { "health_potion", "Health Potion",ITEM_CONSUMABLE,SLOT_NONE,     "packages/ui/rpg/icons/icon_potion.png",   NULL,                          NULL,    0,  0,   40,  true,  10,   0 , 0, -1 },
+        { "wooden_bow",    "Wooden Bow",   ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_bow.png",     "playermodels/vwep/ranger/bow/01",      "bow",   12,  0,   0,   false, 25,   0 , 0, -1 },
+        { "wooden_staff",  "Wooden Staff", ITEM_WEAPON,    SLOT_MAINHAND, "packages/ui/rpg/icons/icon_staff.png",    "playermodels/vwep/magi/staff/01",     "staff", 12,  0,   0,   false, 25,   0 , 0, -1 },
+        { "cape",          "Cape",         ITEM_ARMOR,     SLOT_CAPE,     "packages/ui/rpg/icons/icon_cape.png",     NULL,                          NULL,    0,  1,   0,   false, 20,   0 , 0, -1 },
+        { "pauldron",      "Pauldron",     ITEM_ARMOR,     SLOT_SHOULDER, "packages/ui/rpg/icons/icon_pauldron.png", NULL,                          NULL,    0,  2,   0,   false, 50,   0 , 0, -1 },
     };
     static const int FALLBACK_COUNT = sizeof(FALLBACK_ITEMS)/sizeof(FALLBACK_ITEMS[0]);
 
@@ -76,7 +90,7 @@ namespace rpg
 
     const itemdef &item(int id)
     {
-        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, 0, 0, 0, false, 0, 0 };
+        static const itemdef invalid = { "", "", ITEM_CONSUMABLE, SLOT_NONE, "", NULL, NULL, 0, 0, 0, false, 0, 0, 0, -1 };
         if(id < 0 || id >= itemcount()) return invalid;
         return usingdata ? dataitems[id] : FALLBACK_ITEMS[id];
     }
@@ -95,7 +109,7 @@ namespace rpg
         return item(id).name;
     }
 
-    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet" };
+    static const char *SLOTNAMES[SLOT_COUNT] = { "mainhand", "head", "torso", "legs", "feet", "neck", "ring1", "ring2", "cape", "offhand", "shoulder" };
 
     const char *slotname(int slot)
     {
@@ -114,8 +128,17 @@ namespace rpg
     struct itembuild
     {
         bool active = false;
-        std::string id, name, type, slot, icon, vwep;
-        int damage = 0, armor = 0, heal = 0, mana = 0, value = 0;
+        std::string id, name, type, slot, icon, vwep, weaponcat;
+        int damage = 0, armor = 0, heal = 0, mana = 0, value = 0, tier = 0;
+        int buffattr = -1;
+        int gearstat = -1, gearbonus = 0;
+        std::string enhbase;
+        std::string pvpclass;
+        int pvpreduce = 0, maxhp = 0, emberprice = 0;
+        std::string outfit; // outfit model-dir suffix (e.g. "_ranger"), "" = none
+        std::string armorclass; // class that may wear this armor, "" = any class
+        std::string attach; // armor attach model path, "" = no visual model
+        std::string attach_male; // male-variant attach path, "" = use attach
         bool stack = false;
     };
     static itembuild curitem;
@@ -182,11 +205,77 @@ namespace rpg
         if(c == "ss_item_slot") { if(argc != 1) { err = "ss_item_slot: expected 1 argument"; return false; } curitem.slot = argv[0]; return true; }
         if(c == "ss_item_icon") { if(argc != 1) { err = "ss_item_icon: expected 1 argument"; return false; } curitem.icon = argv[0]; return true; }
         if(c == "ss_item_vwep") { if(argc != 1) { err = "ss_item_vwep: expected 1 argument"; return false; } curitem.vwep = argv[0]; return true; }
+        if(c == "ss_item_weaponcat") { if(argc != 1) { err = "ss_item_weaponcat: expected 1 argument (weapon category)"; return false; } curitem.weaponcat = argv[0]; return true; }
         if(c == "ss_item_damage") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.damage, err)) return false; return true; }
         if(c == "ss_item_armor") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.armor, err)) return false; return true; }
         if(c == "ss_item_heal") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.heal, err)) return false; return true; }
         if(c == "ss_item_mana") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.mana, err)) return false; return true; }
         if(c == "ss_item_value") { if(argc != 1 || !parseintarg(cmd, argv[0], curitem.value, err)) return false; return true; }
+        if(c == "ss_item_tier")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.tier, err)) return false;
+            if(curitem.tier < 0 || curitem.tier > 4) { err = "ss_item_tier out of range 0..4"; return false; }
+            return true;
+        }
+        if(c == "ss_item_buff")
+        {
+            if(argc != 1) { err = "ss_item_buff: expected 1 argument (attribute name)"; return false; }
+            if(argv[0] == std::string("strength")) curitem.buffattr = ATTR_STRENGTH;
+            else if(argv[0] == std::string("dexterity")) curitem.buffattr = ATTR_DEXTERITY;
+            else if(argv[0] == std::string("vitality")) curitem.buffattr = ATTR_VITALITY;
+            else if(argv[0] == std::string("knowledge")) curitem.buffattr = ATTR_KNOWLEDGE;
+            else if(argv[0] == std::string("wisdom")) curitem.buffattr = ATTR_WISDOM;
+            else if(argv[0] == std::string("cunning")) curitem.buffattr = ATTR_CUNNING;
+            else { err = std::string("ss_item_buff: unknown attribute '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        // Phase 3 gear enhancement: persistent equipped bonus, armor only.
+        // Kept deliberately separate from ss_item_buff (consumables only).
+        if(c == "ss_item_gearstat")
+        {
+            if(argc != 1) { err = "ss_item_gearstat: expected 1 argument (attribute name)"; return false; }
+            if(argv[0] == std::string("strength")) curitem.gearstat = ATTR_STRENGTH;
+            else if(argv[0] == std::string("dexterity")) curitem.gearstat = ATTR_DEXTERITY;
+            else if(argv[0] == std::string("vitality")) curitem.gearstat = ATTR_VITALITY;
+            else if(argv[0] == std::string("knowledge")) curitem.gearstat = ATTR_KNOWLEDGE;
+            else if(argv[0] == std::string("wisdom")) curitem.gearstat = ATTR_WISDOM;
+            else if(argv[0] == std::string("cunning")) curitem.gearstat = ATTR_CUNNING;
+            else { err = std::string("ss_item_gearstat: unknown attribute '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_gearbonus")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.gearbonus, err)) return false;
+            if(curitem.gearbonus < 0 || curitem.gearbonus > 6) { err = "ss_item_gearbonus out of range 0..6"; return false; }
+            return true;
+        }
+        if(c == "ss_item_enhbase") { if(argc != 1) { err = "ss_item_enhbase: expected 1 argument (base gear id)"; return false; } curitem.enhbase = argv[0]; return true; }
+        // PvP jewelry/armor (Oct 31): class-gated shop gear, stats-only.
+        if(c == "ss_item_pvpclass")
+        {
+            if(argc != 1) { err = "ss_item_pvpclass: expected 1 argument (class)"; return false; }
+            if(argv[0] == std::string("Magi") || argv[0] == std::string("Warrior") || argv[0] == std::string("Ranger")) curitem.pvpclass = argv[0];
+            else { err = std::string("ss_item_pvpclass: unknown class '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_pvpreduce")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.pvpreduce, err)) return false;
+            if(curitem.pvpreduce < 0 || curitem.pvpreduce > 100) { err = "ss_item_pvpreduce out of range 0..100"; return false; }
+            return true;
+        }
+        if(c == "ss_item_maxhp")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.maxhp, err)) return false;
+            if(curitem.maxhp < 0) { err = "ss_item_maxhp must be >= 0"; return false; }
+            return true;
+        }
+        if(c == "ss_item_emberprice")
+        {
+            if(argc != 1 || !parseintarg(cmd, argv[0], curitem.emberprice, err)) return false;
+            if(curitem.emberprice < 0) { err = "ss_item_emberprice must be >= 0"; return false; }
+            return true;
+        }
         if(c == "ss_item_stack")
         {
             int v = 0;
@@ -194,6 +283,22 @@ namespace rpg
             curitem.stack = v != 0;
             return true;
         }
+        if(c == "ss_item_outfit")
+        {
+            if(argc != 1) { err = "ss_item_outfit: expected 1 argument (model-dir suffix, e.g. _ranger)"; return false; }
+            if(!argv[0][0] || argv[0][0] != '_') { err = "ss_item_outfit: suffix must start with '_'"; return false; }
+            curitem.outfit = argv[0];
+            return true;
+        }
+        if(c == "ss_item_armorclass")
+        {
+            if(argc != 1) { err = "ss_item_armorclass: expected 1 argument (class)"; return false; }
+            if(argv[0] == std::string("Magi") || argv[0] == std::string("Warrior") || argv[0] == std::string("Ranger")) curitem.armorclass = argv[0];
+            else { err = std::string("ss_item_armorclass: unknown class '") + argv[0] + "'"; return false; }
+            return true;
+        }
+        if(c == "ss_item_attach") { if(argc != 1) { err = "ss_item_attach: expected 1 argument (model path)"; return false; } curitem.attach = argv[0]; return true; }
+        if(c == "ss_item_attach_male") { if(argc != 1) { err = "ss_item_attach_male: expected 1 argument (model path)"; return false; } curitem.attach_male = argv[0]; return true; }
         err = "unknown content command '" + c + "'";
         return false;
     }
@@ -316,17 +421,73 @@ namespace rpg
             if(type == ITEM_WEAPON && slot != SLOT_MAINHAND)
             { err = "weapon '" + b.id + "' must use slot mainhand"; return false; }
             if(type == ITEM_ARMOR && (slot == SLOT_NONE || slot == SLOT_MAINHAND))
-            { err = "armor '" + b.id + "' must name a body slot (head/torso/legs/feet)"; return false; }
+            { err = "armor '" + b.id + "' must name a body slot (head/torso/legs/feet/neck/ring1/ring2)"; return false; }
             if(type != ITEM_WEAPON && type != ITEM_ARMOR && slot != SLOT_NONE)
             { err = "item '" + b.id + "' is not gear and cannot name a slot"; return false; }
-            if(b.damage < 0 || b.armor < 0 || b.heal < 0 || b.mana < 0 || b.value < 0)
+            if(b.damage < 0 || b.armor < 0 || b.heal < 0 || b.mana < 0 || b.value < 0 || b.pvpreduce < 0 || b.maxhp < 0 || b.emberprice < 0)
             { err = "item '" + b.id + "' has a negative stat"; return false; }
+            // PvP gear (Oct 31): class-gated shop gear — armor (jewelry/armor
+            // set) and weapons (PvP weapons carry the same class gate; their
+            // stats were defined Oct 31 as the 3-piece set totals). Updated
+            // from armor-only when weapon stats were defined.
+            if(!b.pvpclass.empty() && type != ITEM_ARMOR && type != ITEM_WEAPON)
+            { err = "item '" + b.id + "' sets a PvP class but is not gear"; return false; }
             if(type != ITEM_WEAPON && b.damage != 0)
             { err = "item '" + b.id + "' sets damage but is not a weapon"; return false; }
+            if(!b.weaponcat.empty())
+            {
+                if(type != ITEM_WEAPON)
+                { err = "item '" + b.id + "' sets a weapon category but is not a weapon"; return false; }
+                static const char *cats[] = { "mace", "axe", "sword", "staff", "wand", "orb", "bow", "crossbow", NULL };
+                bool catok = false;
+                for(int k = 0; cats[k]; k++) if(b.weaponcat == cats[k]) { catok = true; break; }
+                if(!catok)
+                { err = "item '" + b.id + "' has unknown weapon category '" + b.weaponcat + "'"; return false; }
+            }
+            // Outfit (Nov 10): an outfit suffix is armor-only (torso outfits).
+            if(!b.outfit.empty() && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets an outfit but is not armor"; return false; }
+            // Class armor gate (Nov 10): an armor class is armor-only.
+            if(!b.armorclass.empty() && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets an armor class but is not armor"; return false; }
             if(type != ITEM_ARMOR && b.armor != 0)
             { err = "item '" + b.id + "' sets armor but is not armor"; return false; }
             if(type != ITEM_CONSUMABLE && (b.heal != 0 || b.mana != 0))
             { err = "item '" + b.id + "' sets heal/mana but is not a consumable"; return false; }
+            if(b.buffattr < -1 || b.buffattr >= ATTR_COUNT)
+            { err = "item '" + b.id + "' has an out-of-range buff attribute"; return false; }
+            if(b.buffattr >= 0 && type != ITEM_CONSUMABLE)
+            { err = "item '" + b.id + "' sets a buff but is not a consumable"; return false; }
+            if(b.buffattr >= 0 && b.heal != 0)
+            { err = "item '" + b.id + "' sets both a buff and a heal; buff items must not heal"; return false; }
+            // Phase 3 gear enhancement: persistent equipped bonus, armor only,
+            // deliberately separate from buffattr (consumables only, above).
+            if(b.gearstat < -1 || b.gearstat >= ATTR_COUNT)
+            { err = "item '" + b.id + "' has an out-of-range gear attribute"; return false; }
+            if(b.gearstat >= 0 && type != ITEM_ARMOR)
+            { err = "item '" + b.id + "' sets a gear bonus but is not armor"; return false; }
+            if(b.gearstat >= 0 && (b.gearbonus < 1 || b.gearbonus > 6))
+            { err = "item '" + b.id + "' sets a gear attribute but no gear bonus 1..6"; return false; }
+            if(b.gearstat >= 0 && b.enhbase.empty())
+            { err = "item '" + b.id + "' sets a gear bonus but no ss_item_enhbase"; return false; }
+            if(b.gearstat < 0 && (b.gearbonus != 0 || !b.enhbase.empty()))
+            { err = "item '" + b.id + "' sets a gear bonus/base without a gear attribute"; return false; }
+        }
+        // Second pass: enhancement bases must exist, be unenhanced armor,
+        // and share the enhanced piece's slot (re-enhance resolution key).
+        for(size_t i = 0; i < builtitems.size(); i++)
+        {
+            const itembuild &b = builtitems[i];
+            if(b.gearstat < 0) continue;
+            const itembuild *base = NULL;
+            for(size_t j = 0; j < builtitems.size(); j++) if(builtitems[j].id == b.enhbase) { base = &builtitems[j]; break; }
+            if(!base) { err = "item '" + b.id + "' names unknown enhancement base '" + b.enhbase + "'"; return false; }
+            bool baseok = true;
+            int baseslot = slotfromname(base->slot, baseok);
+            bool slotok = true;
+            int slot = slotfromname(b.slot, slotok);
+            if(!baseok || typefromname(base->type) != ITEM_ARMOR || base->gearstat >= 0 || baseslot != slot)
+            { err = "item '" + b.id + "' enhancement base '" + b.enhbase + "' is not unenhanced armor in the same slot"; return false; }
         }
         return true;
     }
@@ -345,15 +506,30 @@ namespace rpg
             d.slot = slotfromname(b.slot, slotok);
             d.icon = poolstr(b.icon.empty() ? "packages/ui/rpg/icons/icon_empty.png" : b.icon);
             d.vwep = b.vwep.empty() ? NULL : poolstr(b.vwep);
+            d.weaponcat = b.weaponcat.empty() ? NULL : poolstr(b.weaponcat);
             d.damage = b.damage;
             d.armor = b.armor;
             d.heal = b.heal;
             d.stackable = b.stack;
             d.value = b.value;
             d.mana = b.mana;
+            d.tier = b.tier;
+            d.buffattr = b.buffattr;
+            d.gearstat = b.gearstat;
+            d.gearbonus = b.gearbonus;
+            d.enhbase = b.enhbase.empty() ? NULL : poolstr(b.enhbase);
+            d.pvpclass = b.pvpclass.empty() ? NULL : poolstr(b.pvpclass);
+            d.pvpreduce = b.pvpreduce;
+            d.maxhp = b.maxhp;
+            d.emberprice = b.emberprice;
+            d.outfit = b.outfit.empty() ? NULL : poolstr(b.outfit);
+            d.armorclass = b.armorclass.empty() ? NULL : poolstr(b.armorclass);
+            d.attach = b.attach.empty() ? NULL : poolstr(b.attach);
+            d.attach_male = b.attach_male.empty() ? NULL : poolstr(b.attach_male);
             dataitems.push_back(d);
             // a missing icon must not stop a server (design §1.3): warn only
-            if(!findfile(d.icon, "e"))
+            // findfile "e" alone misses package files when no -k package dir is given (packagedirs empty); also try a direct existence check, like the path check above
+            if(!findfile(d.icon, "e") && !fileexists(d.icon, "r"))
                 conoutf("rpg: content: warning: icon '%s' for item '%s' not found", d.icon, d.id);
         }
         builtitems.clear();
@@ -477,6 +653,11 @@ namespace rpg
         }
         else conoutf("rpg: content: warning: data/rpg/loot.cfg missing - no per-type loot tables (global fallback applies)");
 
+        // Crafting recipes (Phase 1): additive - a missing or rejected
+        // crafting.cfg leaves the game running with no recipes, and the
+        // reason is logged loudly above. It never rolls back items/loot.
+        loadcrafting();
+
         conoutf("rpg: content: %d items, %d loot tables loaded from data/rpg (checksum %08x)",
                 itemcount(), (int)dataloot.size(), contentchecksum());
         return true;
@@ -514,5 +695,20 @@ namespace rpg
             roll -= FALLBACK_LOOT[i].weight;
         }
         return -1;
+    }
+
+    // v0.1.23: mob coin drops. Amounts are copper range for early game
+    // (WoW research: lvl1-10 mobs drop copper/small silver, players report
+    // never more than 30 silver leaving the starting zone). Coin drops are
+    // always granted (not a chance roll) in addition to item loot, so every
+    // kill feels rewarding. Champion is a boss, drops more.
+    int rollcoins(const char *typekey)
+    {
+        if(!typekey || !typekey[0]) return 0;
+        if(!strcmp(typekey, "zombie")) return 1 + (std::rand() % 4); // 1-4c
+        if(!strcmp(typekey, "imp")) return 3 + (std::rand() % 6); // 3-8c
+        if(!strcmp(typekey, "puglin")) return 5 + (std::rand() % 8); // 5-12c
+        if(!strcmp(typekey, "champion")) return 25 + (std::rand() % 26); // 25-50c
+        return 0;
     }
 }
