@@ -1,4 +1,5 @@
 #include "game.h"
+#include "diaglog.h"
 #include <map>
 #include <string>
 #include "auth.h"
@@ -6386,9 +6387,12 @@ namespace server
         // inside serverupdate (regen/projectiletick/dottick/bg_tick/loot/
         // mana/ambient/behavior/autosave); if both fire, it is after the
         // server frame (client frame or message processing).
+        // (v0.1.136): diaglog() writes to stdout + diaglog.txt, NOT the
+        // in-game console — the conoutf version flooded the console once a
+        // second and hid GPS output. Crash bracketing is unchanged.
         static int diag_srv_last = 0;
         bool diag_srv_log = totalmillis - diag_srv_last >= 1000;
-        if(diag_srv_log) { diag_srv_last = totalmillis; conoutf("rpg: server update start"); fflush(stdout); }
+        if(diag_srv_log) { diag_srv_last = totalmillis; diaglog("rpg: server update start"); }
         // --- RPG: Shattered Shield persistence (milestone steps 1+2, additive; see src/rpg) ---
         // --- RPG: Shattered Shield ability layer (milestone step 3, additive; see src/rpg) ---
         rpg::regen(totalmillis); // session mana regen; cheap, runs every tick
@@ -6646,7 +6650,7 @@ namespace server
             }
         }
 
-        if(diag_srv_log) { conoutf("rpg: server update done"); fflush(stdout); }
+        if(diag_srv_log) { diaglog("rpg: server update done"); }
         shouldstep = clients.length() > 0;
     }
 
