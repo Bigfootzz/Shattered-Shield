@@ -444,6 +444,14 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
         glPopMatrix();
         glDisable(GL_TEXTURE_2D);
     }
+    // Nov 18 (.142, Note 233): Ed sees NO loading bar. The gold fill
+    // above only drew when bar > 0, but most load steps are indeterminate
+    // (renderprogress(0, ...): 'computing normals...', 'clearing
+    // lightmaps...'), so the bar sat empty (bare silver track) for the
+    // whole 60s load and read as no bar at all. Now bar <= 0 draws an
+    // indeterminate sweep: a gold segment that glides back and forth
+    // (2s cycle on totalmillis), so the bar visibly works even when no
+    // step reports a fraction. Determinate steps (bar > 0) still fill.
     if(bar > 0)
     {
         float fillw = bw * (bar > 1 ? 1 : bar);
@@ -456,6 +464,23 @@ void renderprogress(float bar, const char *text, GLuint tex, bool background)   
         glBegin(GL_QUADS);
         glVertex2f(bx, by); glVertex2f(bx + fillw, by);
         glVertex2f(bx + fillw, by + 2); glVertex2f(bx, by + 2);
+        glEnd();
+    }
+    else
+    {
+        float segw = bw*0.25f;
+        float phase = float(totalmillis % 2000)/2000.0f;
+        float pos = phase < 0.5f ? phase*2.0f : 2.0f - phase*2.0f;
+        float sx = bx + pos*(bw - segw);
+        glColor4f(0.98f, 0.70f, 0.26f, 1.0f);
+        glBegin(GL_QUADS);
+        glVertex2f(sx, by); glVertex2f(sx + segw, by);
+        glVertex2f(sx + segw, by + bh); glVertex2f(sx, by + bh);
+        glEnd();
+        glColor4f(1.0f, 0.85f, 0.45f, 0.9f);
+        glBegin(GL_QUADS);
+        glVertex2f(sx, by); glVertex2f(sx + segw, by);
+        glVertex2f(sx + segw, by + 2); glVertex2f(sx, by + 2);
         glEnd();
     }
 

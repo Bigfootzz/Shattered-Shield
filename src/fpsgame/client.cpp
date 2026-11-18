@@ -324,13 +324,35 @@ namespace game
         fpsent *sel = rpg_selmon();
         if(!sel)
         {
-            // Nov 18 (.139, Notes 194/197): no target selected. The old code
-            // returned here, so a manual cast went out with whatever yaw the
-            // character happened to have, and the Ranger attacked sideways
-            // (body turned away from the mob he was shooting). Snap the
-            // character to the camera yaw instead, so a cast without a
-            // click-selected target still faces where the player is looking.
-            player1->yaw = camera1->yaw;
+            // Nov 18 (.142, Note 238): no target selected. The old code
+            // snapped the character to the camera yaw, but the server hits
+            // the NEAREST mob when the advisory target is -1, so the
+            // character faced the camera direction while the arrow went to
+            // a mob off to the side ('not facing who he is attacking').
+            // Face the nearest live monster within 60u (the Tab-cycle
+            // range), matching what the server will hit; fall back to the
+            // camera yaw only when no mob is near.
+            fpsent *nearmob = NULL;
+            float best = 60.0f;
+            loopv(clients)
+            {
+                fpsent *d = clients[i];
+                if(!d || d == player1 || d->state != CS_ALIVE) continue;
+                if(d->ai.type != ai::AI_TYPE_MONSTER) continue;
+                float dist = d->o.dist(player1->o);
+                if(dist < best) { best = dist; nearmob = d; }
+            }
+            if(nearmob)
+            {
+                vec delta(nearmob->o); delta.sub(player1->o); delta.z = 0;
+                if(delta.magnitude() >= 0.01f)
+                {
+                    float yaw, pitch;
+                    vectoyawpitch(delta, yaw, pitch);
+                    player1->yaw = yaw;
+                }
+            }
+            else player1->yaw = camera1->yaw;
             rpg_facetill = totalmillis + 1000;
             return;
         }
@@ -1214,7 +1236,12 @@ namespace game
                     }
                 }
             }
-            else player1->yaw = rpg_steeryaw(player1->yaw, camera1->yaw, rpg_faceturn * (curtime/1000.0f));
+            // Nov 18 (.142, Note 238): rpg_facetill is the 1s face hold
+            // set by rpg_facetarget() on every cast. It was write-only
+            // (never read), so this steer undid the cast facing on the
+            // next frame. While the hold is live, skip the camera-yaw
+            // steer and keep the facing the cast set (nearest mob).
+            else if(totalmillis >= rpg_facetill) player1->yaw = rpg_steeryaw(player1->yaw, camera1->yaw, rpg_faceturn * (curtime/1000.0f));
         }
 
         // Zone music (Nov 18): switch the music when the player crosses

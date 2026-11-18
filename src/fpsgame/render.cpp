@@ -94,6 +94,25 @@ namespace game
         // (mdl->quad) is never drawn there - skip it (load-time fix, Oct 22).
         // The vwep (hand weapon) IS drawn in third person; keep it.
         bool rpgmap = rpg::mapactive(getincomingmapname());
+        // Load-time fix (Nov 18, stdout.txt profiling): the armor preload
+        // below used to queue EVERY item's attach (both sexes, all three
+        // classes) - 37 models, ~30s of the ~60s load. On the RPG world
+        // map (rpg_01) the player is solo and can only wear their own
+        // class's armor, so preload only that class + the player's sex.
+        // Battleground maps keep the old behavior (bots wear random
+        // models), as does multiplayer or an unknown class.
+        bool bgmap = rpg::bgmap(getincomingmapname());
+        const char *playerclass = NULL; // "Ranger"|"Warrior"|"Magi", NULL = unknown
+        bool playermale = true;
+        const playermodelinfo *pmi = getplayermodelinfo(playermodel);
+        if(pmi && pmi->ffa && pmi->ffa[0])
+        {
+            if(strstr(pmi->ffa, "ranger")) playerclass = "Ranger";
+            else if(strstr(pmi->ffa, "warrior")) playerclass = "Warrior";
+            else if(strstr(pmi->ffa, "wizard") || strstr(pmi->ffa, "sorceress")) playerclass = "Magi";
+            playermale = !strstr(pmi->ffa, "_female");
+        }
+        bool filterarmor = rpgmap && !bgmap && playerclass && !multiplayer(false);
         // Shoulder (Nov 16, Ed: shoulders replace the visible cape):
         // the pauldron pair is preloaded by the data-driven loop below
         // (it reads every item's attach path), so no explicit preload
@@ -116,11 +135,25 @@ namespace game
                 const rpg::itemdef &def = rpg::item(i);
                 // Armor attach (female default) and male variant (.132):
                 // boots split into _l/_r, same as the render code.
-                const char *attaches[2] = { def.attach, def.attach_male };
-                loopj(2)
+                // When filterarmor is set (RPG world, solo, known class),
+                // skip other classes' armor (armorclass gate) and preload
+                // only the player's sex variant; otherwise both variants.
+                if(filterarmor && def.armorclass && def.armorclass[0] && strcmp(def.armorclass, playerclass)) continue;
+                const char *attaches[2];
+                int nattach = 0;
+                if(filterarmor)
+                {
+                    const char *a = (playermale && def.attach_male && def.attach_male[0]) ? def.attach_male : def.attach;
+                    if(a && a[0]) attaches[nattach++] = a;
+                }
+                else
+                {
+                    if(def.attach && def.attach[0]) attaches[nattach++] = def.attach;
+                    if(def.attach_male && def.attach_male[0]) attaches[nattach++] = def.attach_male;
+                }
+                loopj(nattach)
                 {
                     const char *apath = attaches[j];
-                    if(!apath || !apath[0]) continue;
                     if(def.slot == rpg::SLOT_FEET)
                     {
                         defformatstring(bootl)("%s_l", apath);
@@ -138,11 +171,26 @@ namespace game
                 }
                 // Weapon model (vwep, .132): the RPG item's hand weapon
                 // path. Same first-equip hitch as armor had; preload it
-                // here so the cost lands on the loading screen.
+                // here so the cost lands on the loading screen. When
+                // filterarmor is set, only the player's class weapons
+                // (weaponcat gate); uncategorized weapons preload always.
                 if(def.vwep && def.vwep[0])
                 {
-                    diaglog("preloadplayermodel: loading weapon '%s'", def.vwep);
-                    preloadmodel(def.vwep);
+                    bool vwepok = true;
+                    if(filterarmor && def.weaponcat && def.weaponcat[0])
+                    {
+                        if(!strcmp(playerclass, "Ranger"))
+                            vwepok = !strcmp(def.weaponcat, "bow") || !strcmp(def.weaponcat, "crossbow");
+                        else if(!strcmp(playerclass, "Warrior"))
+                            vwepok = !strcmp(def.weaponcat, "mace") || !strcmp(def.weaponcat, "axe") || !strcmp(def.weaponcat, "sword");
+                        else if(!strcmp(playerclass, "Magi"))
+                            vwepok = !strcmp(def.weaponcat, "staff") || !strcmp(def.weaponcat, "wand") || !strcmp(def.weaponcat, "orb");
+                    }
+                    if(vwepok)
+                    {
+                        diaglog("preloadplayermodel: loading weapon '%s'", def.vwep);
+                        preloadmodel(def.vwep);
+                    }
                 }
             }
         }
@@ -159,7 +207,7 @@ namespace game
             // ctf_twinkeeps_b1 — the whole queue flow), warm all selectable
             // models at world entry so the cost lands on the loading screen
             // (with progress) instead. FPS solo maps keep the old behavior.
-            if(i != playermodel && ((!multiplayer(false) && !rpgmap) || forceplayermodels || (!mdl->selectable && !allplayermodels))) continue;
+            if(i != playermodel && ((!multiplayer(false) && !rpgmap) || forceplayermodels || (!mdl->selectable && !allplayermodels) || (rpgmap && !bgmap))) continue;
             diaglog("preloadplayermodel: model i=%d ffa='%s' vwep='%s'", i, mdl->ffa ? mdl->ffa : "", mdl->vwep ? mdl->vwep : "");
             if(m_teammode)
             {

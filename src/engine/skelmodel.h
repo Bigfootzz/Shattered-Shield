@@ -2096,7 +2096,10 @@ struct skelmodel : animmodel
         skeleton *mskel = ((skelmeshgroup *)m->parts[0]->meshes)->skel;
         if(skel == mskel) return LINK_REUSE;
         if(sameskeleton(skel, mskel)) return LINK_SKIN;
-        {   // DIAGNOSTIC v0.1.125: why sameskeleton failed (first 20).
+        {   // DIAGNOSTIC v0.1.125: why sameskeleton failed (first 20). Nov 18
+            // (.142, Notes 234/207): log-only (diaglog) now; the mismatch is
+            // expected for tag armor and harmless, but conoutf spammed the
+            // System tab on every Ranger load.
             static int diag_skel_n = 0;
             if(diag_skel_n < 20)
             {
@@ -2118,7 +2121,7 @@ struct skelmodel : animmodel
                         }
                     }
                 }
-                conoutf("rpg: skel mismatch parent='%s' attach='%s' pnumbones=%d mnumbones=%d firstbad=%d pname='%s' mname='%s' pparent=%d mparent=%d", loadname ? loadname : "(null)", m->loadname ? m->loadname : "(null)", pn, mn, firstbad, pnm, mnm, pp, mp);
+                diaglog("rpg: skel mismatch parent='%s' attach='%s' pnumbones=%d mnumbones=%d firstbad=%d pname='%s' mname='%s' pparent=%d mparent=%d", loadname ? loadname : "(null)", m->loadname ? m->loadname : "(null)", pn, mn, firstbad, pnm, mnm, pp, mp);
                 diag_skel_n++;
             }
         }

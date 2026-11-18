@@ -2953,6 +2953,30 @@ namespace server
                 damage = newdmg;
             }
         }
+        // --- RPG: level-scaled monster damage (Nov 18, .142, Note 239) ---
+        // A level-14 elite should be a real threat, but WEAP_BITE's flat 12
+        // is crushed to ~1 by armor mitigation (stat_mitigate), so the giant
+        // bites like a gnat. Monsters above level 10 hit harder: multiplier
+        // (level-8)/2, so the giant (14) bites at 3x (12 -> 36 base, ~22
+        // after leather-armor mitigation). Level <= 10 mobs (imp, puglin,
+        // rat, zombies, juggernaut) are untouched. Runs before armor
+        // mitigation so the armor log line shows the final numbers.
+        if(damage > 0 && rpg::connected() && target && target->state.ai.type == ai::AI_TYPE_NONE &&
+           actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
+           rpg::mapactive(smapname))
+        {
+            int mlevel = ::monster::getMonsterLevel(actor->state.getMonsterType());
+            if(mlevel > 10)
+            {
+                int mult = (mlevel - 8)/2;
+                if(mult > 1)
+                {
+                    int newdmg = damage*mult;
+                    if(newdmg != damage) conoutf("rpg: level %d monster damage scaled %dx (%d -> %d)", mlevel, mult, damage, newdmg);
+                    damage = newdmg;
+                }
+            }
+        }
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // DDO-style PERCENTAGE mitigation: taken = raw*100/(100 + armor*10).
         // Same gating as before (monster attacker + RPG map only): PvP damage,
@@ -5122,7 +5146,7 @@ namespace server
             copystring(rpg_ambientmap, smapname);
             rpg_ambients.shrink(0);
             int n = rpg::spawnpointcount();
-            loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = 1; r.lastfight = 0; r.foecn = -1; r.fullhp = 0; r.engaged = false; }
+            loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = -1; r.lastfight = 0; r.foecn = -1; r.fullhp = 0; r.engaged = false; }
             diaglog("rpg: ambient spawns armed for rpg_01 (%d points)", n);
         }
         // AI slots need an owner: only spawn while a live player is connected
@@ -5137,6 +5161,18 @@ namespace server
         loopv(rpg_ambients)
         {
             if(rpg_ambientalive(rpg_ambients[i])) continue;
+            // WoW method (Nov 18, .142, Notes 240/241): the INITIAL spawn is
+            // immediate on map load — nextrespawn < 0 means "never spawned,
+            // spawn now", no timer. The 60s respawn timer is DEATH-ONLY: it
+            // is set when a mob dies (nextrespawn == 0 -> now + 60s) and only
+            // then does the tick wait. This replaces the nextrespawn=1 hack
+            // that routed the first spawn through the same timer path.
+            if(rpg_ambients[i].nextrespawn < 0)
+            {
+                if(rpg_ambients[i].clientnum < 0) rpg_spawnsingleambient(i);
+                else rpg_respawnsingleambient(i);
+                continue;
+            }
             if(rpg_ambients[i].nextrespawn == 0)
                 rpg_ambients[i].nextrespawn = totalmillis + RPG_AMBIENT_RESPAWN_MS;
             if(totalmillis >= rpg_ambients[i].nextrespawn)
@@ -6189,7 +6225,7 @@ namespace server
             }
             bool isnew = !rpg::recipediscovered(cq->name, r->key);
             if(isnew) rpg::discoverrecipe(cq->name, r->key);
-            defformatstring(msg)("You enhance %s into %s.", rpg::itemname(gearidx), rpg::itemname(rpg::finditem(outid)));
+            defformatstring(msg)("You enhance it into %s.", rpg::itemname(rpg::finditem(outid)));
             rpg_craftresult(cq, 1, msg);
             conoutf("rpg: '%s' enhances %s into %s (tier %s) with %s%s", cq->name,
                     gearid, outid, rpg::crafttiername(md.tier), matid,
