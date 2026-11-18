@@ -1079,8 +1079,10 @@ namespace game
         // Real-kill crash diagnostic (Nov 8, .55 follow-up): log when the
         // client finishes death processing on a battleground map, so the
         // next crash log shows whether it got past ai::killed.
+        // v0.1.137: routed through diaglog() so it lands in stdout.txt +
+        // diaglog.txt but no longer spams the in-game System tab (Note 167).
         if(rpg::mapactive(getclientmap()))
-            conoutf("rpg: client killed() done: victim '%s' (cn %d), killer '%s' (cn %d)",
+            diaglog("rpg: client killed() done: victim '%s' (cn %d), killer '%s' (cn %d)",
                     d->name, d->clientnum, actor ? actor->name : "<none>", actor ? actor->clientnum : -1);
         if(d == player1) d->follow = actor->clientnum;
     }

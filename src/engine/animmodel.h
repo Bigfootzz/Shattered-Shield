@@ -1,3 +1,5 @@
+#include "diaglog.h"
+
 VARFP(lightmodels, 0, 1, 1, preloadmodelshaders());
 VARFP(envmapmodels, 0, 1, 1, preloadmodelshaders());
 VARFP(glowmodels, 0, 1, 1, preloadmodelshaders());
@@ -942,7 +944,7 @@ struct animmodel : model
                     static int diag_attach_n = 0;
                     if(diag_attach_n < 60)
                     {
-                        conoutf("rpg: attach #%d tag='%s' name='%s' loaded=%d linktype=%d", diag_attach_n, a[i].tag ? a[i].tag : "(null)", a[i].name ? a[i].name : "(null)", (m && m->loaded) ? 1 : 0, (int)linktype(m));
+                        diaglog("rpg: attach #%d tag='%s' name='%s' loaded=%d linktype=%d", diag_attach_n, a[i].tag ? a[i].tag : "(null)", a[i].name ? a[i].name : "(null)", (m && m->loaded) ? 1 : 0, (int)linktype(m));
                         diag_attach_n++;
                     }
                 }

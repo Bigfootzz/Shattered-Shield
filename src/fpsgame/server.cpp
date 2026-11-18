@@ -4239,7 +4239,7 @@ namespace server
         t->nodeidx = nodeidx;
         t->nsentresp = 0;
         // DIAGNOSTIC ONLY (v0.1.128, Maren crash): log the node being sent.
-        conoutf("rpg: dlgdiag: senddialog graph '%s' node %d '%s' npcid %d", g->name, nodeidx, nd.id, npcid);
+        diaglog("rpg: dlgdiag: senddialog graph '%s' node %d '%s' npcid %d", g->name, nodeidx, nd.id, npcid);
         // join say lines with $var substitution
         char text[1024]; text[0] = '\0';
         loopi(nd.nsay)
@@ -4249,7 +4249,7 @@ namespace server
             if(i > 0) concatstring(text, "\n");
             concatstring(text, sub);
         }
-        conoutf("rpg: dlgdiag: senddialog node '%s' text '%s'", nd.id, text);
+        diaglog("rpg: dlgdiag: senddialog node '%s' text '%s'", nd.id, text);
         // response buttons: only those whose conditions all hold
         char r0[160] = "", r1[160] = "", r2[160] = "", r3[160] = "";
         char *rs[4] = { r0, r1, r2, r3 };
@@ -4418,22 +4418,22 @@ namespace server
         const rpg::dlgresponse &r = node.resp[respidx];
         // DIAGNOSTIC ONLY (v0.1.128, Maren crash): bracket the whole response
         // path so the last line before a crash names the step that died.
-        conoutf("rpg: dlgdiag: respond player '%s' npc '%s' node '%s' resp %d '%s' nact %d goto '%s' close %d",
+        diaglog("rpg: dlgdiag: respond player '%s' npc '%s' node '%s' resp %d '%s' nact %d goto '%s' close %d",
                 cq->name, nd->id, node.id, respidx, r.text, r.nact, r.gotonode, (int)r.close);
         // re-check response conditions (they could have changed)
         loopi(r.ncond) if(!rpg::dlgcondmet(cq->name, r.cond[i])) { rpg_closetalk(cq); return; }
         int xp_granted = 0;
         loopi(r.nact)
         {
-            conoutf("rpg: dlgdiag: action %d/%d verb %d qid %d item '%s' count %d n %d",
+            diaglog("rpg: dlgdiag: action %d/%d verb %d qid %d item '%s' count %d n %d",
                     i, r.nact, r.act[i].verb, r.act[i].qid, r.act[i].item, r.act[i].count, r.act[i].n);
-            if(!rpg_doaction(cq, r.act[i], xp_granted)) { conoutf("rpg: dlgdiag: action %d FAILED, closing talk", i); rpg_closetalk(cq); return; }
-            conoutf("rpg: dlgdiag: action %d done", i);
+            if(!rpg_doaction(cq, r.act[i], xp_granted)) { diaglog("rpg: dlgdiag: action %d FAILED, closing talk", i); rpg_closetalk(cq); return; }
+            diaglog("rpg: dlgdiag: action %d done", i);
         }
-        conoutf("rpg: dlgdiag: syncinv start");
+        diaglog("rpg: dlgdiag: syncinv start");
         rpg_syncinv(cq); // refresh xp/inventory/level + quest tracker
-        conoutf("rpg: dlgdiag: syncinv done");
-        if(r.close) { conoutf("rpg: dlgdiag: close flow"); rpg_closetalk(cq); return; }
+        diaglog("rpg: dlgdiag: syncinv done");
+        if(r.close) { diaglog("rpg: dlgdiag: close flow"); rpg_closetalk(cq); return; }
         if(r.gotonode[0])
         {
             int target = -1;
@@ -4445,12 +4445,12 @@ namespace server
                 bool ok = g->nodes[target].nwhen > 0;
                 if(ok) loopi(g->nodes[target].nwhen)
                     if(!rpg::dlgcondmet(cq->name, g->nodes[target].when[i])) { ok = false; break; }
-                conoutf("rpg: dlgdiag: goto '%s' target %d when-ok %d", r.gotonode, target, (int)ok);
-                if(ok) { rpg_senddialog(cq, g, target, t->npcid); conoutf("rpg: dlgdiag: senddialog returned"); return; }
+                diaglog("rpg: dlgdiag: goto '%s' target %d when-ok %d", r.gotonode, target, (int)ok);
+                if(ok) { rpg_senddialog(cq, g, target, t->npcid); diaglog("rpg: dlgdiag: senddialog returned"); return; }
             }
-            else conoutf("rpg: dlgdiag: goto '%s' target NOT FOUND, falling back to entry", r.gotonode);
+            else diaglog("rpg: dlgdiag: goto '%s' target NOT FOUND, falling back to entry", r.gotonode);
             int entry = rpg::dlgnode_selectentry(g, cq->name);
-            conoutf("rpg: dlgdiag: entry fallback %d", entry);
+            diaglog("rpg: dlgdiag: entry fallback %d", entry);
             if(entry >= 0) rpg_senddialog(cq, g, entry, t->npcid);
             else rpg_closetalk(cq);
         }
@@ -5032,7 +5032,7 @@ namespace server
         const rpg::spawndef *sp = rpg::spawnpoint(idx);
         if(!sp) return;
         clientinfo *mi = aiman::addai(50, -1, ai::AI_TYPE_MONSTER);
-        if(!mi) { conoutf("rpg: ambient spawn %d (%s): no free AI slot", idx, sp->area); return; }
+        if(!mi) { diaglog("rpg: ambient spawn %d (%s): no free AI slot", idx, sp->area); return; }
         int mtype = rpg_resolvespawntype(sp->type);
         makeInfected(mi, mtype, false);
         copystring(mi->name, monster::getMonsterType(mtype).classInfo.name, MAXNAMELEN+1);
@@ -5046,7 +5046,7 @@ namespace server
         rpg_sendmobhome(mi, vec(sp->x, sp->y, sp->z));
         rpg_ambients[idx].fullhp = mi->state.maxhealth; // settled by sendspawn (type HP)
         rpg_ambients[idx].engaged = false; rpg_ambients[idx].foecn = -1;
-        conoutf("rpg: ambient spawn %d (%s): '%s' at (%.0f, %.0f, %.0f)", idx, sp->area, mi->name, sp->x, sp->y, sp->z);
+        diaglog("rpg: ambient spawn %d (%s): '%s' at (%.0f, %.0f, %.0f)", idx, sp->area, mi->name, sp->x, sp->y, sp->z);
     }
 
     static void rpg_respawnsingleambient(int idx)
@@ -5070,7 +5070,7 @@ namespace server
         rpg_sendmobhome(mi, vec(sp->x, sp->y, sp->z));
         rpg_ambients[idx].fullhp = mi->state.maxhealth;
         rpg_ambients[idx].engaged = false; rpg_ambients[idx].foecn = -1;
-        conoutf("rpg: ambient spawn %d (%s): respawned '%s'", idx, sp->area, mi->name);
+        diaglog("rpg: ambient spawn %d (%s): respawned '%s'", idx, sp->area, mi->name);
     }
 
     void rpg_ambienttick()
@@ -5088,7 +5088,7 @@ namespace server
             rpg_ambients.shrink(0);
             int n = rpg::spawnpointcount();
             loopi(n) { rpg_ambientrec &r = rpg_ambients.add(); r.clientnum = -1; r.nextrespawn = 1; r.lastfight = 0; r.foecn = -1; r.fullhp = 0; r.engaged = false; }
-            conoutf("rpg: ambient spawns armed for rpg_01 (%d points)", n);
+            diaglog("rpg: ambient spawns armed for rpg_01 (%d points)", n);
         }
         // AI slots need an owner: only spawn while a live player is connected
         // (ownerless AI is immediately deleted by reinitai).

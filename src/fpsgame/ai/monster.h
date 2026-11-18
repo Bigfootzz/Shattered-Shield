@@ -32,10 +32,14 @@ namespace ai
             float rpgwanderyaw = 0;              // current wander direction
             int rpgmovetimer = 0;                // millis when move/pause phase flips (v0.1.18)
             bool rpgmoving = false;              // currently in move phase (v0.1.18)
+            // --- Mob AI proposal 4 (Nov 17): wall-slide / stuck recovery ---
+            vec rpgstuckpos;                     // position at the last stuck check
+            int rpgstucktimer = 0;               // millis when the next stuck check runs
+            float rpgsteeroffset = 0;            // yaw offset (deg) to slide along a wall; decays while moving freely
 
             MonsterAiInfo() :   monsterstate(M_SEARCH), tag(-1), enemy(NULL), targetyaw(0), trigger(0), attacktarget(0, 0, 0),
                                 anger(0), lastrouteplan(0), stacked(NULL), stackpos(0, 0, 0), counts(true), lastshot(0),
-                                rpghome(0, 0, 0), rpglifeseq(-1), rpgfoe(NULL)
+                                rpghome(0, 0, 0), rpglifeseq(-1), rpgfoe(NULL), rpgstuckpos(0, 0, 0)
             {}
 
             // monster AI is sequenced using transitions: they are in a particular state where

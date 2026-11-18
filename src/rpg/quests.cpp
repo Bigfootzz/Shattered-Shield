@@ -13,6 +13,7 @@
 #include "items.h"
 #include "crafting.h"
 #include "cube.h"
+#include "diaglog.h"
 #include <vector>
 #include <string>
 
@@ -628,14 +629,14 @@ namespace rpg
                     formatstring(amount)("%d", ra);
                     int iid = finditem(ri);
                     // DIAGNOSTIC ONLY (v0.1.128, Maren crash): log the fetch substitution.
-                    conoutf("rpg: dlgdiag: questtextsubst qid %d rolled '%s' x%d itemid %d", qid, ri, ra, iid);
+                    diaglog("rpg: dlgdiag: questtextsubst qid %d rolled '%s' x%d itemid %d", qid, ri, ra, iid);
                     copystring(item, iid >= 0 ? itemname(iid) : ri, sizeof(item));
                     have = itemcount(name, ri);
                     if(have > ra) have = ra;
                     formatstring(progress)("%d", have);
                     formatstring(target)("%d", ra);
                 }
-                else conoutf("rpg: dlgdiag: questtextsubst qid %d NO ROLL (repeatableget false)", qid);
+                else diaglog("rpg: dlgdiag: questtextsubst qid %d NO ROLL (repeatableget false)", qid);
             }
             else if(qs && (qs->objtype == QOBJ_KILL || qs->objtype == QOBJ_BGKILL ||
                             qs->objtype == QOBJ_BGWIN || qs->objtype == QOBJ_BGWINALL))

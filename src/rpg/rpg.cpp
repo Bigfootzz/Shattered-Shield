@@ -7,6 +7,7 @@
 #include "items.h"
 #include "sqlite3.h"
 #include "cube.h"
+#include "diaglog.h"
 
 #include <ctime>
 #include <map>
@@ -1805,8 +1806,8 @@ namespace rpg
         // (z 2116, the village ground level) in the east/north fields, clear
         // of the player spawn, NPCs, and existing spawn points.
         { "imp"   , 2800.0f, 2400.0f, 2116.0f, "east field" },
-        { "imp"   , 3200.0f, 2400.0f, 2116.0f, "east field north" },
-        { "imp"   , 2900.0f, 2900.0f, 2116.0f, "northeast field" },
+        { "imp"   , 3200.0f, 2400.0f, 2300.0f, "east field north" }, // Nov 17: ground 2280 (measured from rpg_01.ogz); z 2116 buried the imp 164u under the terrain and it fell out of the world every ~65s (Notes 167/174)
+        { "imp"   , 2900.0f, 2900.0f, 2268.0f, "northeast field" }, // Nov 17: ground 2248; same fall-through as spawn 1
         { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
         { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
         { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
@@ -1814,8 +1815,20 @@ namespace rpg
         { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
         { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
         { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
-        { "imp"   , 2500.0f, 3100.0f, 2116.0f, "north field" },
+        { "imp"   , 2500.0f, 3100.0f, 2373.0f, "north field" }, // Nov 17: ground 2353; same fall-through as spawns 1/2
         { "imp"   , 2000.0f, 3000.0f, 2116.0f, "northwest field" },
+        // Forest Giants (Nov 17, Ed): 4 in the clearing just outside the
+        // village, reached by a cave path. GPS from Ed's playtest (Notes
+        // 168-171), all z 2191 in his GPS = eye position; ground is 2176
+        // (flat, measured from rpg_01.ogz). z = ground + eyeheight (50) so
+        // the feet land on the ground: 2176 + 50 = 2226. Level 14, so the
+        // stock AI hunts on sight (AGGRESSIVE, Ed's call) - rpgthink only
+        // runs for level <= 10. They respawn on the 60s ambient timer like
+        // the other mobs; quest 12 (Corvin) needs 3 giant kills.
+        { "forest giant", 1419.0f, 3554.0f, 2226.0f, "giant clearing 1" },
+        { "forest giant", 1568.0f, 3764.0f, 2226.0f, "giant clearing 2" },
+        { "forest giant", 1715.0f, 3765.0f, 2226.0f, "giant clearing 3" },
+        { "forest giant", 1719.0f, 3634.0f, 2226.0f, "giant clearing 4" },
     };
     static const int SPAWN_COUNT = sizeof(SPAWNS)/sizeof(SPAWNS[0]);
 
@@ -2122,14 +2135,14 @@ namespace rpg
     {
         const questdef *qd = questdefbyid(qid);
         // DIAGNOSTIC ONLY (v0.1.128, Maren crash): log the fetch roll.
-        conoutf("rpg: dlgdiag: repeatableroll qid %d qd %s npool %d poolmin %d poolmax %d",
+        diaglog("rpg: dlgdiag: repeatableroll qid %d qd %s npool %d poolmin %d poolmax %d",
                 qid, qd ? "ok" : "NULL", qd ? qd->npool : -1, qd ? qd->poolmin : -1, qd ? qd->poolmax : -1);
         if(!qd || qd->npool <= 0 || qd->poolmax < qd->poolmin) return false;
         rprow r;
         copystring(r.item, qd->pool[rnd(qd->npool)], sizeof(r.item));
         r.amount = qd->poolmin + rnd(qd->poolmax - qd->poolmin + 1);
         r.readyat = 0;
-        conoutf("rpg: dlgdiag: repeatableroll qid %d rolled '%s' x%d", qid, r.item, r.amount);
+        diaglog("rpg: dlgdiag: repeatableroll qid %d rolled '%s' x%d", qid, r.item, r.amount);
         rpcache[std::string(name)][qid] = r;
         rpsave(name, qid);
         return true;

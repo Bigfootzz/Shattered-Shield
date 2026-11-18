@@ -67,16 +67,31 @@ namespace monster
             // TUNING Oct 21 (user-approved): 90 HP, not 200 - the
             // weakest ambient mob and the q1 hunt target was unwinnable
             // for a level-1 character.
-            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 90,     0,          0,      100,        "imp",      0},
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 90,     0,          0,      130,        "imp",      0},
                0,       0,      100,    400,    1,          S_PAINB,    S_DEATHB, 0,
             { "playermodels/imp",               NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "imp",          NULL,       NULL,       "hudguns/zombie",   false,      true,       3.2f,   14.0f,      1.0f,       0 },
         },
         {
             // Bestiary (Shattered Shield): slow brute, tankier than a zombie,
             // below the champion. freq 0 for the same reason as the imp.
-            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 300,    0,          0,      58,         "puglin",   0},
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 300,    0,          0,      90,         "puglin",   0},
                0,       0,      100,    400,    1,          S_PAINH,    S_DEATHH, 0,
             { "playermodels/puglin",            NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   "puglin",       NULL,       NULL,       "hudguns/zombie",   false,      true,       4.2f,   13.0f,      1.0f,       0 },
+        },
+        {
+            // Forest Giant (Shattered Shield): "Forest Monster" by CDmir
+            // (OpenGameArt, CC0). WORLD mob, 3x player size (Ed, Nov 17):
+            // native height 41.24u incl. tree, mdlscale 468 -> ~193u tall.
+            // Lives in the clearing just outside the village (4 spawns in
+            // the RPG spawn table, GPS from Ed Nov 17); level 14, so the
+            // stock AI hunts on sight (AGGRESSIVE, Ed's call). freq 0:
+            // named types never enter the random pool; it spawns only
+            // where the RPG spawn table names it. Radius/eyeheight follow
+            // the codebase's own ratios (juggernaut-scaled); tune after
+            // playtest.
+            { {WEAP_BITE, WEAP_NONE, WEAP_NONE, WEAP_NONE}, 300,    0,          0,      45,         "forest giant", 0},
+               0,       0,      100,    400,    1,          S_PAINH,    S_DEATHH, 0,
+            { "playermodels/forest_giant",      NULL,       NULL,       NULL,       NULL,   NULL,   { NULL, NULL, NULL },   NULL,           NULL,       NULL,       "hudguns/zombie",   false,      true,       15.0f,  50.0f,      1.0f,       0 },
         }
         /* TODO
         { 
@@ -105,10 +120,10 @@ namespace monster
 
     // Shattered Shield RPG levels, parallel to monstertypes[] above. The
     // ladder follows max HP: rat 1, zombies 2, imp 4, puglin 6, juggernaut
-    // 10. Every current world type is <= 10, so all ambient mobs (and the
+    // 10, forest giant 14. All ambient types are <= 10, so all ambient mobs (and the
     // Rotting Champion, a zombie variant) are passive until engaged under
     // the Oct 20 mob-behaviour rules. Data-only: stock modes never read it.
-    static const int monsterlevels[] = { 2, 2, 2, 2, 2, 2, 2, 1, 10, 4, 6 };
+    static const int monsterlevels[] = { 2, 2, 2, 2, 2, 2, 2, 1, 10, 4, 6, 14 };
 
     int getMonsterLevel(int id)
     {
@@ -216,7 +231,15 @@ namespace ai
             monsterstate = _state;
             d->move = _moving;
             n = n*130/100;
-            trigger = lastmillis+n-d->ai.skill*(n/16)+rnd(r+1);
+            // FIX (Nov 17, mob AI proposal 2): the timing formula is only
+            // defined for skill 0..10 (n at skill 0, ~n/2 at skill 10).
+            // RPG ambient mobs spawn at skill 50, where n - 50*(n/16) goes
+            // NEGATIVE, so the trigger lands in the past and every state
+            // ends the same tick it starts (machine-gun state flips).
+            // Clamp the skill the formula sees to its designed max of 10;
+            // skill 50 then behaves like skill 10 (fastest intended).
+            int skill = min(d->ai.skill, 10);
+            trigger = lastmillis+n-skill*(n/16)+rnd(r+1);
         }
 
         inline MonsterAiInfo *getMonsterState(fpsent *d)
@@ -319,9 +342,11 @@ namespace ai
         // the fight, the mob walks home, and the server resets the fight
         // (full health, threat wiped) once it is back. Movement and the
         // bite flow deliberately mirror the stock M_HOME / M_AIMING path
-        // so attacks land through the exact same shoot() plumbing. No
-        // waypoint routing here: the world fields are open ground, and
-        // the blocked-hop below covers lips and steps.
+        // so attacks land through the exact same shoot() plumbing.
+        // Waypoint routing (Nov 17, proposal 5) IS used when chasing a foe
+        // with no line of sight, reusing the stock Level 2 routing; it
+        // falls back to the beeline when no .wpt graph exists for the map.
+        // The blocked-hop + wall-slide below covers lips and steps.
         void MonsterAi::rpgthink(fpsent *d, MonsterAiInfo *ai, const ::monster::MonsterType &monsterType)
         {
             // Leash / roam distances are horizontal: the anchor z is a feet
@@ -354,6 +379,33 @@ namespace ai
                 ai->transition(d, M_SLEEP, 0, 100, 100);
             }
 
+            // FIX (Nov 17, mob AI proposal 4): stuck detection + wall-slide.
+            // If the mob was trying to move (d->move, set by the previous
+            // tick's state machine) but its position barely changed over
+            // the last second, it is wedged on terrain or a wall. Set a
+            // steer offset so it angles along the obstacle instead of
+            // pushing straight into it, hop to clear a lip, and (for an
+            // idle mob) pick a fresh wander direction. The offset decays
+            // while the mob moves freely, so it straightens out once
+            // clear; if it is still blocked the blocked handler re-sets it.
+            if(d->move && lastmillis >= ai->rpgstucktimer)
+            {
+                if(ai->rpgstucktimer > 0 && ai->rpgstuckpos.dist(d->o) < 2.0f)
+                {
+                    ai->rpgsteeroffset = rnd(2) ? 60 : -60;
+                    ai->rpgwanderyaw = rnd(360);
+                    d->jumping = true;
+                }
+                ai->rpgstuckpos = d->o;
+                ai->rpgstucktimer = lastmillis + 1000;
+            }
+            if(!d->blocked && ai->rpgsteeroffset != 0)
+            {
+                float decay = curtime*0.06f; // ~60 deg/sec back to straight
+                if(ai->rpgsteeroffset > 0) { ai->rpgsteeroffset -= decay; if(ai->rpgsteeroffset < 0) ai->rpgsteeroffset = 0; }
+                else { ai->rpgsteeroffset += decay; if(ai->rpgsteeroffset > 0) ai->rpgsteeroffset = 0; }
+            }
+
             // Retaliation: consume the recorded attacker as the target.
             if(!ai->enemy && ai->rpgfoe)
             {
@@ -381,9 +433,57 @@ namespace ai
             bool havedest = false;
             if(ai->enemy) { dest = ai->enemy->o; havedest = true; }
             else if(RPGDH(d->o) > rpg::MOB_ROAM_RADIUS) { dest = ai->rpghome; havedest = true; }
+            // Waypoint routing (proposal 5): when chasing a foe with no
+            // line of sight, steer along the waypoint graph instead of
+            // beelining into the wall between the mob and the foe. This
+            // reuses the stock Level 2 routing (ai::route / closestwaypoint
+            // / wproute, replanned at most once a second). With no .wpt
+            // graph for this map, closestwaypoint returns -1 and it falls
+            // back to the beeline, so behaviour is unchanged until
+            // rpg_01.wpt exists. The graph itself is the remaining piece.
+            if(ai->enemy)
+            {
+                vec lostarget;
+                if(!raycubelos(d->o, ai->enemy->o, lostarget))
+                {
+                    bool routed = false;
+                    if(!ai->wproute.empty())
+                    {
+                        int node = ai->wproute.last();
+                        if(iswaypoint(node))
+                        {
+                            if(d->o.squaredist(waypoints[node].o) < (WAYPOINTRADIUS*1.5f)*(WAYPOINTRADIUS*1.5f))
+                            {
+                                ai->wproute.pop(); // reached this node, aim for the next one
+                                routed = !ai->wproute.empty();
+                            }
+                            else routed = true;
+                            if(routed) { node = ai->wproute.last(); dest = waypoints[node].o; havedest = true; }
+                        }
+                        else ai->wproute.setsize(0);
+                    }
+                    if(!routed && lastmillis-ai->lastrouteplan >= 1000)
+                    {
+                        ai->lastrouteplan = lastmillis;
+                        int from = closestwaypoint(d->o, SIGHTMAX, true);
+                        int goal = closestwaypoint(ai->enemy->o, SIGHTMAX, true);
+                        if(iswaypoint(from) && iswaypoint(goal) && from != goal)
+                        {
+                            if(route(d, from, goal, ai->wproute, obstacles)) { int node = ai->wproute.last(); dest = waypoints[node].o; havedest = true; }
+                            else ai->wproute.setsize(0);
+                        }
+                        else ai->wproute.setsize(0);
+                    }
+                }
+                else ai->wproute.setsize(0); // line of sight: beeline, drop any stale route
+            }
             if(havedest)
             {
                 ai->targetyaw = -atan2(dest.x - d->o.x, dest.y - d->o.y)/RAD;
+                // Wall-slide (proposal 4): angle off the direct line by the
+                // steer offset, so a mob sliding along a wall keeps moving
+                // instead of pushing straight into it.
+                ai->targetyaw += ai->rpgsteeroffset;
                 normalizeYaw(d->yaw, ai->targetyaw);
                 if(ai->targetyaw > d->yaw) { d->yaw += curtime*0.5f; if(ai->targetyaw < d->yaw) d->yaw = ai->targetyaw; }
                 else { d->yaw -= curtime*0.5f; if(ai->targetyaw > d->yaw) d->yaw = ai->targetyaw; }
@@ -394,6 +494,11 @@ namespace ai
             if(d->blocked) // ran into scenery: hop it (returning or chasing)
             {
                 d->blocked = false;
+                // Wall-slide (proposal 4): angle along the wall instead of
+                // pushing straight into it. Set the steer offset if none is
+                // active; the direction is random so it does not always
+                // turn the same way into a corner.
+                if(!ai->rpgsteeroffset) ai->rpgsteeroffset = rnd(2) ? 45 : -45;
                 if(!rnd(20000/max(monsterType.classInfo.maxspeed/4, 1))) d->jumping = true;
                 // v0.1.26 (item 5): idle wander hopped "like on drugs".
                 // Was !rnd(3): while blocked on uneven ground, an idle
@@ -424,13 +529,19 @@ namespace ai
                     break;
                 case M_HOME: // chasing the foe
                     if(!ai->enemy) { ai->transition(d, M_SLEEP, 0, 100, 100); break; }
-                    d->move = dist > 20 ? 1 : 0;
+                    // FIX (Nov 17, mob AI proposal 1): close the bite gap.
+                    // The mob used to stop at dist <= 20 and try to bite at
+                    // dist < 20, but WEAP_BITE's ray only reaches 12, so it
+                    // stood 13-20u away whiffing forever. Now it closes to
+                    // within 10u (inside the 12u bite ray, with margin for
+                    // the 3D origin distance) and only bites once there.
+                    d->move = dist > 10 ? 1 : 0;
                     if(ai->trigger < lastmillis)
                     {
                         vec target;
                         if(raycubelos(d->o, ai->enemy->o, target))
                         {
-                            if(dist < 20 && ai->enemy->state == CS_ALIVE) // bite trigger, same gate as stock
+                            if(dist <= 10 && ai->enemy->state == CS_ALIVE) // bite trigger, inside bite range now
                             {
                                 ai->attacktarget = rnd(100) < 20*aiSkillToLevel(d->ai.skill) ? ai->enemy->headpos() : target;
                                 ai->transition(d, M_AIMING, 0, monsterType.lag, 10);

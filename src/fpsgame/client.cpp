@@ -4017,7 +4017,7 @@ namespace game
                 string rs[4];
                 loopi(4) getstring(rs[i], p);
                 // DIAGNOSTIC ONLY (v0.1.128, Maren crash): log the node the client received.
-                conoutf("rpg: dlgdiag: client N_RPG_DIALOG nodeid %d npc '%s' nresp %d text '%s'", nodeid, npcname, nresp, text);
+                diaglog("rpg: dlgdiag: client N_RPG_DIALOG nodeid %d npc '%s' nresp %d text '%s'", nodeid, npcname, nresp, text);
                 if(nodeid < 0)
                 {
                     // server closed the dialogue
@@ -4046,7 +4046,7 @@ namespace game
                     // shows which NPC is being talked to.
                     if(rpg_dlg_npcidx >= 0) rpg::selectnpc(rpg_dlg_npcidx);
                     showgui("rpgdialog");
-                    conoutf("rpg: dlgdiag: client showgui rpgdialog done");
+                    diaglog("rpg: dlgdiag: client showgui rpgdialog done"); // v0.1.137: diaglog, not conoutf (Note 174 spam)
                 }
                 break;
             }
