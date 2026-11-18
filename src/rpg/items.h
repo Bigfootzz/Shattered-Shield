@@ -28,6 +28,12 @@ namespace rpg
     };
 
     // Equipment slots (SLOT_NONE = not equippable, e.g. consumables)
+    // Neck/rings are stats-only: no 3D model or vwep is shown for them on
+    // the character (Ed, Oct 24) — they exist to add stats and balance to
+    // the character sheet. The cape joined them (Nov 16, Ed: shoulders
+    // replace the visible cape; the cape gives stats only, renders nothing).
+    // Ring slots are distinct: a ring1 item equips only to ring1, a ring2
+    // item only to ring2 (no first-free-slot logic).
     enum
     {
         SLOT_MAINHAND = 0,
@@ -35,6 +41,25 @@ namespace rpg
         SLOT_TORSO,
         SLOT_LEGS,
         SLOT_FEET,
+        SLOT_NECK,
+        SLOT_RING1,
+        SLOT_RING2,
+        SLOT_CAPE,
+        // Off Hand (Nov 13 rework, Ed's word): Warrior holds a shield here,
+        // Magi an orb. Ranger has no off-hand item (the bow is two-handed),
+        // so no off-hand item is ever gated to Ranger. The slot itself is
+        // class-agnostic — the gate lives on the item (armorclass), the same
+        // mechanism as the armor gate, so a shield (armorclass Warrior) or
+        // orb (armorclass Magi) equips and sells only for its class. No
+        // shield/orb item defs exist yet; the slot reads empty until they do.
+        // The 3D attach (shield on tag_shield, orb in the left hand) is
+        // future work — the slot, paperdoll and sheet are wired now.
+        SLOT_OFFHAND,
+        // Shoulder (Nov 16, Ed: shoulders replace the visible cape).
+        // The pauldron (base for shoulder designs) equips here and renders
+        // via tag_shoulder on spine_03. The cape stays in SLOT_CAPE for
+        // stats only, so both can be worn at once (more stat options).
+        SLOT_SHOULDER,
         SLOT_COUNT,
         SLOT_NONE = -1
     };
@@ -47,6 +72,11 @@ namespace rpg
         int slot;          // SLOT_* above (SLOT_NONE for non-gear)
         const char *icon;  // packages/ path to the 64px sliced icon PNG
         const char *vwep;  // weapons only: model path attached at tag_weapon; else NULL
+        const char *weaponcat; // weapons only: category for class gating
+                           // ("mace"|"axe"|"sword"|"staff"|"wand"|"orb"|
+                           // "bow"|"crossbow"), or NULL for legacy weapons
+                           // with no category (equippable by all classes).
+                           // Data files set it with ss_item_weaponcat.
         int damage;        // weapons: bonus added to melee ability (Power Strike) damage
         int armor;         // armor: flat reduction of incoming monster damage
         int heal;          // consumables: HP restored on use
@@ -54,13 +84,69 @@ namespace rpg
         int value;         // base worth: fetch-quest rewards read it now in data;
                            // no gameplay consumer until merchants (crafting design §5.4)
         int mana;          // consumables: mana restored on use (0 = none)
+        int tier;          // rarity tier (crafting Phase 1): 0 common, 1 uncommon,
+                           // 2 rare, 3 epic, 4 legendary. Default 0; data files
+                           // set it with ss_item_tier. Crafting output tier is
+                           // computed from ingredient tiers, never stored here.
+        int buffattr;      // buff consumables (crafting Phase 2): ATTR_* from stats.h
+                           // that this item raises while active, or -1 for non-buff
+                           // items. Magnitude comes from the item's tier via
+                           // rpg::buffmagnitude(), never stored here. Data files
+                           // set it with ss_item_buff; buff items must not heal.
+        // Phase 3 gear enhancement: persistent equipped bonus, armor only,
+        // deliberately separate from buffattr (consumables + timed path).
+        // gearstat -1 = unenhanced; gearbonus 1..6 raw points (pre-weighting);
+        // enhbase = base gear id this enhanced piece derives from (NULL when unenhanced).
+        int gearstat = -1; // Phase 3 default: unenhanced (positional fallback
+                           // initializers predate these fields and rely on it)
+        int gearbonus = 0; // Phase 3 default: no bonus
+        const char *enhbase = NULL; // Phase 3 default: not an enhanced piece
+        // PvP jewelry/armor (Oct 31): class-gated shop gear, stats-only like
+        // other neck/ring pieces. pvpclass NULL = not a PvP item; pvpreduce
+        // is percent reduction vs PLAYER damage only; maxhp is a flat
+        // max-HP bonus while worn; emberprice is the price in Embers
+        // (0 = not for sale for Embers). Data files set them with
+        // ss_item_pvpclass / ss_item_pvpreduce / ss_item_maxhp /
+        // ss_item_emberprice. Positional fallback initializers predate
+        // these fields and rely on the defaults below.
+        const char *pvpclass = NULL; // PvP default: not a PvP item
+        int pvpreduce = 0; // PvP default: no PvP reduction
+        int maxhp = 0; // PvP default: no max-HP bonus
+        int emberprice = 0; // PvP default: not for sale for Embers
+        // Outfit (Nov 10, Warrior equip test): model-dir SUFFIX applied to
+        // the wearer's base model when this item is equipped, e.g. "_ranger"
+        // turns "warrior_male" into "warrior_male_ranger". NULL = not an
+        // outfit (no appearance change). Data files set it with
+        // ss_item_outfit. The equip hook strips a previous outfit suffix
+        // before applying, so outfits swap cleanly; unequip reverts to base.
+        const char *outfit = NULL; // outfit default: not an outfit item
+        // Class armor gate (Nov 10, Ed's class-armor rule): the class that
+        // may wear this armor ("Warrior"|"Ranger"|"Magi"). NULL = any class
+        // (rings/necklaces and ungated armor). Data files set it with
+        // ss_item_armorclass. Enforced in rpg::equipitem, mirroring the
+        // Oct 29 weapon-category gate; already-equipped pieces are never
+        // stripped by a re-equip, only new disallowed equips are refused.
+        const char *armorclass = NULL; // armor-class default: any class
+        // Armor attach (Nov 10, Ed's "true armor swapping"): model path
+        // attached to the wearer's body when this armor piece is equipped,
+        // e.g. "playermodels/attachments/armor/ranger/female/head/01". NULL = no
+        // visual attach (stats only). Data files set it with
+        // ss_item_attach. The attach renders via the modelattach array in
+        // renderclient, same pattern as the cape (tag_cape) and vwep.
+        const char *attach = NULL; // armor-attach default: no visual model
+        // Male-variant attach (.132, class-based armor): model path used
+        // when the wearer's model is male and this is set, e.g. the male
+        // Magi cloth set (magi/male/torso/01) vs the female default (magi/female/torso/01).
+        // NULL = use attach for both sexes. Data files set it with
+        // ss_item_attach_male.
+        const char *attach_male = NULL;
     };
 
     int itemcount();                    // number of defs in the ACTIVE table
     const itemdef &item(int id);        // id in [0, itemcount())
     int finditem(const char *id);       // -1 when unknown
     const char *itemname(int id);       // display name, "" when invalid
-    const char *slotname(int slot);     // "mainhand".."feet", "" when invalid
+    const char *slotname(int slot);     // "mainhand".."offhand", "" when invalid
     int slotid(const char *name);       // SLOT_* or SLOT_NONE
 
     // --- content data layer (crafting build step 0) ---
@@ -93,4 +179,11 @@ namespace rpg
     // else to the compiled-in global table (pre-content-layer behavior).
     // Returns an item index, or -1 for "no drop".
     int rollloot(const char *typekey);
+    // v0.1.23: mob coin drops (MMO research: WoW mobs drop coins directly,
+    // in addition to items). Returns copper amount for the mob type, 0 for
+    // unknown types. Early-game amounts (copper range, not silver/gold):
+    // zombie (lvl2) 1-4c, imp (lvl4) 3-8c, puglin (lvl6) 5-12c, champion 25-50c.
+    // Coin drops are granted directly to the killer on mob death, separate
+    // from the item loot roll (which may also drop an item).
+    int rollcoins(const char *typekey);
 }
