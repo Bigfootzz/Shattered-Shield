@@ -59,6 +59,18 @@ namespace rpg
         // flavor of the same design: upfront melee hit (Strength-scaled)
         // plus a 10s bleed DoT. 8s cooldown, melee range.
         { "rend",         "Rend",         8000,     0,    15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior", "A slash that causes bleeding." },
+        // QUICK SHOT / QUICK SLASH (v0.1.146): the fast filler attacks, one
+        // per class, in hotbar slot 1 and tied to auto-attack. They fill the
+        // rotation gap between the two slower specials. damagetype "quick":
+        // base + weapon ONLY, no attribute scaling (see rpg_cast in
+        // server.cpp) — with standard scaling the shared weapon+attribute
+        // term would let the filler out-DPS the main attack at high level.
+        // 1.2s cooldown, 0 mana. Quick Shot is the Release-only clip
+        // (0.83s), which also gives the Ranger a ranged auto-attack
+        // (range 120); before this, auto-attack was melee-only (Basic
+        // Attack, range 15) so right-click at bow range did nothing.
+        { "quickshot",    "Quick Shot",   1200,     0,    120.0f, 12,  false, "quick", DELIVERY_PROJECTILE, "arrow", "Ranger", "A fast arrow shot." },
+        { "quickslash",   "Quick Slash",  1200,     0,    15.0f, 10,   true,  "quick", DELIVERY_INSTANT,    NULL, "Warrior", "A fast weapon slash." },
     };
 
     // DoT definitions for the two v0.1.8 DoT attacks. 1s ticks x 10 = 10s.
@@ -105,6 +117,7 @@ namespace rpg
         int n = 0;
         if(arch && !strcmp(arch, "Warrior"))
         {
+            if(n < max) out[n++] = 9; // Quick Slash (filler, slot 1 / auto-attack, v0.1.146)
             if(n < max) out[n++] = 0; // Power Strike
             if(n < max) out[n++] = 7; // Rend (bleed DoT, v0.1.8 fix 15)
         }
@@ -116,6 +129,7 @@ namespace rpg
         }
         else if(arch && !strcmp(arch, "Ranger"))
         {
+            if(n < max) out[n++] = 8; // Quick Shot (filler, slot 1 / auto-attack, v0.1.146)
             if(n < max) out[n++] = 5; // Arrow Shot
             if(n < max) out[n++] = 6; // Venom Shot (poison DoT, v0.1.8 fix 10)
         }

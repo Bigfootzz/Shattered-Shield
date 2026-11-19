@@ -55,7 +55,7 @@ namespace rpg
     };
     const dotdef *abilitydot(int id); // NULL when the ability has no DoT
 
-    const int ABILITY_COUNT = 8;
+    const int ABILITY_COUNT = 10; // 0-7 originals + 8 Quick Shot, 9 Quick Slash (v0.1.146 fillers)
 
     // Melee: short range, free, fast cooldown.
     // Spell: long range, costs mana, slower cooldown.

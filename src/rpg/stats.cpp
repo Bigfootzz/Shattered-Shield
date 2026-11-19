@@ -212,4 +212,108 @@ namespace rpg
     {
         return resist >= 0 && resist < RESIST_COUNT ? RESIST_NAMES[resist] : "";
     }
+
+    // --- WoW-style attack table (v0.1.146) ---
+    // White damage: one roll, precedence miss > dodge > parry > glancing >
+    // block > crit > crushing > hit. Yellow damage: two rolls (miss, then
+    // crit) + a concurrent block roll for physical attacks. All chances
+    // are percents; the roll functions take the roll value so a harness can
+    // test them deterministically (the server passes rand()%10000/100).
+    const char *atkoutcomename(int outcome)
+    {
+        static const char *names[ATK_COUNT] =
+        {
+            "miss", "dodge", "parry", "glancing", "block", "crit", "crushing", "hit"
+        };
+        return outcome >= 0 && outcome < ATK_COUNT ? names[outcome] : "";
+    }
+
+    float atk_misschance(int attlevel, int deflevel)
+    {
+        float c = 5.0f + float(deflevel > attlevel ? deflevel - attlevel : 0);
+        return c > 100.0f ? 100.0f : c;
+    }
+
+    float atk_dodgechance(int defdex)
+    {
+        if(defdex < 0) defdex = 0;
+        return 5.0f + 0.1f*defdex;
+    }
+
+    float atk_parrychance(int defstr, bool canparry)
+    {
+        if(!canparry) return 0.0f;
+        if(defstr < 0) defstr = 0;
+        return 5.0f + 0.1f*defstr;
+    }
+
+    float atk_glancechance(int attlevel, int deflevel)
+    {
+        if(deflevel <= attlevel) return 0.0f;
+        float c = 10.0f*(deflevel - attlevel);
+        return c > 30.0f ? 30.0f : c;
+    }
+
+    float atk_blockchance(bool hasshield)
+    {
+        return hasshield ? 5.0f : 0.0f;
+    }
+
+    float atk_crushchance(int attlevel, int deflevel)
+    {
+        (void)attlevel; (void)deflevel;
+        return 0.0f; // DEFERRED: crushing blows only when a mob is 3+
+                     // levels above the player; not implemented yet.
+    }
+
+    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float critmult, int damage, int &outdmg)
+    {
+        if(damage < 0) damage = 0;
+        if(crit < 0.0f) crit = 0.0f;
+        if(critmult < 1.0f) critmult = 1.0f;
+        float band = 0.0f;
+        band += miss;
+        if(roll < band) { outdmg = 0; return ATK_MISS; }
+        band += dodge;
+        if(roll < band) { outdmg = 0; return ATK_DODGE; }
+        band += parry;
+        if(roll < band) { outdmg = 0; return ATK_PARRY; }
+        band += glance;
+        if(roll < band)
+        {
+            outdmg = int(damage*ATK_GLANCING_DMG_PCT/100.0f + 0.5f);
+            if(outdmg < 1 && damage > 0) outdmg = 1;
+            return ATK_GLANCING;
+        }
+        band += block;
+        if(roll < band)
+        {
+            outdmg = int(damage*(100.0f - ATK_BLOCK_REDUCE_PCT)/100.0f + 0.5f);
+            if(outdmg < 1 && damage > 0) outdmg = 1;
+            return ATK_BLOCK;
+        }
+        band += crit;
+        if(roll < band) { outdmg = int(damage*critmult + 0.5f); return ATK_CRIT; }
+        band += atk_crushchance(0, 0); // 0 (deferred); the slot stays in
+                                       // the precedence order for later.
+        if(roll < band) { outdmg = int(damage*1.5f + 0.5f); return ATK_CRUSHING; }
+        outdmg = damage;
+        return ATK_HIT;
+    }
+
+    bool atk_rollyellowmiss(float roll, int attlevel, int deflevel)
+    {
+        return roll < atk_misschance(attlevel, deflevel);
+    }
+
+    bool atk_rollyellowcrit(float roll, float critchance)
+    {
+        if(critchance < 0.0f) critchance = 0.0f;
+        return roll < critchance;
+    }
+
+    bool atk_rollyellowblock(float roll, bool hasshield)
+    {
+        return roll < atk_blockchance(hasshield);
+    }
 }

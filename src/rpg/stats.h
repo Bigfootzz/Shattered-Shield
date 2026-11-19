@@ -80,6 +80,52 @@ namespace rpg
     // pvpreducepct <= 0 returns the plain mitigated value unchanged.
     int stat_mitigatepvp(int rawdmg, int armor, int pvpreducepct);
 
+    // --- WoW-style attack table (v0.1.146) ---
+    // White damage (auto-attacks + "quick" fillers): ONE roll against a
+    // precedence table. Yellow damage (specials): TWO rolls (miss, then
+    // crit); block is a separate concurrent roll for physical attacks.
+    // All chances are percents (0..100). The roll functions take the roll
+    // value (0..100) so a harness can test them deterministically; the
+    // server generates the roll with rand() (same pattern as
+    // stat_rollcrit). Crushing Blow is deferred: its chance is always 0
+    // (it only applies when a mob is 3+ levels above the player).
+    enum
+    {
+        ATK_MISS = 0,
+        ATK_DODGE,
+        ATK_PARRY,
+        ATK_GLANCING,
+        ATK_BLOCK,
+        ATK_CRIT,
+        ATK_CRUSHING,
+        ATK_HIT,
+        ATK_COUNT
+    };
+    const char *atkoutcomename(int outcome); // "miss", "dodge", ...; "" when out of range
+    float atk_misschance(int attlevel, int deflevel);    // 5 + 1 per level the defender is above the attacker
+    float atk_dodgechance(int defdex);                   // 5 + 0.1 per Dexterity
+    float atk_parrychance(int defstr, bool canparry);    // 5 + 0.1 per Strength, 0 when !canparry
+    float atk_glancechance(int attlevel, int deflevel);  // 10 per level the defender is above, cap 30, else 0
+    float atk_blockchance(bool hasshield);               // 5 when a shield is equipped, else 0
+    float atk_crushchance(int attlevel, int deflevel);   // DEFERRED: always 0
+    // Glancing blows land for 75% of the rolled damage; a block shaves 30%.
+    const float ATK_GLANCING_DMG_PCT = 75.0f;
+    const float ATK_BLOCK_REDUCE_PCT = 30.0f;
+    // White: single roll 0..100, precedence miss > dodge > parry > glancing
+    // > block > crit > crushing > hit. All outcomes mutually exclusive, so
+    // crit is capped by what is left after the bands above it. The chance
+    // parameters are percents (use the atk_*chance functions above).
+    // outdmg is the adjusted damage (0 for miss/dodge/parry). Returns the
+    // ATK_* outcome.
+    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float critmult, int damage, int &outdmg);
+    // Yellow: first roll is the miss check (true = the attack misses).
+    bool atk_rollyellowmiss(float roll, int attlevel, int deflevel);
+    // Yellow: second roll is the crit check (true = critical hit).
+    bool atk_rollyellowcrit(float roll, float critchance);
+    // Yellow: block is a separate concurrent roll for PHYSICAL attacks only
+    // (melee / pierce / poison / quick); spells never block. True = blocked.
+    bool atk_rollyellowblock(float roll, bool hasshield);
+
     // --- damage types & resists: data now, behavior later ---
     // Every ability records its type; every character carries six resists
     // defaulting to 0, which change nothing. Typed monster damage and the

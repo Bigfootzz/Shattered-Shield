@@ -100,6 +100,20 @@ namespace game
     // Arrow Shot (v0.1.8): ranger's ranged attack, ability index 5.
     ICOMMAND(ability5, "", (), { if(!require_hardware_event("ability5")) return; rpg_castslot(5); });
 
+    // Filler auto-attack (v0.1.146): the class's slot-1 ability from
+    // rpg::classabilities IS the auto-attack (Quick Shot for Ranger at
+    // range 120, Quick Slash for Warrior at 15). Falls back to Basic
+    // Attack (2) when the character has no class list (e.g. no archetype
+    // row yet) so right-click still does something.
+    static int rpg_autoattackability()
+    {
+        if(!player1) return 2;
+        char arch[32]; arch[0] = '\0';
+        rpg::chararchetype(player1->name, arch, sizeof(arch));
+        int ids[6]; int n = rpg::classabilities(arch, ids, 6);
+        return n > 0 ? ids[0] : 2;
+    }
+
     // --- RPG: Shattered Shield inventory (milestone step 4, additive) ---
     // The client only ASKS (item id / slot); the server validates and pushes
     // fresh state (N_RPG_INV) after every mutation. The GUIs in
@@ -288,10 +302,10 @@ namespace game
                 fx.prev = fx.pos;
                 fx.pos.add(d);
             }
-            // Arrow Shot (ability 5) / Venom Shot (ability 6): render the
-            // physical arrow model, oriented along travel direction.
-            // No trail/light (plain arrow).
-            if(fx.ability == 5 || fx.ability == 6)
+            // Arrow Shot (ability 5) / Venom Shot (ability 6) / Quick Shot
+            // (ability 8, v0.1.146): render the physical arrow model,
+            // oriented along travel direction. No trail/light (plain arrow).
+            if(fx.ability == 5 || fx.ability == 6 || fx.ability == 8)
             {
                 vec dir(fx.pos); dir.sub(fx.prev);
                 float yaw = 0, pitch = 0;
@@ -423,12 +437,14 @@ namespace game
         {
                 if(pk.kind == 2 && pk.mon)
             {
-                // CLEANUP item 8: right-click engages only within basic
-                // attack range. Out of range the click just selects - no
-                // auto-attack loop, no repeated 'no target' server spam.
+                // v0.1.146: right-click engages only within the AUTO-ATTACK
+                // ability's range (the class's slot-1 filler: Quick Shot
+                // 120 for Ranger, Quick Slash 15 for Warrior). Out of range
+                // the click just selects - no auto-attack loop, no repeated
+                // 'no target' server spam.
                 rpg::selecttarget(pk.mon->clientnum);
                 vec delta(pk.mon->o); delta.sub(player1->o);
-                if(delta.magnitude() <= rpg::ability(2).range)
+                if(delta.magnitude() <= rpg::ability(rpg_autoattackability()).range)
                 {
                     rpg::setautoattack(true);
                     conoutf("rpg: auto-attacking '%s'", pk.mon->name);
@@ -1279,10 +1295,12 @@ namespace game
             }
         }
 
-        // auto-attack: repeated Basic Attack (ability 2, CLEANUP item 8)
-        // through the real, server-validated cast path. Client-side
-        // pre-checks only avoid chat spam; cooldown/mana/range/line-of-sight
-        // are enforced by the server.
+        // auto-attack: repeated slot-1 filler (v0.1.146: Quick Shot for
+        // Ranger, Quick Slash for Warrior; Basic Attack (2) only as the
+        // no-archetype fallback inside rpg_autoattackability) through the
+        // real, server-validated cast path. Client-side pre-checks only
+        // avoid chat spam; cooldown/mana/range/line-of-sight are enforced
+        // by the server.
         // Out of range: HOLD in place (no teleport, no auto-path) and say so.
         if(rpg::autoattacking() && sel)
         {
@@ -1291,7 +1309,8 @@ namespace game
             if(totalmillis - lasttry >= 250)
             {
                 lasttry = totalmillis;
-                const rpg::abilitydef &ab = rpg::ability(2);
+                int aaid = rpg_autoattackability();
+                const rpg::abilitydef &ab = rpg::ability(aaid);
                 vec delta(sel->o); delta.sub(player1->o);
                 bool inrange = rpg_testforcerange || delta.magnitude() <= ab.range; // TEST-ONLY
                 if(!inrange)
@@ -1303,7 +1322,7 @@ namespace game
                     }
                     washolding = true;
                 }
-                else if(rpg::cooldownleft(2, totalmillis) > 0) washolding = false;
+                else if(rpg::cooldownleft(aaid, totalmillis) > 0) washolding = false;
                 else
                 {
                     int mana = 0, maxmana = 0;
@@ -1313,7 +1332,7 @@ namespace game
                         if(washolding) conoutf("rpg: auto-attack resumed");
                         washolding = false;
                         conoutf("rpg: auto-attack tick -> '%s' (hp %d/%d)", sel->name, sel->health, sel->maxhealth);
-                        rpg_castability(2);
+                        rpg_castability(aaid);
                     }
                     else if(!washolding || totalmillis - lastholdlog > 5000)
                     {
@@ -1758,7 +1777,7 @@ namespace game
     // back to icon_empty.png, same as rpgeqicon. The table lives outside
     // the ICOMMAND because the commas in a brace-initializer would split
     // the macro arguments.
-    static const char *rpgabiconfiles[8] = {
+    static const char *rpgabiconfiles[10] = {
         "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
         "packages/ui/rpg/hud/icon_sparkbolt.png",   // 1 Spark Bolt
         "",                                          // 2 Basic (right-click)
@@ -1767,9 +1786,11 @@ namespace game
         "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
         "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot
         "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend
+        "packages/ui/rpg/icons/icon_bow.png",       // 8 Quick Shot (PLACEHOLDER - inventory art, needs HUD-style icon)
+        "packages/ui/rpg/icons/icon_sword.png",     // 9 Quick Slash (PLACEHOLDER - inventory art, needs HUD-style icon)
     };
     ICOMMAND(rpgabicon, "i", (int *i), {
-        result(rpg::validability(*i) && *i >= 0 && *i < 8 && rpgabiconfiles[*i] && rpgabiconfiles[*i][0] ? rpgabiconfiles[*i] : "packages/ui/rpg/icons/icon_empty.png");
+        result(rpg::validability(*i) && *i >= 0 && *i < rpg::ABILITY_COUNT && rpgabiconfiles[*i] && rpgabiconfiles[*i][0] ? rpgabiconfiles[*i] : "packages/ui/rpg/icons/icon_empty.png");
     });
     // Spells tab (Nov 13): ability id at position <slot> in the player's
     // class list (rpg::classabilities), or -1 when the slot is empty.
@@ -3913,6 +3934,7 @@ namespace game
                     // cannot drift apart. Must match the 2000ms delay in
                     // renderplayer (render.cpp).
                     if(ability == 5 || ability == 6) { player1->lastattackgun = 6; rpg_facetill = totalmillis + 2000; }
+                    else if(ability == 8 || ability == 9) player1->lastattackgun = 0; // Quick Shot / Quick Slash: attack 1 (Release clip / Sword_Regular_A, v0.1.146)
                     else if(ability == 4) player1->lastattackgun = 1;
                     else player1->lastattackgun = player1->gunselect;
                 }
@@ -3938,8 +3960,8 @@ namespace game
                 (void)tcn; (void)dmg;
                 loopvrev(rpg_projfxs) if(rpg_projfxs[i].id == id)
                 {
-                    // Arrow Shot: no impact splash (plain arrow thunk)
-                    if(rpg_projfxs[i].ability != 5)
+                    // Arrow Shot / Quick Shot: no impact splash (plain arrow thunk)
+                    if(rpg_projfxs[i].ability != 5 && rpg_projfxs[i].ability != 8)
                     {
                         vec col; int part;
                         rpg_projfxstyle(rpg_projfxs[i].ability, col, part);

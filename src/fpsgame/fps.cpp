@@ -2296,10 +2296,11 @@ namespace game
 
         // action slots (lower recess): 10 slots on keys 1-0; v0.1.8: the
         // character's class abilities fill slots 1..N in classabilities()
-        // order (Warrior: Power Strike, Rend; Magi: Spark/Arcane/Ice Bolt;
-        // Ranger: Arrow Shot, Venom Shot). Remaining slots are empty kit frames.
+        // order (v0.1.146: filler first — Warrior: Quick Slash, Power
+        // Strike, Rend; Magi: Spark/Arcane/Ice Bolt; Ranger: Quick Shot,
+        // Arrow Shot, Venom Shot). Remaining slots are empty kit frames.
         Texture *slottex = rpg_loadtex("packages/ui/rpg/slots/slot.png");
-        static const char *abiconfiles[8] = {
+        static const char *abiconfiles[10] = {
             "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
             "packages/ui/rpg/hud/icon_sparkbolt.png",   // 1 Spark Bolt
             NULL,                                       // 2 Basic (right-click)
@@ -2308,6 +2309,8 @@ namespace game
             "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
             "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot (v0.1.8)
             "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend (v0.1.8)
+            "packages/ui/rpg/icons/icon_bow.png",       // 8 Quick Shot (PLACEHOLDER - inventory art, needs HUD-style icon)
+            "packages/ui/rpg/icons/icon_sword.png",     // 9 Quick Slash (PLACEHOLDER - inventory art, needs HUD-style icon)
         };
         char hudarch[32]; hudarch[0] = '\0';
         if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
@@ -2334,7 +2337,7 @@ namespace game
                 rpg_hotbar_rect[i][0] = qx; rpg_hotbar_rect[i][1] = sloty;
                 rpg_hotbar_rect[i][2] = qx + slotn; rpg_hotbar_rect[i][3] = sloty + slotn;
                 int aid = hudids[i];
-                if(aid >= 0 && aid < 8 && abiconfiles[aid])
+                if(aid >= 0 && aid < rpg::ABILITY_COUNT && abiconfiles[aid])
                 {
                     Texture *abtex = rpg_loadtex(abiconfiles[aid]);
                     glBindTexture(GL_TEXTURE_2D, abtex->id);
@@ -2399,7 +2402,7 @@ namespace game
             // the hint line were invisible in v0.1.23.
             pushfont();
             setfont("digital");
-            if(hoverSlot >= 0 && hoverAid >= 0 && hoverAid < 8 && rpg::validability(hoverAid))
+            if(hoverSlot >= 0 && hoverAid >= 0 && hoverAid < rpg::ABILITY_COUNT && rpg::validability(hoverAid))
             {
                 const rpg::abilitydef &ab = rpg::ability(hoverAid);
                 const rpg::dotdef *dot = rpg::abilitydot(hoverAid);

@@ -2921,6 +2921,122 @@ namespace server
     void startintermission() { gamelimit = min(gamelimit, gamemillis); checkintermission(true); }
 
     static void rpg_behaviordamage(clientinfo *monster, clientinfo *player); // RPG mob behaviour (Oct 20), defined with the ambient spawner below
+
+    // --- RPG: WoW-style attack table (v0.1.146) ---
+    // One place gathers attacker/defender combat stats and rolls the table
+    // in stats.cpp. Attacker: level + crit chance/mult. Defender: level +
+    // Dexterity (dodge) + Strength (parry, Warrior/monster only) + shield
+    // (block). Monsters use their level for Dex/Str, a flat 5% crit for
+    // 1.5x, and no shield. Players and BG bots resolve by name through
+    // getstats; an unknown name (e.g. a bot with no character row) fails
+    // closed to the fallback level with no gear/buff bonuses. All rolls
+    // are server-side (rand, same pattern as stat_rollcrit); the pure
+    // table math lives in stats.cpp so a harness can test it.
+    // PvP gear note: the table itself does not distinguish PvP from PvE
+    // (same dodge/parry/block chances). The "better reduction against
+    // other players" is the EXISTING pvpreduce layer (stat_mitigatepvp in
+    // dodamage below): armor mitigation first, then the target's summed
+    // PvP % off the mitigated value, and only when the attacker is a
+    // player — monster damage never reaches it. The table-adjusted damage
+    // flows into that layer unchanged, so a blocked/crit/glancing hit
+    // against a player is reduced again by their PvP gear.
+    struct rpg_atkfighter
+    {
+        int level;        // combat level
+        int dex;          // defender: effective Dexterity (dodge)
+        int str;          // defender: effective Strength (parry)
+        bool canparry;    // defender: Warrior players and monsters
+        bool hasshield;   // defender: Duskthorn Aegis in the off hand
+        float critchance; // attacker: % (players: stat_critchance; monsters: flat 5)
+        float critmult;   // attacker: x (players: stat_critmult; monsters: flat 1.5)
+    };
+    static bool rpg_atk_hasshield(const char *name)
+    {
+        // The Duskthorn Aegis is the only shield in the data (the Magi
+        // book shares the off-hand slot but is not a shield). When more
+        // shields are added this wants a proper "shield" item flag;
+        // until then the id check is the exact gate.
+        if(!name || !name[0]) return false;
+        int id = rpg::equippeditem(name, rpg::SLOT_OFFHAND);
+        if(id < 0) return false;
+        return id == rpg::finditem("pvp_warrior_shield");
+    }
+    static void rpg_atk_attacker(clientinfo *ci, int fallbacklevel, rpg_atkfighter &f)
+    {
+        f.level = fallbacklevel; f.dex = 0; f.str = 0; f.canparry = false; f.hasshield = false;
+        f.critchance = 5.0f; f.critmult = 1.5f; // monster default; players override below
+        if(!ci) return;
+        if(ci->state.ai.type == ai::AI_TYPE_MONSTER)
+        {
+            f.level = ::monster::getMonsterLevel(ci->state.getMonsterType());
+            return; // monsters crit at a flat 5% for 1.5x (WoW mob base)
+        }
+        int level = fallbacklevel, xp = 0;
+        if(rpg::getstats(ci->name, level, xp)) f.level = level;
+        int dexbonus = rpg::gearbonus(ci->name, rpg::ATTR_DEXTERITY) + rpg::buffbonus(ci->name, rpg::ATTR_DEXTERITY);
+        int cunbonus = rpg::gearbonus(ci->name, rpg::ATTR_CUNNING) + rpg::buffbonus(ci->name, rpg::ATTR_CUNNING);
+        f.critchance = rpg::stat_critchance(f.level, dexbonus);
+        f.critmult = rpg::stat_critmult(f.level, cunbonus);
+    }
+    static void rpg_atk_defender(clientinfo *ci, rpg_atkfighter &f)
+    {
+        f.level = 1; f.dex = 1; f.str = 1; f.canparry = false; f.hasshield = false;
+        f.critchance = 0.0f; f.critmult = 1.0f;
+        if(!ci) return;
+        if(ci->state.ai.type == ai::AI_TYPE_MONSTER)
+        {
+            f.level = ::monster::getMonsterLevel(ci->state.getMonsterType());
+            f.dex = f.level; f.str = f.level;
+            f.canparry = true; // mobs parry melee from the front
+            return;
+        }
+        int level = 1, xp = 0;
+        if(rpg::getstats(ci->name, level, xp)) f.level = level;
+        f.dex = rpg::effectiveattr(ci->name, f.level, rpg::ATTR_DEXTERITY);
+        f.str = rpg::effectiveattr(ci->name, f.level, rpg::ATTR_STRENGTH);
+        char arch[32]; arch[0] = '\0';
+        if(rpg::chararchetype(ci->name, arch, sizeof(arch)) && !strcmp(arch, "Warrior")) f.canparry = true;
+        f.hasshield = rpg_atk_hasshield(ci->name);
+    }
+    // White roll (auto-attacks + "quick" fillers): one roll, precedence
+    // miss > dodge > parry > glancing > block > crit > hit. ismelee gates
+    // parry (arrows cannot be parried). Returns the ATK_* outcome.
+    static int rpg_atk_rollwhite(clientinfo *att, clientinfo *def, int attfallbacklevel, bool ismelee, float roll, int damage, int &outdmg)
+    {
+        rpg_atkfighter a, d;
+        rpg_atk_attacker(att, attfallbacklevel, a);
+        rpg_atk_defender(def, d);
+        float miss = rpg::atk_misschance(a.level, d.level);
+        float dodge = rpg::atk_dodgechance(d.dex);
+        float parry = ismelee ? rpg::atk_parrychance(d.str, d.canparry) : 0.0f;
+        float glance = rpg::atk_glancechance(a.level, d.level);
+        float block = rpg::atk_blockchance(d.hasshield);
+        return rpg::atk_rollwhite(roll, miss, dodge, parry, glance, block, a.critchance, a.critmult, damage, outdmg);
+    }
+    // Yellow roll (specials): two rolls (miss, then crit) + a concurrent
+    // block roll for PHYSICAL attacks only (spells never block). Returns
+    // false when the attack missed (outdmg 0); otherwise outdmg is the
+    // adjusted damage, crit/blocked report whether each landed (both can
+    // land together, per the WoW table).
+    static bool rpg_atk_rollyellow(clientinfo *att, clientinfo *def, int attfallbacklevel, bool isphysical, float rollmiss, float rollcrit, float rollblock, int damage, int &outdmg, bool &crit, bool &blocked)
+    {
+        rpg_atkfighter a, d;
+        rpg_atk_attacker(att, attfallbacklevel, a);
+        rpg_atk_defender(def, d);
+        crit = false; blocked = false;
+        if(rpg::atk_rollyellowmiss(rollmiss, a.level, d.level)) { outdmg = 0; return false; }
+        outdmg = damage;
+        blocked = isphysical && rpg::atk_rollyellowblock(rollblock, d.hasshield);
+        if(blocked) outdmg = int(outdmg*(100.0f - rpg::ATK_BLOCK_REDUCE_PCT)/100.0f + 0.5f);
+        if(rpg::atk_rollyellowcrit(rollcrit, a.critchance))
+        {
+            crit = true;
+            outdmg = int(outdmg*a.critmult + 0.5f);
+        }
+        if(outdmg < 1 && damage > 0) outdmg = 1;
+        return true;
+    }
+
     void dodamage(clientinfo *target, clientinfo *actor, int damage, int gun, const vec &hitpush, bool special)
     {
         // --- RPG: Shattered Shield ambient spawns (additive) ---
@@ -2976,6 +3092,39 @@ namespace server
                     damage = newdmg;
                 }
             }
+        }
+        // --- RPG: WoW-style attack table, mob -> player (v0.1.146) ---
+        // Monster bites are white attacks: one roll, precedence miss >
+        // dodge > parry > glancing > block > crit > hit. The roll runs
+        // here (after imp-halving / level scaling, before armor
+        // mitigation) because monster damage reaches dodamage through the
+        // generic gun hit path, not through rpg_cast. DoT ticks and player
+        // casts never have a monster actor, so this gate cannot
+        // double-roll them. Player-vs-player damage is NOT rolled here:
+        // ability casts roll in rpg_cast, projectiles roll at arrival in
+        // rpg_projectiletick. A miss/dodge/parry lands nothing at all: the
+        // function returns early (no N_DAMAGE, no push, no combat stamp),
+        // matching the monster-vs-monster early return above.
+        if(damage > 0 && rpg::connected() && target && target->state.ai.type == ai::AI_TYPE_NONE &&
+           actor && actor != target && actor->state.ai.type == ai::AI_TYPE_MONSTER &&
+           rpg::mapactive(smapname))
+        {
+            int outdmg = damage;
+            float roll = float(rand()%10000)/100.0f;
+            int outcome = rpg_atk_rollwhite(actor, target, 1, true, roll, damage, outdmg);
+            if(outcome == rpg::ATK_MISS || outcome == rpg::ATK_DODGE || outcome == rpg::ATK_PARRY)
+            {
+                conoutf("rpg: mob '%s' %s '%s' (bite avoided, no damage)",
+                        ::monster::getMonsterType(actor->state.getMonsterType()).classInfo.name,
+                        rpg::atkoutcomename(outcome), target->name);
+                fflush(stdout);
+                return;
+            }
+            if(outcome != rpg::ATK_HIT)
+                conoutf("rpg: mob '%s' %s '%s' (%d -> %d)",
+                        ::monster::getMonsterType(actor->state.getMonsterType()).classInfo.name,
+                        rpg::atkoutcomename(outcome), target->name, damage, outdmg);
+            damage = outdmg;
         }
         // --- RPG: Shattered Shield stats (milestone step 5, additive; see src/rpg/stats.h) ---
         // DDO-style PERCENTAGE mitigation: taken = raw*100/(100 + armor*10).
@@ -5390,6 +5539,56 @@ namespace server
                 vec push(t->state.o); push.sub(pr.pos); push.z = 0;
                 if(push.squaredlen() > 0.01f) push.normalize();
                 int hpbefore = t->state.health;
+                // --- RPG: WoW-style attack table (v0.1.146) ---
+                // Projectiles roll at ARRIVAL (their damage was stored
+                // un-rolled in pr.damage at cast). Same split as rpg_cast:
+                // white (Basic Attack + "quick" fillers) one roll, yellow
+                // (specials) two rolls + a concurrent block roll for
+                // physical attacks. A miss/dodge/parry fizzles the bolt:
+                // no dodamage, no DoT, no PROJHIT — the client already
+                // renders PROJFIZZLE. The caster is told why there is no
+                // damage number (bots' owners get it, as in rpg_cast).
+                const rpg::abilitydef &ab = rpg::ability(pr.ability);
+                bool projcrit = false, projblocked = false;
+                int projoutcome = rpg::ATK_HIT;
+                if(rpg::mapactive(smapname))
+                {
+                    bool iswhite = !strcmp(ab.key, "basicattack") || !strcmp(ab.damagetype, "quick");
+                    if(iswhite)
+                    {
+                        int outdmg = pr.damage;
+                        float roll = float(rand()%10000)/100.0f;
+                        projoutcome = rpg_atk_rollwhite(caster, t, pr.level, ab.melee, roll, pr.damage, outdmg);
+                        pr.damage = outdmg;
+                        projcrit = (projoutcome == rpg::ATK_CRIT);
+                    }
+                    else
+                    {
+                        float rollmiss = float(rand()%10000)/100.0f;
+                        float rollcrit = float(rand()%10000)/100.0f;
+                        float rollblock = float(rand()%10000)/100.0f;
+                        bool isphysical = ab.melee || !strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison") || !strcmp(ab.damagetype, "quick");
+                        int outdmg = pr.damage;
+                        bool hit = rpg_atk_rollyellow(caster, t, pr.level, isphysical, rollmiss, rollcrit, rollblock, pr.damage, outdmg, projcrit, projblocked);
+                        pr.damage = outdmg;
+                        projoutcome = hit ? (projcrit ? rpg::ATK_CRIT : rpg::ATK_HIT) : rpg::ATK_MISS;
+                    }
+                    if(projoutcome == rpg::ATK_MISS || projoutcome == rpg::ATK_DODGE || projoutcome == rpg::ATK_PARRY)
+                    {
+                        conoutf("rpg: projectile %s %s '%s' (fizzle, no damage)", ab.name, rpg::atkoutcomename(projoutcome), t->name);
+                        fflush(stdout);
+                        sendf(-1, 1, "ri2", N_RPG_PROJFIZZLE, pr.id);
+                        if(caster)
+                        {
+                            int msgcn = caster->state.ai.type != ai::AI_TYPE_NONE ? caster->ownernum : caster->clientnum;
+                            if(projoutcome == rpg::ATK_MISS) { defformatstring(msg)("\f2%s \f7misses %s.", ab.name, t->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+                            else if(projoutcome == rpg::ATK_DODGE) { defformatstring(msg)("\f2%s \f7is dodged by %s.", ab.name, t->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+                            else { defformatstring(msg)("\f2%s \f7is parried by %s.", ab.name, t->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+                        }
+                        rpg_projectiles.remove(i);
+                        continue;
+                    }
+                }
                 conoutf("rpg: proj tick: pre-dodamage, proj %d, target '%s', castercn %d", pr.id, t->name, pr.castercn);
                 fflush(stdout);
                 dodamage(t, caster, pr.damage, WEAP_FIST, push, false);
@@ -5414,11 +5613,10 @@ namespace server
                 fflush(stdout);
                 conoutf("rpg: proj tick: pre-ability, proj %d", pr.id);
                 fflush(stdout);
-                const rpg::abilitydef &ab = rpg::ability(pr.ability);
                 conoutf("rpg: proj tick: ability ok, proj %d", pr.id);
                 fflush(stdout);
-                conoutf("rpg: projectile %s hits '%s' for %d (%d -> %d hp)",
-                        ab.name, t->name, pr.damage, hpbefore, t->state.health);
+                conoutf("rpg: projectile %s %s '%s' for %d%s%s (%d -> %d hp)",
+                        ab.name, projcrit ? "CRIT" : "hits", t->name, pr.damage, projoutcome == rpg::ATK_GLANCING ? " GLANCING" : "", projoutcome == rpg::ATK_BLOCK || projblocked ? " BLOCKED" : "", hpbefore, t->state.health);
                 fflush(stdout);
                 conoutf("rpg: proj tick: pre-applydot, proj %d", pr.id);
                 fflush(stdout);
@@ -5637,14 +5835,23 @@ namespace server
         // Melee: ability base + weapon + Strength (Power Strike's base is 35,
         // the basic swing's is 0 - CLEANUP item 8). Spell: base + weapon +
         // 2*Knowledge. Arrow: base + weapon + 2*Dexterity.
+        // Quick filler (v0.1.146, damagetype "quick"): base + weapon ONLY, no
+        // attribute. The filler shares the weapon term with the main attacks
+        // but not the attribute term, so it stays below them at every level
+        // while still growing with better weapons. Checked FIRST: a quick
+        // melee attack must not take the Strength branch below.
         // RPG maps only.
         // Melee abilities can crit: the SERVER rolls (never the client) and the
         // crit is announced in the cast message so it is harness-observable.
         int castdmg = ab.damage;
         bool crit = false;
+        bool atkblocked = false; // yellow: blocked (white reports it as its own outcome)
+        int atkoutcome = rpg::ATK_HIT; // attack-table outcome (v0.1.146)
+        bool atkforcecrit = false; // TEST-ONLY hook, snapshotted below
         if(rpg::mapactive(smapname))
         {
-            if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::effectiveattr(cq->name, level, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
+            if(!strcmp(ab.damagetype, "quick")) castdmg = ab.damage + rpg::weapondamage(cq->name); // v0.1.146 filler: base + weapon only, no attribute
+            else if(ab.melee) castdmg = ab.damage + rpg::weapondamage(cq->name) + rpg::effectiveattr(cq->name, level, rpg::ATTR_STRENGTH); // Phase 2: Strength buff
             // Spell damage: ability base + weapon + 2xKnowledge. (stat_sparkbolt() is
             // exactly this with base 50; the table now carries each spell's
             // own base so the formula stays uniform.)
@@ -5653,11 +5860,14 @@ namespace server
             // an arrow, not a spell.
             else if(!strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison")) castdmg = ab.damage + rpg::weapondamage(cq->name) + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_DEXTERITY);
             else castdmg = ab.damage + rpg::weapondamage(cq->name) + 2*rpg::effectiveattr(cq->name, level, rpg::ATTR_KNOWLEDGE);
-            if(ab.melee && (rpg_forcecrit || rpg::stat_rollcrit(rpg::stat_critchance(level, rpg::gearbonus(cq->name, rpg::ATTR_DEXTERITY) + rpg::buffbonus(cq->name, rpg::ATTR_DEXTERITY)))))
-            {
-                crit = true;
-                castdmg = int(castdmg*rpg::stat_critmult(level, rpg::gearbonus(cq->name, rpg::ATTR_CUNNING) + rpg::buffbonus(cq->name, rpg::ATTR_CUNNING)) + 0.5f);
-            }
+            // Melee-only crit REMOVED (v0.1.146): crit now comes from the
+            // attack table in the instant path below, so ranged attacks can
+            // crit too and there is one crit system, not two. Projectiles
+            // roll at arrival in rpg_projectiletick.
+            // TEST-ONLY hook (rpgforcecrit): snapshotted and cleared here,
+            // exactly as before — any cast on an RPG map consumes it — and
+            // applied by the instant roll below (melee only, as before).
+            atkforcecrit = rpg_forcecrit;
             rpg_forcecrit = false; // one-shot: the hook never leaks into real casts
         }
         // Projectile delivery (Oct 21): range + LoS were already validated at
@@ -5702,14 +5912,76 @@ namespace server
             fflush(stdout);
             return;
         }
+        // --- RPG: WoW-style attack table (v0.1.146) ---
+        // Instant hits roll here; projectiles roll at arrival in
+        // rpg_projectiletick (their damage is stored un-rolled in
+        // pr.damage). White (Basic Attack + "quick" fillers): one roll,
+        // precedence miss > dodge > parry > glancing > block > crit > hit.
+        // Yellow (specials): two rolls (miss, then crit) + a concurrent
+        // block roll for physical attacks. A miss/dodge/parry lands
+        // nothing and applies no DoT; mana and cooldown are still spent
+        // (WoW-correct: a missed special still costs mana and the GCD).
+        bool atkavoided = false;
+        if(rpg::mapactive(smapname))
+        {
+            bool iswhite = !strcmp(ab.key, "basicattack") || !strcmp(ab.damagetype, "quick");
+            if(atkforcecrit && ab.melee)
+            {
+                // TEST-ONLY: force the next melee cast to crit (see
+                // rpgforcecrit). Skips the table entirely, as before.
+                rpg_atkfighter af;
+                rpg_atk_attacker(cq, level, af);
+                crit = true;
+                atkoutcome = rpg::ATK_CRIT;
+                castdmg = int(castdmg*af.critmult + 0.5f);
+            }
+            else if(iswhite)
+            {
+                int outdmg = castdmg;
+                float roll = float(rand()%10000)/100.0f;
+                atkoutcome = rpg_atk_rollwhite(cq, target, level, ab.melee, roll, castdmg, outdmg);
+                castdmg = outdmg;
+                crit = (atkoutcome == rpg::ATK_CRIT);
+                if(atkoutcome == rpg::ATK_MISS || atkoutcome == rpg::ATK_DODGE || atkoutcome == rpg::ATK_PARRY) atkavoided = true;
+            }
+            else
+            {
+                float rollmiss = float(rand()%10000)/100.0f;
+                float rollcrit = float(rand()%10000)/100.0f;
+                float rollblock = float(rand()%10000)/100.0f;
+                bool isphysical = ab.melee || !strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison") || !strcmp(ab.damagetype, "quick");
+                int outdmg = castdmg;
+                bool hit = rpg_atk_rollyellow(cq, target, level, isphysical, rollmiss, rollcrit, rollblock, castdmg, outdmg, crit, atkblocked);
+                castdmg = outdmg;
+                atkoutcome = hit ? (crit ? rpg::ATK_CRIT : rpg::ATK_HIT) : rpg::ATK_MISS;
+                if(!hit) atkavoided = true;
+            }
+        }
+        if(atkavoided)
+        {
+            // Nothing landed: no dodamage, no DoT, no floating number.
+            // Mana and cooldown are still spent (see above).
+            conoutf("rpg: '%s' casts %s on '%s': %s", cq->name, ab.name, target->name, rpg::atkoutcomename(atkoutcome));
+            fflush(stdout);
+            if(atkoutcome == rpg::ATK_MISS) { defformatstring(msg)("\f2%s \f7misses %s.", ab.name, target->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+            else if(atkoutcome == rpg::ATK_DODGE) { defformatstring(msg)("\f2%s \f7is dodged by %s.", ab.name, target->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+            else { defformatstring(msg)("\f2%s \f7is parried by %s.", ab.name, target->name); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+            rpg::getmana(cq->name, mana, maxmana);
+            sendf(msgcn, 1, "ri3", N_RPG_MANA, mana, maxmana);
+            sendf(msgcn, 1, "ri3", N_RPG_CD, ability, ab.cooldownms);
+            return;
+        }
         dodamage(target, cq, castdmg, WEAP_FIST, push, false); // real plumbing: kills feed the XP hook
         rpg_applydot(cq, target, ability, level); // Rend bleed (no-op for non-DoT abilities)
-        conoutf("rpg: '%s' casts %s on '%s' for %d%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", hpbefore, target->state.health);
+        conoutf("rpg: '%s' casts %s on '%s' for %d%s%s (%d -> %d hp)", cq->name, ab.name, target->name, castdmg, crit ? " CRIT" : "", atkoutcome == rpg::ATK_GLANCING ? " GLANCING" : (atkoutcome == rpg::ATK_BLOCK || atkblocked ? " BLOCKED" : ""), hpbefore, target->state.health);
         fflush(stdout);
-        defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg);
         conoutf("rpg: cast: pre-servmsg, msgcn %d", msgcn);
         fflush(stdout);
-        sendf(msgcn, 1, "ris", N_SERVMSG, msg);
+        if(atkoutcome == rpg::ATK_GLANCING) { defformatstring(msg)("\f2%s \f7glances %s for %d damage.", ab.name, target->name, castdmg); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+        else if(atkoutcome == rpg::ATK_BLOCK) { defformatstring(msg)("\f2%s \f7is blocked by %s for %d damage.", ab.name, target->name, castdmg); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+        else if(atkblocked && crit) { defformatstring(msg)("\f2%s \f3CRIT \f7hits %s for %d damage (blocked).", ab.name, target->name, castdmg); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+        else if(atkblocked) { defformatstring(msg)("\f2%s \f7hits %s for %d damage (blocked).", ab.name, target->name, castdmg); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
+        else { defformatstring(msg)("\f2%s %s\f7hits %s for %d damage.", ab.name, crit ? "\f3CRIT " : "", target->name, castdmg); sendf(msgcn, 1, "ris", N_SERVMSG, msg); }
         // Battlegrounds (v0.1.40): floating damage number, attacker
         // only (Ed: competitive, see damage dealt). Gold, above the
         // target's head; the client renders it via particle_text.
