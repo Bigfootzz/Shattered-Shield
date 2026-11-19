@@ -74,11 +74,11 @@ namespace game
     // Targeting v1: casts carry the client-selected target as ADVISORY data.
     // The server validates it (monster, alive, in range) and falls back to the
     // old nearest-target behavior when no selection is set (-1).
-    static void rpg_facetarget(); // defined with the targeting helpers below
+    static void rpg_facetarget(int ability); // defined with the targeting helpers below
     static void rpg_castability(int ability)
     {
         if(!player1) return;
-        rpg_facetarget(); // face the selected target; yaw is client-advisory
+        rpg_facetarget(ability); // face the selected target; yaw is client-advisory
         addmsg(N_RPG_CAST, "ri3", ability, int(player1->yaw), rpg::selectedtarget());
     }
     // v0.1.8: hotbar slots 1-5 cast the nth ability in the character's class
@@ -317,8 +317,9 @@ namespace game
     // RPG follow camera (user design, Oct 19): when casting at a selected
     // target, the character faces the target so the strike visibly plays out
     // toward the mob on screen. Sets a 1s face window; the per-frame update
-    // below keeps facing the target while auto-attacking.
-    static void rpg_facetarget()
+    // below keeps facing the target while auto-attacking. Bow shots get the
+    // hold extended to 2000ms in the N_RPG_CD handler (Note 264).
+    static void rpg_facetarget(int ability)
     {
         if(!player1 || !rpg::mapactive(getclientmap())) return;
         fpsent *sel = rpg_selmon();
@@ -329,11 +330,17 @@ namespace game
             // the NEAREST mob when the advisory target is -1, so the
             // character faced the camera direction while the arrow went to
             // a mob off to the side ('not facing who he is attacking').
-            // Face the nearest live monster within 60u (the Tab-cycle
-            // range), matching what the server will hit; fall back to the
-            // camera yaw only when no mob is near.
+            // Face the nearest live monster within the CAST ability's range,
+            // matching what the server will hit; fall back to the camera yaw
+            // only when no mob is near.
+            // Nov 18 (.143, Note 264): was a fixed 60u, but Arrow Shot /
+            // Venom Shot reach 120u (abilities.cpp) and the server picks its
+            // target within ab.range — so at 60-120u the client faced the
+            // camera while the arrow went to a mob. Falls back to 60u for an
+            // invalid ability id.
+            float searchrange = rpg::validability(ability) ? rpg::ability(ability).range : 60.0f;
             fpsent *nearmob = NULL;
-            float best = 60.0f;
+            float best = searchrange;
             loopv(clients)
             {
                 fpsent *d = clients[i];
@@ -3898,7 +3905,14 @@ namespace game
                     // v0.1.10 fix 7: Ice Bolt (ability 4) had no cast anim;
                     // force the spell-cast (attack 2, slot index 1) like the
                     // other Magi spells should show.
-                    if(ability == 5 || ability == 6) player1->lastattackgun = 6;
+                    // Nov 18 (.143, Note 264): the bow window in renderplayer
+                    // is 2000ms, but rpg_facetarget only held facing for 1000ms,
+                    // so the ranger turned back to the camera halfway through
+                    // the draw. Extend the hold to cover the full window, timed
+                    // from this same N_RPG_CD arrival as lastaction, so the two
+                    // cannot drift apart. Must match the 2000ms delay in
+                    // renderplayer (render.cpp).
+                    if(ability == 5 || ability == 6) { player1->lastattackgun = 6; rpg_facetill = totalmillis + 2000; }
                     else if(ability == 4) player1->lastattackgun = 1;
                     else player1->lastattackgun = player1->gunselect;
                 }

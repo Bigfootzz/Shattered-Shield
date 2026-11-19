@@ -1810,14 +1810,14 @@ namespace rpg
         // (z 2116, the village ground level) in the east/north fields, clear
         // of the player spawn, NPCs, and existing spawn points.
         { "imp"   , 2800.0f, 2400.0f, 2116.0f, "east field" },
-        { "imp"   , 1300.0f, 2050.0f, 2180.0f, "west forest edge" },
-        { "puglin", 1120.0f, 2420.0f, 2181.0f, "west forest" },
-        { "imp"   , 1480.0f, 2520.0f, 2180.0f, "west forest edge north" },
-        { "imp",    3080.0f, 2280.0f, 2111.0f, "east clearing" }, // Oct 21: z was 2188, imp fell 68u through terrain (invisible)
-        { "imp",    3050.0f, 2600.0f, 2116.0f, "east homesteads" },
-        { "imp"   , 2200.0f, 3350.0f, 2116.0f, "north road" },
-        { "puglin", 1800.0f, 3600.0f, 2180.0f, "northwest treeline" },
-        { "imp"   , 2000.0f, 3000.0f, 2116.0f, "northwest field" },
+        { "imp"   , 1300.0f, 2050.0f, 2192.0f, "west forest edge" }, // Nov 18: was 2180, feet 8u inside terrain -> fell through and died every ~64s
+        { "puglin", 1120.0f, 2420.0f, 2191.0f, "west forest" }, // Nov 18: was 2181, feet 6u embedded (lived, but on the edge)
+        { "imp"   , 1480.0f, 2520.0f, 2192.0f, "west forest edge north" }, // Nov 18: was 2180, feet 8u embedded
+        { "imp",    3080.0f, 2280.0f, 2124.0f, "east clearing" }, // Oct 21: z was 2188, imp fell 68u through terrain (invisible). Nov 18: 2111 still left feet 8.6u embedded -> fell and died every ~64s
+        { "imp",    3050.0f, 2600.0f, 2128.0f, "east homesteads" }, // Nov 18: was 2116, feet 8u embedded -> fell and died every ~64s
+        { "imp"   , 2200.0f, 3350.0f, 2128.0f, "north road" }, // Nov 18: was 2116, feet 8u embedded -> fell and died every ~64s
+        { "puglin", 1800.0f, 3600.0f, 2191.0f, "northwest treeline" }, // Nov 18: was 2180, feet 7u embedded (lived, but on the edge)
+        { "imp"   , 2000.0f, 3000.0f, 2124.0f, "northwest field" }, // Nov 18: was 2116, feet 4u embedded (lived, but on the edge)
         // Forest Giants (Nov 17, Ed): 4 in the clearing just outside the
         // village, reached by a cave path. GPS from Ed's playtest (Notes
         // 168-171), all z 2191 in his GPS = eye position; ground is 2176
