@@ -87,8 +87,9 @@ namespace rpg
     // All chances are percents (0..100). The roll functions take the roll
     // value (0..100) so a harness can test them deterministically; the
     // server generates the roll with rand() (same pattern as
-    // stat_rollcrit). Crushing Blow is deferred: its chance is always 0
-    // (it only applies when a mob is 3+ levels above the player).
+    // stat_rollcrit). Crushing Blow: 15% when the attacker is 3+ levels
+    // above the defender (WoW rule); the server wrapper only ever feeds
+    // it a nonzero value for monster attackers, so players never crush.
     enum
     {
         ATK_MISS = 0,
@@ -107,21 +108,34 @@ namespace rpg
     float atk_parrychance(int defstr, bool canparry);    // 5 + 0.1 per Strength, 0 when !canparry
     float atk_glancechance(int attlevel, int deflevel);  // 10 per level the defender is above, cap 30, else 0
     float atk_blockchance(bool hasshield);               // 5 when a shield is equipped, else 0
-    float atk_crushchance(int attlevel, int deflevel);   // DEFERRED: always 0
+    float atk_crushchance(int attlevel, int deflevel);   // 15% when the attacker is 3+ levels above the defender, else 0 (WoW rule)
     // Glancing blows land for 75% of the rolled damage; a block shaves 30%.
     const float ATK_GLANCING_DMG_PCT = 75.0f;
     const float ATK_BLOCK_REDUCE_PCT = 30.0f;
     // White: single roll 0..100, precedence miss > dodge > parry > glancing
     // > block > crit > crushing > hit. All outcomes mutually exclusive, so
-    // crit is capped by what is left after the bands above it. The chance
-    // parameters are percents (use the atk_*chance functions above).
+    // crit is capped by what is left after the bands above it, and crushing
+    // takes only what is left after crit. The chance parameters are
+    // percents (use the atk_*chance functions above).
     // outdmg is the adjusted damage (0 for miss/dodge/parry). Returns the
     // ATK_* outcome.
-    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float critmult, int damage, int &outdmg);
+    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float crush, float critmult, int damage, int &outdmg);
     // Yellow: first roll is the miss check (true = the attack misses).
     bool atk_rollyellowmiss(float roll, int attlevel, int deflevel);
     // Yellow: second roll is the crit check (true = critical hit).
     bool atk_rollyellowcrit(float roll, float critchance);
+    // Yellow: dodge and parry are checked after the miss roll (WoW: a
+    // special from the front can be dodged or parried). Dodge applies to
+    // any physical special (melee or ranged); parry is melee-only
+    // (canparry is Warrior players and monsters). Spells are never
+    // dodged or parried. A dodged/parried special deals no damage and
+    // does not crit.
+    bool atk_rollyellowdodge(float roll, int defdex);
+    bool atk_rollyellowparry(float roll, int defstr, bool canparry);
+    // Glancing is PvE melee-only (WoW): only a player/bot attacker vs a
+    // monster target with a melee attack can glance. PvP, mob attackers
+    // (they crush instead), and ranged attacks never glance.
+    bool atk_glanceapplies(bool attisplayer, bool defismonster, bool ismelee);
     // Yellow: block is a separate concurrent roll for PHYSICAL attacks only
     // (melee / pierce / poison / quick); spells never block. True = blocked.
     bool atk_rollyellowblock(float roll, bool hasshield);

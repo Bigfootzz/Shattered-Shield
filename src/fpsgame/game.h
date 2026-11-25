@@ -12,7 +12,8 @@ enum
     CON_GAMEINFO   = 1<<10,
     CON_FRAG_SELF  = 1<<11,
     CON_FRAG_OTHER = 1<<12,
-    CON_TEAMKILL   = 1<<13
+    CON_TEAMKILL   = 1<<13,
+    CON_WHISPER    = 1<<14 // WoW chat Phase 3 (Nov 25): whisper lines -> Whisper tab
 };
 
 // network quantization scale
@@ -116,6 +117,7 @@ namespace game
     extern const playermodelinfo *getplayermodelinfo(int n);
     extern const int NUMPLAYERMODELS;
     void rpg_shownotice(const char *str); // HUD notice (fps.cpp): big red fading text under the target area
+    void rpg_chat_event(int ev, const char *sender, const char *text, const char *tag = NULL); // WoW chat Phase 3 (fps.cpp): CHAT_MSG_* event -> tab + prefix, via conoutf
 };
 
 
@@ -665,6 +667,31 @@ enum
     CONNECTION_STATE_CONNECTED
 };
 
+// Shattered Shield chat tabs (WoW chat Phase 3, Nov 25): shared by the chat
+// box (fps.cpp) and the slash parser (client.cpp). Order is the tab-strip
+// order; the values are UI ids, not wire values, so appending is safe.
+enum
+{
+    RPG_CHAT_WORLD = 0,
+    RPG_CHAT_CLAN = 1,
+    RPG_CHAT_SYSTEM = 2,
+    RPG_CHAT_WHISPER = 3,
+    RPG_CHAT_NTABS = 4
+};
+
+// WoW chat Phase 3 (Nov 25): CHAT_MSG_* events (research report §7.4).
+// rpg_chat_event() (fps.cpp) maps each event to its tab + prefix; the
+// print goes through conoutf so the Phase 2 filter hook and per-tab
+// persistence apply unchanged.
+enum
+{
+    CHAT_MSG_SAY = 0,            // World channel (N_TEXT)
+    CHAT_MSG_GUILD,              // Clan channel (N_SAYTEAM / N_RPG_CLANCHAT)
+    CHAT_MSG_WHISPER,            // incoming whisper (N_RPG_WHISPER, inform 0)
+    CHAT_MSG_WHISPER_INFORM,     // outgoing whisper copy (N_RPG_WHISPER, inform 1)
+    CHAT_MSG_SYSTEM              // system lines (N_RPG_QMSG, "rpg: " prefix)
+};
+
 enum
 {
     N_CONNECT = 0, N_SERVINFO, N_WELCOME, N_INITCLIENT, N_POS, N_TEXT, N_SOUND, N_CDIS,
@@ -749,6 +776,9 @@ enum
     N_RPG_EMBERS, // s->c: Embers sync (total Embers int) — Oct 31, Blasque shop
     N_RPG_NOTICE, // s->c: HUD notice (string) — appended last so no existing wire value moves
     N_BG_POINT,   // s->c: battleground point state (mode, score1, score2, point idx, owner, capteam, cap progress 0..1000) — Nov 6, KOTH/TFF
+    // WoW chat Phase 3 (Nov 25): appended last so no existing wire value moves.
+    N_RPG_WHISPER, // c->s: whisper send (target name, text); s->c: whisper line (sender cn, text, inform 0 = incoming / 1 = outgoing copy)
+    N_RPG_CLANSAY, // c->s: clan send (text); server fans out as N_RPG_CLANCHAT
     NUMSV
 };
 
@@ -787,7 +817,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0, N_BG_POINT, 8,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0, N_BG_POINT, 8, N_RPG_WHISPER, 0, N_RPG_CLANSAY, 0,
     -1
 };
 
@@ -798,7 +828,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
 #define RR_MASTER_PORT 16962
 #define RR_MASTER_HOST "rr.master.theintercooler.com"
 
-#define PROTOCOL_VERSION 268            // bump when protocol changes (268: N_BG_POINT, Nov 6)
+#define PROTOCOL_VERSION 269            // bump when protocol changes (269: N_RPG_WHISPER + N_RPG_CLANSAY, Nov 25)
 #define DEMO_VERSION 1                  // bump when demo format changes
 #define DEMO_MAGIC "REVREV_DEMO"
 

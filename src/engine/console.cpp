@@ -231,9 +231,9 @@ int renderconsole(int w, int h, int abovehud)                   // render buffer
         int minifilter = miniconfilter;
 #ifndef STANDALONE
         // Shattered Shield: while the chat box is the chat surface, player
-        // chat (CON_CHAT/CON_TEAMCHAT, see game.h) lives only in the box -
+        // chat (CON_CHAT/CON_TEAMCHAT/CON_WHISPER, see game.h) lives only in the box -
         // mask it from the stock left-side feed. Full console unaffected.
-        if(game::chatboxactive()) minifilter &= ~((1<<8)|(1<<9));
+        if(game::chatboxactive()) minifilter &= ~((1<<8)|(1<<9)|(1<<14)); // CON_CHAT | CON_TEAMCHAT | CON_WHISPER (WoW chat Phase 3)
 #endif
         drawconlines(miniconskip, miniconfade, (miniconwidth*(w - 2*(conpad + conoff)))/100, min(FONTH*miniconsize, abovehud - y), conpad+conoff, minifilter, abovehud, -1);
     }

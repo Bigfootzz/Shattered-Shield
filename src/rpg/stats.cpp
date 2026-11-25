@@ -254,22 +254,36 @@ namespace rpg
         return c > 30.0f ? 30.0f : c;
     }
 
+    // Glancing is PvE melee-only (WoW): only a player/bot attacker vs a
+    // monster target with a melee attack can glance. PvP (both sides
+    // players/bots), mob attackers (they crush instead), and ranged
+    // attacks (arrows) never glance.
+    bool atk_glanceapplies(bool attisplayer, bool defismonster, bool ismelee)
+    {
+        return attisplayer && defismonster && ismelee;
+    }
+
     float atk_blockchance(bool hasshield)
     {
         return hasshield ? 5.0f : 0.0f;
     }
 
+    // Crushing Blow (WoW rule): a mob 3+ levels above its target crushes
+    // 15% of the time for 150% damage. Flat 15% once the threshold is met
+    // (vanilla WoW does not scale it further with the gap); below the
+    // threshold the chance is 0. Mob-only is enforced by the server
+    // wrapper (rpg_atk_rollwhite), which feeds 0 for player attackers.
     float atk_crushchance(int attlevel, int deflevel)
     {
-        (void)attlevel; (void)deflevel;
-        return 0.0f; // DEFERRED: crushing blows only when a mob is 3+
-                     // levels above the player; not implemented yet.
+        if(attlevel < deflevel + 3) return 0.0f;
+        return 15.0f;
     }
 
-    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float critmult, int damage, int &outdmg)
+    int atk_rollwhite(float roll, float miss, float dodge, float parry, float glance, float block, float crit, float crush, float critmult, int damage, int &outdmg)
     {
         if(damage < 0) damage = 0;
         if(crit < 0.0f) crit = 0.0f;
+        if(crush < 0.0f) crush = 0.0f;
         if(critmult < 1.0f) critmult = 1.0f;
         float band = 0.0f;
         band += miss;
@@ -294,8 +308,8 @@ namespace rpg
         }
         band += crit;
         if(roll < band) { outdmg = int(damage*critmult + 0.5f); return ATK_CRIT; }
-        band += atk_crushchance(0, 0); // 0 (deferred); the slot stays in
-                                       // the precedence order for later.
+        band += crush; // crushing sits below crit: it takes only what is
+                       // left after the crit band, never alongside a crit.
         if(roll < band) { outdmg = int(damage*1.5f + 0.5f); return ATK_CRUSHING; }
         outdmg = damage;
         return ATK_HIT;
@@ -315,5 +329,15 @@ namespace rpg
     bool atk_rollyellowblock(float roll, bool hasshield)
     {
         return roll < atk_blockchance(hasshield);
+    }
+
+    bool atk_rollyellowdodge(float roll, int defdex)
+    {
+        return roll < atk_dodgechance(defdex);
+    }
+
+    bool atk_rollyellowparry(float roll, int defstr, bool canparry)
+    {
+        return roll < atk_parrychance(defstr, canparry);
     }
 }

@@ -10,6 +10,7 @@
 
 // rendergl.cpp ground-truth camera basis (global scope)
 extern vec camdir, camright, camup;
+extern void inputcommand(char *init, char *action, char *prompt, char *flags); // console.cpp: close the console/chat input
 
 namespace game
 {
@@ -395,6 +396,10 @@ namespace game
     // Plain function (not inline in the ICOMMAND): the macro parser splits on bare
     // commas, so multi-declaration bodies live here instead.
     bool rpg_chattabclick(float vx, float vy); // fps.cpp: chat box tab clicks
+    bool rpg_chatboxclick(float vx, float vy); // fps.cpp: chat box rect click (Phase 2 click-to-open)
+    void rpg_chatopeninput(); // fps.cpp: open the chat input prompt (Phase 2 click-to-open)
+    void rpg_chatsettab(int tab); // fps.cpp: set the active chat tab (Phase 3 slash aliases)
+    void rpg_chatdump(int tab); // fps.cpp: print a chat tab's lines (Phase 3 harness)
     float hudvirtualheight(int h); // fps.cpp: shared HUD virtual height (HUD scale)
     bool rpg_radariconclick(float vx, float vy); // fps.cpp: v0.1.25 radar buttons
     bool rpg_hotbarclick(float vx, float vy); // fps.cpp: v0.1.42 action bar slots
@@ -412,8 +417,13 @@ namespace game
         int w = 0; int h = 0; rpg_screenwh(w, h);
         float cx = 0; float cy = 0;
         rpg::cursorget(cx, cy); rpg::cursorclamp(cx, cy, w, h); rpg::cursorget(cx, cy);
-        // chat box tabs eat their own clicks (the rest of the box is click-through)
-        if(rpg_chattabclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
+        // WoW chat Phase 2 (Nov 23): click-to-open. A LEFT click on a tab
+        // switches to it AND opens the chat input; a LEFT click anywhere
+        // else on the chat box opens the input. Right-click stays
+        // attack/select, same pattern as the radar/hotbar widgets below.
+        // (The rest of the box used to be click-through.)
+        if(button == 0 && rpg_chattabclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) { rpg_chatopeninput(); return; }
+        if(button == 0 && rpg_chatboxclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) { rpg_chatopeninput(); return; }
         // v0.1.25: radar buttons eat LEFT clicks only (right-click stays attack;
         // same tab-click pattern as the chat tabs, but left-gated)
         if(button == 0 && rpg_radariconclick(cx*hudvirtualheight(h)/h, cy*hudvirtualheight(h)/h)) return;
@@ -986,11 +996,79 @@ namespace game
         float sx = cx*h/hudvirtualheight(h); float sy = cy*h/hudvirtualheight(h); // -> screen px
         rpg::cursorset(sx, sy);
         rpg_doclick(0);
+        inputcommand(NULL, NULL, NULL, NULL); // click-to-open (Phase 2) leaves the chat input open; close it so later harness steps keep the console
         int after = rpg_chattabval();
         conoutf("rpgtesttabclick: tab %d center virtual (%.0f,%.0f) -> screen (%.0f,%.0f); rpg_chattab %d -> %d %s",
             *i, cx, cy, sx, sy, before, after, after == *i ? "OK" : "NO-SWITCH");
     });
     ICOMMAND(rpgteststats, "", (), { int l = 0; int x = 0; rpg::getclientstats(l, x); conoutf("rpgteststats: level=%d xp=%d", l, x); });
+
+    void parsemessages(int cn, fpsent *d, ucharbuf &p); // defined below
+    static bool rpg_chatslash(char *text); // defined below (slash parser)
+    // TEST-ONLY (harness, WoW chat Phase 3): send-path probe. Runs a literal
+    // line through the REAL slash parser (rpg_chatslash — the same function
+    // toserver()/sayteam()/sayclan() call after the gate + throttle) and,
+    // for plain text, the same echo + N_TEXT send toserver() does. NOTE:
+    // a sleep-timer callback is NOT a hardware event, so calling toserver()
+    // itself here would hit the sandbox gate and send nothing (run 1 proved
+    // exactly that: every timer send was blocked, gate working as designed).
+    // The probe therefore calls the parser directly — gate + throttle are
+    // the pre-existing Phase 1 code and are only exercisable from real key
+    // / console input (hline::run, hardware-wrapped). Reports the active
+    // tab before/after; the server's answers (e.g. /w to an offline name)
+    // come back as System-tab lines.
+    ICOMMAND(rpgtestchatsend, "C", (char *s),
+    {
+        if(!s || !s[0]) { conoutf("rpgtestchatsend: usage: rpgtestchatsend <line>"); return; }
+        int tabbefore = rpg_chattabval();
+        bool handled = rpg_chatslash(s);
+        if(!handled)
+        {
+            conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), s);
+            addmsg(N_TEXT, "rcs", player1, s);
+        }
+        conoutf("rpgtestchatsend: [%s] handled=%d tab %d -> %d (parser probe: no hardware gate, no throttle)", s, handled ? 1 : 0, tabbefore, rpg_chattabval());
+    });
+
+    // TEST-ONLY (harness, WoW chat Phase 3): receive-path probe. Builds a
+    // minimal server packet for one chat event and runs it through the REAL
+    // parsemessages() receive path (parse + CHAT_MSG_* routing + tab), then
+    // dumps the tab it should have landed in. Sender cn is player1 (the
+    // only client that resolves in a single-client harness). kind: 0 SAY
+    // direct (N_TEXT + cn, the RPG relay format), 1 SAY wrapped (N_CLIENT,
+    // the stock format), 2 GUILD (N_RPG_CLANCHAT), 3 WHISPER in,
+    // 4 WHISPER inform, 5 SYSTEM (N_RPG_QMSG).
+    ICOMMAND(rpgtestchatrecv, "i", (int *kind),
+    {
+        if(!player1) { conoutf("rpgtestchatrecv: no player1"); return; }
+        int scn = player1->clientnum;
+        static uchar buf[512];
+        ucharbuf p(buf, sizeof(buf));
+        int tab = -1;
+        switch(*kind)
+        {
+            case 0: putint(p, N_TEXT); putint(p, scn); sendstring("harness world probe", p); tab = RPG_CHAT_WORLD; break;
+            case 1:
+            {
+                // stock format: the message wrapped in N_CLIENT with the sender cn
+                uchar inner[256]; ucharbuf q(inner, sizeof(inner));
+                putint(q, N_TEXT); sendstring("harness world probe (wrapped)", q);
+                putint(p, N_CLIENT); putint(p, scn); putuint(p, q.length()); p.put(inner, q.length());
+                tab = RPG_CHAT_WORLD;
+                break;
+            }
+            case 2: putint(p, N_RPG_CLANCHAT); putint(p, scn); sendstring("TAG", p); sendstring("harness clan probe", p); tab = RPG_CHAT_CLAN; break;
+            case 3: putint(p, N_RPG_WHISPER); putint(p, scn); sendstring("harness whisper probe", p); putint(p, 0); tab = RPG_CHAT_WHISPER; break;
+            case 4: putint(p, N_RPG_WHISPER); putint(p, scn); sendstring("harness whisper-inform probe", p); putint(p, 1); tab = RPG_CHAT_WHISPER; break;
+            case 5: putint(p, N_RPG_QMSG); sendstring("harness system probe", p); tab = RPG_CHAT_SYSTEM; break;
+            default: conoutf("rpgtestchatrecv: unknown kind %d (0..5)", *kind); return;
+        }
+        ucharbuf q(buf, p.length());
+        parsemessages(-1, NULL, q);
+        conoutf("rpgtestchatrecv: kind %d parsed, expect tab %d", *kind, tab);
+        if(tab >= 0) rpg_chatdump(tab);
+    });
+    ICOMMAND(rpgtestchatdump, "i", (int *tab), { rpg_chatdump(*tab); });
     // Target-frame queries for the HUD (never authoritative)
     ICOMMAND(rpgtargetname, "", (), { fpsent *d = rpg_selmon(); result(d ? d->name : ""); });
     ICOMMAND(rpgtargethp, "", (), { fpsent *d = rpg_selmon(); intret(d ? d->health : 0); });
@@ -2729,6 +2807,90 @@ namespace game
         conoutf("%s", gps2);
         return true;
     }
+    // WoW chat Phase 3 (Nov 25): slash-command parsing for the chat input.
+    // Runs in toserver()/sayteam()/sayclan() AFTER the hardware-event gate
+    // and throttle, BEFORE the local echo and the channel send. Returns true
+    // when the line was a slash command handled here; false means "not a
+    // command we own — send it on as plain text" (the server's rpg_chatcmd
+    // handles /phelp, /clancreate and the rest via N_TEXT, as before).
+    // Owned commands: /w, /whisper, /t, /tell <name> <msg>; /r, /reply <msg>;
+    // /g, /guild <msg>; /world, /clan, /system, /say (channel aliases).
+    // NOTE: a leading "y" from the Y key (Phase 2 open flag: Y types a stray
+    // "y" into the input by the same SDL_TEXTINPUT mechanism as "/") means a
+    // "/w ..." typed after Y arrives as "y/w ..." and is NOT a command —
+    // the player must delete the stray "y" first.
+    static string rpg_lastwhisperfrom; // name of the last whisper sender, for /r
+    static void rpg_sendwhisper(const char *target, const char *text) // raw send only: gate + throttle already passed by the caller
+    {
+        if(!target || !target[0] || !text || !text[0]) return;
+        // no local echo: the server sends the inform packet back (the
+        // CHAT_MSG_WHISPER_INFORM copy), so the sender's line is a real
+        // server packet too. Errors come back as System-tab rpg_qmsg lines.
+        addmsg(N_RPG_WHISPER, "rss", target, text);
+    }
+    static void rpg_sendclan(const char *text) // raw send + local echo: gate + throttle already passed by the caller
+    {
+        if(!text || !text[0]) return;
+        conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text);
+        addmsg(N_RPG_CLANSAY, "rs", text);
+    }
+    static bool rpg_chatslash(char *text)
+    {
+        if(!text || text[0] != '/') return false;
+        // split "/cmd rest"
+        string cmd, rest;
+        const char *sp = strchr(text, ' ');
+        if(sp) { copystring(cmd, text, min(int(sp - text) + 1, (int)sizeof(cmd))); copystring(rest, sp + 1); }
+        else { copystring(cmd, text); rest[0] = '\0'; }
+        // ---- /w <name> <msg> (also /whisper, /t, /tell) ----
+        if(!strcmp(cmd, "/w") || !strcmp(cmd, "/whisper") || !strcmp(cmd, "/t") || !strcmp(cmd, "/tell"))
+        {
+            const char *sp2 = strchr(rest, ' ');
+            if(!sp2 || !sp2[1]) { conoutf("rpg: Usage: /w <name> <message>"); return true; }
+            string target; copystring(target, rest, min(int(sp2 - rest) + 1, (int)sizeof(target)));
+            rpg_sendwhisper(target, sp2 + 1);
+            return true;
+        }
+        // ---- /r <msg> (also /reply): reply to the last whisper sender ----
+        if(!strcmp(cmd, "/r") || !strcmp(cmd, "/reply"))
+        {
+            if(!rest[0]) { conoutf("rpg: Usage: /r <message> (replies to the last whisper)"); return true; }
+            if(!rpg_lastwhisperfrom[0]) { conoutf("rpg: Nobody has whispered you yet."); return true; }
+            rpg_sendwhisper(rpg_lastwhisperfrom, rest);
+            return true;
+        }
+        // ---- /g <msg> (also /guild): clan chat ----
+        if(!strcmp(cmd, "/g") || !strcmp(cmd, "/guild"))
+        {
+            if(!rest[0]) { rpg_chatsettab(RPG_CHAT_CLAN); return true; } // bare /g: switch to the Clan tab (WoW sticky type)
+            rpg_chatsettab(RPG_CHAT_CLAN);
+            rpg_sendclan(rest);
+            return true;
+        }
+        // ---- channel aliases: /world, /clan, /system, /say ----
+        if(!strcmp(cmd, "/world") || !strcmp(cmd, "/say"))
+        {
+            rpg_chatsettab(RPG_CHAT_WORLD);
+            if(!rest[0]) return true; // bare alias: switch tab only
+            conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), rest);
+            addmsg(N_TEXT, "rcs", player1, rest);
+            return true;
+        }
+        if(!strcmp(cmd, "/clan"))
+        {
+            rpg_chatsettab(RPG_CHAT_CLAN);
+            if(!rest[0]) return true;
+            rpg_sendclan(rest);
+            return true;
+        }
+        if(!strcmp(cmd, "/system"))
+        {
+            rpg_chatsettab(RPG_CHAT_SYSTEM);
+            if(rest[0]) conoutf("rpg: The System tab is read-only.");
+            return true;
+        }
+        return false;
+    }
     // Chat throttle (Nov 14, WoW chat Phase 1): max 3 messages per 2 seconds,
     // counted only for messages that pass the hardware-event gate. Over the
     // limit the send is dropped and the player gets a local warning.
@@ -2748,11 +2910,25 @@ namespace game
     // WoW chat Phase 1 (Nov 14): sending requires a hardware event (the
     // sandbox counter), so scripts, quests and timers cannot flood chat.
     // The edit-box Enter handler and key binds run at depth > 0.
-    void toserver(char *text) { if(!require_hardware_event("say")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
+    void toserver(char *text) { if(!require_hardware_event("say")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; if(rpg_chatslash(text)) return; conoutf(CON_CHAT, "%s:\f0 %s", colorname(player1), text); addmsg(N_TEXT, "rcs", player1, text); }
     COMMANDN(say, toserver, "C");
 
-    void sayteam(char *text) { if(!require_hardware_event("sayteam")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
+    void sayteam(char *text) { if(!require_hardware_event("sayteam")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; if(rpg_chatslash(text)) return; conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(player1), text); addmsg(N_SAYTEAM, "rcs", player1, text); }
     COMMAND(sayteam, "C");
+
+    // WoW chat Phase 3 (Nov 25): Clan-tab send. Same gate + throttle as
+    // say/sayteam; goes out as N_RPG_CLANSAY (dedicated clan packet) instead
+    // of N_SAYTEAM, so a player with no clan gets a System-tab error from
+    // the server instead of a silent drop through stock team chat.
+    void sayclan(char *text) { if(!require_hardware_event("sayclan")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; if(rpg_chatslash(text)) return; rpg_sendclan(text); }
+    COMMAND(sayclan, "C");
+
+    // WoW chat Phase 3 (Nov 25): Whisper-tab send (rpg.cfg routes the
+    // Whisper tab here). Plain text goes to the last whisper sender (WoW
+    // sticky whisper); slash lines still parse first, so "/w ..." typed in
+    // the Whisper tab works. No last sender -> a usage note, never a send.
+    void rpgwhisperreply(char *text) { if(!require_hardware_event("rpgwhisperreply")) return; if(!rpg_chatthrottle()) return; if(rpg_gps(text)) return; if(rpg_chatslash(text)) return; if(!rpg_lastwhisperfrom[0]) { conoutf("rpg: Whisper to whom? Use /w <name> <message>."); return; } rpg_sendwhisper(rpg_lastwhisperfrom, text); }
+    COMMANDN(rpgwhisperreply, rpgwhisperreply, "C");
 
     void sendposition(fpsent *d, packetbuf &q)
     {
@@ -3181,12 +3357,25 @@ namespace game
 
             case N_TEXT:
             {
-                if(!d) return;
-                getstring(text, p);
+                // Two wire formats, distinguished by the N_CLIENT wrapper:
+                //  - stock path (wrapped): d is the sender, body is just the string.
+                //  - RPG direct relay (server.cpp N_TEXT, RPG maps): no wrapper,
+                //    so d is NULL and the body carries the sender cn first.
+                // The old code returned here on !d, silently dropping every
+                // remote World line on RPG maps (the sender only ever saw
+                // their own local echo). WoW chat Phase 3 (Nov 25) fix.
+                if(d) getstring(text, p);
+                else
+                {
+                    int scn = getint(p);
+                    getstring(text, p);
+                    d = getclient(scn);
+                    if(!d) break;
+                }
                 filtertext(text, text);
                 if(d->state!=CS_DEAD && d->state!=CS_SPECTATOR)
                     particle_textcopy(d->abovehead(), text, PART_TEXT, 2000, 0x32FF64, 4.0f, -8);
-                conoutf(CON_CHAT, "%s:\f0 %s", colorname(d), text);
+                rpg_chat_event(CHAT_MSG_SAY, colorname(d), text);
                 break;
             }
 
@@ -3199,7 +3388,7 @@ namespace game
                 if(!t) break;
                 if(t->state!=CS_DEAD && t->state!=CS_SPECTATOR)
                     particle_textcopy(t->abovehead(), text, PART_TEXT, 2000, 0x6496FF, 4.0f, -8);
-                conoutf(CON_TEAMCHAT, "%s:\f1 %s", colorname(t), text);
+                rpg_chat_event(CHAT_MSG_GUILD, colorname(t), text);
                 break;
             }
 
@@ -4114,7 +4303,7 @@ namespace game
                 getstring(msg, p);
                 // quest dialogue / event lines print as "rpg: " lines, so the
                 // chat box System tab picks them up via the existing tap.
-                conoutf("rpg: %s", msg);
+                rpg_chat_event(CHAT_MSG_SYSTEM, NULL, msg);
                 break;
             }
             case N_RPG_QUEST:
@@ -4233,10 +4422,27 @@ namespace game
                 getstring(text, p);
                 filtertext(text, text);
                 fpsent *d = getclient(scn);
-                if(d)
+                if(d) rpg_chat_event(CHAT_MSG_GUILD, colorname(d), text, tag);
+                break;
+            }
+            case N_RPG_WHISPER:
+            {
+                // WoW chat Phase 3 (Nov 25): whisper line (sender cn, text,
+                // inform). inform 0 = incoming (CHAT_MSG_WHISPER), 1 =
+                // outgoing copy from the server (CHAT_MSG_WHISPER_INFORM).
+                // Incoming whispers remember the sender for /r (reply).
+                int scn = getint(p);
+                string text;
+                getstring(text, p);
+                int inform = getint(p);
+                filtertext(text, text);
+                fpsent *d = getclient(scn);
+                if(!d) break;
+                if(inform) rpg_chat_event(CHAT_MSG_WHISPER_INFORM, colorname(d), text);
+                else
                 {
-                    if(tag[0]) conoutf(CON_TEAMCHAT, "[%s] %s:\\f1 %s", tag, colorname(d), text);
-                    else conoutf(CON_TEAMCHAT, "%s:\\f1 %s", colorname(d), text);
+                    copystring(rpg_lastwhisperfrom, d->name);
+                    rpg_chat_event(CHAT_MSG_WHISPER, colorname(d), text);
                 }
                 break;
             }

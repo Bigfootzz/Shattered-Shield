@@ -50,6 +50,7 @@ namespace game
     extern const char *defaultconfig();
     extern const char *autoexec();
     extern void loadconfigs();
+    extern void rpg_chatsave(); // fps.cpp: persist chat history on exit (WoW chat Phase 2)
     extern const char *getentname(dynent *d);
 
     extern void updateworld();

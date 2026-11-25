@@ -1201,10 +1201,13 @@ namespace game
         loopv(clients) if(clients[i]) clientdisconnected(i, notify);
     }
 
+    void rpg_chatload(); // defined with the chat box below: replay saved history
     void initclient()
     {
         player1 = spawnstate(new fpsent);
         players.add(player1);
+        // WoW chat Phase 2 (Nov 23): replay last session's chat history
+        rpg_chatload();
     }
 
     VARP(showmodeinfo, 0, 1, 1);
@@ -2474,14 +2477,32 @@ namespace game
     // RPG chat box v1 (user design, Oct 19): tabbed World | Clan | System panel,
     // bottom-right of the screen on RPG maps only. Console lines are tapped via
     // rpg_chat_tap (hooked in conoutfv): CON_CHAT -> World, CON_TEAMCHAT -> Clan,
-    // "rpg: " lines -> System. Clan rides the team channel for now: there is NO
-    // clan/guild system in the game yet. The active tab is a VARP so the chat
+    // WoW chat Phase 3 (Nov 25): the active tab is a VARP so the chat
     // prompt (rpgchat in data/menus/rpg.cfg) can route input: World -> say,
-    // Clan -> sayteam, System is read-only and falls back to World.
-    VARP(rpg_chattab, 0, 0, 2);
+    // Clan -> sayclan, Whisper -> reply to the last whisperer, System is
+    // read-only and falls back to World.
+    VARP(rpg_chattab, 0, 0, 3);
+    // WoW chat Phase 3 (Nov 25): dock corner, persisted via VARP (config.cfg).
+    // 0 = docked bottom-right (the v1 position), 1 = docked bottom-left.
+    // The box is C++-drawn, not a 2D menu, so the dock anchor lives here in
+    // place (engine-reference §1: extend the box, do not rebuild it as a
+    // guiframe); the model mirrors guidockright — dock to an edge with a
+    // fixed 24px gap. Changed with `rpgchatdock <0|1>`.
+    VARP(rpg_chatdock, 0, 0, 1);
+    // WoW chat Phase 2 (Nov 23): timestamps default OFF, fading default ON
+    // (WoW defaults). Both persist via VARP.
+    VARP(rpg_chattimestamps, 0, 0, 1);
+    VARP(rpg_chatfade, 0, 1, 1);
+    // WoW chat Phase 2 (Nov 23): substring filter — a line containing this
+    // text is blocked from all tabs. Empty = no filtering. Persists.
+    SVARP(rpg_chatfilter, "");
 
-    enum { RPG_CHAT_WORLD = 0, RPG_CHAT_CLAN = 1, RPG_CHAT_SYSTEM = 2, RPG_CHAT_NTABS = 3 };
-    struct rpg_chatline { string text; };
+    // Tab ids live in game.h (shared with the slash parser, client.cpp).
+    // WoW chat Phase 2 (Nov 23): millis = lastmillis at arrival (fade age),
+    // or -1 for replayed history (stamped on first draw, so the fade clock
+    // starts when the player first sees the line); stamp = "[HH:MM]"
+    // wall-clock prefix at arrival ("" for replayed history).
+    struct rpg_chatline { string text; string stamp; int millis; };
     static vector<rpg_chatline> rpg_chatbuf[RPG_CHAT_NTABS];
     // WoW chat Phase 1 (Nov 14): scrollback cap 500/tab (was 50), and a
     // per-tab scroll offset for wheel scrolling. 0 = locked to the newest
@@ -2489,11 +2510,12 @@ namespace game
     // window is RPG_CHAT_VISIBLE lines.
     static const int RPG_CHAT_CAP = 500;
     static const int RPG_CHAT_VISIBLE = 8;
-    static int rpg_chatscroll[RPG_CHAT_NTABS] = { 0, 0, 0 };
-    static const char *rpg_chatnames[RPG_CHAT_NTABS] = { "World", "Clan", "System" };
-    // channel colors: warm white / green / amber (spirit of the reference box)
+    static int rpg_chatscroll[RPG_CHAT_NTABS] = { 0, 0, 0, 0 };
+    static const char *rpg_chatnames[RPG_CHAT_NTABS] = { "World", "Clan", "System", "Whisper" };
+    // channel colors: warm white / green / amber / pink (WoW whisper pink,
+    // research report §7.1: whisper = pink/purple)
     static const float rpg_chancol[RPG_CHAT_NTABS][3] = {
-        { 1.00f, 0.93f, 0.86f }, { 0.55f, 1.00f, 0.55f }, { 1.00f, 0.78f, 0.42f }
+        { 1.00f, 0.93f, 0.86f }, { 0.55f, 1.00f, 0.55f }, { 1.00f, 0.78f, 0.42f }, { 1.00f, 0.55f, 1.00f }
     };
     // tab hit-rects from the last draw (virtual coords), for click routing
     static float rpg_chattabs[RPG_CHAT_NTABS][4];
@@ -2514,12 +2536,43 @@ namespace game
     }
 
     bool rpg_serverline(const char *line); // defined below, next to rpg_chattabclick
+
+    // WoW chat Phase 2 (Nov 23): "[HH:MM]" wall-clock prefix, local time.
+    // Same time()/localtime()/strftime idiom as the radar clock (fps.cpp ~3904).
+    static void rpg_chatstamp(string &dst)
+    {
+        time_t now = time(NULL);
+        struct tm *lt = localtime(&now);
+        if(lt)
+        {
+            char tbuf[16];
+            if(strftime(tbuf, sizeof(tbuf), "[%H:%M]", lt) > 0) { copystring(dst, tbuf); return; }
+        }
+        dst[0] = '\0';
+    }
+
+    // WoW chat Phase 2 (Nov 23): AddChatFilter hook — runs in rpg_chat_tap
+    // BEFORE routing. Return true to block the line from every tab (WoW
+    // ChatFrame_AddMessageEventFilter semantics: true = suppress, and a
+    // blocked line reaches no further filter). The stock rule is the
+    // rpg_chatfilter substring var (empty = no filtering); add-on or
+    // engine filters plug in here.
+    static bool rpg_chatfilterline(int type, const char *line)
+    {
+        if(rpg_chatfilter[0] && line && strstr(line, rpg_chatfilter)) return true;
+        return false;
+    }
+
     void rpg_chat_tap(int type, const char *line)
     {
         if(!rpg::connected()) return;
+        // WoW chat Phase 2 (Nov 23): filters run before routing — a blocked
+        // line reaches no tab.
+        if(rpg_chatfilterline(type, line)) return;
         int tab = -1;
         if(type & CON_CHAT) tab = RPG_CHAT_WORLD;
         else if(type & CON_TEAMCHAT) tab = RPG_CHAT_CLAN;
+        else if(type & CON_WHISPER) tab = RPG_CHAT_WHISPER; // WoW chat Phase 3 (Nov 25)
         else if(!strncmp(line, "rpg: ", 5))
         {
             // keep the System tab readable: skip high-frequency debug chatter
@@ -2533,6 +2586,8 @@ namespace game
         if(tab < 0) return;
         vector<rpg_chatline> &b = rpg_chatbuf[tab];
         rpg_chatline cl; copystring(cl.text, line);
+        cl.millis = lastmillis;
+        rpg_chatstamp(cl.stamp);
         b.add(cl);
         int dropped = 0;
         while(b.length() > RPG_CHAT_CAP) { b.remove(0); dropped++; }
@@ -2546,6 +2601,79 @@ namespace game
             rpg_chatscroll[tab] += 1 - dropped;
             if(rpg_chatscroll[tab] < 0) rpg_chatscroll[tab] = 0;
         }
+    }
+
+    // WoW chat Phase 3 (Nov 25): CHAT_MSG_* event routing. One entry point
+    // per incoming server chat event (client.cpp parsemessages); the event
+    // selects the tab (via the conoutf type) and the prefix, and the print
+    // goes through conoutf so the Phase 2 filter hook (rpg_chat_tap) and
+    // per-tab persistence apply unchanged. `sender` is the colorname() of
+    // the other party; `tag` is the clan tag for CHAT_MSG_GUILD, else NULL.
+    void rpg_chat_event(int ev, const char *sender, const char *text, const char *tag)
+    {
+        if(!text) return;
+        switch(ev)
+        {
+            case CHAT_MSG_SAY: // World
+                conoutf(CON_CHAT, "%s:\f0 %s", sender ? sender : "", text);
+                break;
+            case CHAT_MSG_GUILD: // Clan
+                if(tag && tag[0]) conoutf(CON_TEAMCHAT, "[%s] %s:\f1 %s", tag, sender ? sender : "", text);
+                else conoutf(CON_TEAMCHAT, "%s:\f1 %s", sender ? sender : "", text);
+                break;
+            case CHAT_MSG_WHISPER: // incoming whisper
+                conoutf(CON_WHISPER, "[Whisper] From %s:\f5 %s", sender ? sender : "", text);
+                break;
+            case CHAT_MSG_WHISPER_INFORM: // outgoing whisper copy from the server
+                conoutf(CON_WHISPER, "[Whisper] To %s:\f5 %s", sender ? sender : "", text);
+                break;
+            case CHAT_MSG_SYSTEM: // System ("rpg: " prefix is what the tap routes on)
+                conoutf("rpg: %s", text);
+                break;
+            default: break;
+        }
+    }
+
+    // WoW chat Phase 3 (Nov 25): set the active tab from the slash parser
+    // (client.cpp). Clamped; the tab strip is 0..RPG_CHAT_NTABS-1.
+    void rpg_chatsettab(int tab)
+    {
+        if(tab < 0) tab = 0;
+        if(tab >= RPG_CHAT_NTABS) tab = RPG_CHAT_NTABS-1;
+        rpg_chattab = tab;
+    }
+
+    // WoW chat Phase 3 (Nov 25): dock the chat box (rpgchatdock <0|1>).
+    // 0 = bottom-right (the v1 position), 1 = bottom-left. Persists via
+    // the rpg_chatdock VARP (config.cfg). Prints a System-tab note so the
+    // player sees the change took.
+    ICOMMAND(rpgchatdock, "i", (int *v),
+    {
+        int d = *v;
+        if(d < 0) d = 0;
+        if(d > 1) d = 1;
+        rpg_chatdock = d;
+        conoutf("rpg: chat docked %s.", d == 1 ? "bottom-left" : "bottom-right");
+    });
+
+    // TEST-ONLY (harness): print the dock corner + box rect recorded by the
+    // last drawrpgchat, so a headless run can prove the dock geometry.
+    ICOMMAND(rpgtestchatrect, "", (),
+    {
+        conoutf("rpgtestchatrect: dock %d box [%.0f %.0f %.0f %.0f] tab %d", rpg_chatdock,
+            rpg_chatboxrect[0], rpg_chatboxrect[1], rpg_chatboxrect[2], rpg_chatboxrect[3], rpg_chattab);
+    });
+
+    // TEST-ONLY (harness): print a chat tab's buffered lines to the console
+    // (stdout in a headless run), so a probe can prove which tab a line
+    // landed in. Prints the tab name, line count and the last 3 lines.
+    void rpg_chatdump(int tab)
+    {
+        if(tab < 0 || tab >= RPG_CHAT_NTABS) { conoutf("rpgtestchatdump: bad tab %d", tab); return; }
+        vector<rpg_chatline> &b = rpg_chatbuf[tab];
+        conoutf("rpgtestchatdump: tab %d (%s) %d lines", tab, rpg_chatnames[tab], b.length());
+        int start = max(0, b.length() - 3);
+        loopi(b.length() - start) conoutf("rpgtestchatdump: [%d] %s", start+i, b[start+i].text);
     }
 
     // colored text helpers (the strip helpers are white-only)
@@ -2566,6 +2694,45 @@ namespace game
     {
         float wpx = float(strlen(str))*0.5f*pxh;   // FONTW = FONTH/2
         rpg_chattext(str, int(cx - wpx/2), int(cy - pxh/2), pxh, r, g, b);
+    }
+
+    // WoW chat Phase 2 (Nov 23): fade alpha for a line stamped at `millis`.
+    // Fully visible 12 s, linear fade over the next 3 s, gone after 15 s.
+    // When rpg_chatfade is off the line stays at full alpha until scrolled
+    // out. A millis of -1 (replayed history not yet drawn) never fades —
+    // drawrpgchat stamps it on first draw.
+    static float rpg_chatfadealpha(int millis)
+    {
+        if(millis < 0) return 1.0f;
+        if(!rpg_chatfade) return 1.0f;
+        int age = lastmillis - millis;
+        if(age <= 12000) return 1.0f;
+        if(age >= 15000) return 0.0f;
+        return float(15000 - age)/3000.0f;
+    }
+
+    // WoW chat Phase 2 (Nov 23): rpg_hudtext with an explicit alpha. The
+    // glColor set by the caller is ignored by draw_text (it sets its own
+    // colour from its r/g/b/a params), so fading must go through here.
+    static void rpg_hudtexta(const char *str, int left, int top, float pxh, int alpha)
+    {
+        float save = gtextscale;
+        float baseh = (curfont && curfont->scale > 0) ? float(curfont->scale) : 59.0f;
+        settextscale(pxh/baseh);
+        draw_text(str, left, top, 255, 255, 255, alpha);
+        settextscale(save);
+    }
+
+    // Same two-pass layout as rpg_chattext (1px shadow offset), but with the
+    // fade alpha applied to both passes. Renders identically to rpg_chattext
+    // at full alpha.
+    static void rpg_chattextf(const char *str, int left, int top, float pxh, float a)
+    {
+        int ai = int(a*255.0f);
+        if(ai < 0) ai = 0;
+        if(ai > 255) ai = 255;
+        rpg_hudtexta(str, left+1, top+1, pxh, ai);
+        rpg_hudtexta(str, left, top, pxh, ai);
     }
     // conservative fit: chop lines that would overflow the message area
     static void rpg_chatfit(string &dst, const char *src, float maxw, float pxh)
@@ -2588,6 +2755,101 @@ namespace game
                vy >= rpg_chattabs[i][1] && vy < rpg_chattabs[i][3])
             { rpg_chattab = i; return true; }
         return false;
+    }
+
+    // WoW chat Phase 2 (Nov 23): click-to-open. Pure hit-test: true when the
+    // point is inside the chat box rect recorded by drawrpgchat (tabs
+    // included — the tab test above runs first, so this covers the message
+    // area). The dispatcher (rpg_doclick, client.cpp) opens the input.
+    bool rpg_chatboxclick(float vx, float vy)
+    {
+        if(!chatboxactive()) return false;
+        return vx >= rpg_chatboxrect[0] && vx < rpg_chatboxrect[2] &&
+               vy >= rpg_chatboxrect[1] && vy < rpg_chatboxrect[3];
+    }
+
+    // WoW chat Phase 2 (Nov 23): open the chat input prompt — the same
+    // rpgchat input the Y / SLASH keys open (rpg.cfg).
+    void rpg_chatopeninput()
+    {
+        execute("rpgchat \"\"");
+    }
+
+    // WoW chat Phase 2 (Nov 23): chat history persistence. The last
+    // RPG_CHAT_HIST (100) lines per tab are saved to config/chathistory.cfg
+    // (home dir, same config/ convention as config.cfg) on exit and replayed
+    // on startup, with a "--- end of history ---" separator after the
+    // replayed lines in each tab that had history. Lines are stored raw
+    // (no timestamp prefix); replayed lines carry no stamp and age from
+    // first draw, so they fade like any other line when fading is on.
+    static const int RPG_CHAT_HIST = 100;
+    static const char *RPG_CHAT_HISTFILE = "config/chathistory.cfg";
+    static const char *RPG_CHAT_HISTSEP = "--- end of history ---";
+
+    void rpg_chatsave()
+    {
+        stream *f = openutf8file(RPG_CHAT_HISTFILE, "w");
+        if(!f) return;
+        f->printf("# Shattered Shield chat history — last %d lines per tab\n", RPG_CHAT_HIST);
+        loopi(RPG_CHAT_NTABS)
+        {
+            f->printf("#tab %s\n", rpg_chatnames[i]);
+            vector<rpg_chatline> &b = rpg_chatbuf[i];
+            int start = max(0, b.length() - RPG_CHAT_HIST);
+            for(int j = start; j < b.length(); j++)
+            {
+                // the separator is re-added on load, so it must not be
+                // saved or it would accumulate a copy every session
+                if(!strcmp(b[j].text, RPG_CHAT_HISTSEP)) continue;
+                f->printf("%s\n", b[j].text);
+            }
+        }
+        delete f;
+    }
+
+    void rpg_chatload()
+    {
+        static bool loaded = false;
+        if(loaded) return;
+        loaded = true;
+        stream *f = openfile(RPG_CHAT_HISTFILE, "r");
+        if(!f) return; // first run: no history file yet
+        int tab = -1;
+        string linebuf;
+        while(f->getline(linebuf, sizeof(linebuf)))
+        {
+            // stream::getline keeps the trailing newline: strip it (and a
+            // stray CR) so saved lines replay exactly as typed
+            size_t n = strlen(linebuf);
+            while(n > 0 && (linebuf[n-1] == '\n' || linebuf[n-1] == '\r')) linebuf[--n] = '\0';
+            if(linebuf[0] == '#')
+            {
+                if(!strncmp(linebuf, "#tab ", 5))
+                {
+                    tab = -1;
+                    loopi(RPG_CHAT_NTABS) if(!strcmp(linebuf+5, rpg_chatnames[i])) { tab = i; break; }
+                }
+                continue;
+            }
+            if(tab < 0 || !linebuf[0]) continue;
+            vector<rpg_chatline> &b = rpg_chatbuf[tab];
+            rpg_chatline cl; copystring(cl.text, linebuf);
+            cl.millis = -1; // stamped on first draw (see drawrpgchat)
+            cl.stamp[0] = '\0';
+            b.add(cl);
+            while(b.length() > RPG_CHAT_CAP) b.remove(0);
+        }
+        delete f;
+        loopi(RPG_CHAT_NTABS)
+        {
+            vector<rpg_chatline> &b = rpg_chatbuf[i];
+            if(b.empty()) continue;
+            rpg_chatline cl; copystring(cl.text, RPG_CHAT_HISTSEP);
+            cl.millis = -1;
+            cl.stamp[0] = '\0';
+            b.add(cl);
+            while(b.length() > RPG_CHAT_CAP) b.remove(0);
+        }
     }
 
     // WoW chat Phase 1 (Nov 14): mouse-wheel scrolling for the chat box.
@@ -2673,7 +2935,12 @@ namespace game
         float stripr = (X + 1500.0f)/2;
         float bw = min(704.0f, X - stripr - 48.0f);
         if(bw < 352.0f) bw = 352.0f;
-        float bx1 = X - 24.0f, bx0 = bx1 - bw;
+        // WoW chat Phase 3 (Nov 25): dock anchor. Bottom-right is the v1
+        // position; bottom-left mirrors it (the strip is centered, so the
+        // free width is the same on both sides). rpg_chatdock persists.
+        float bx0, bx1;
+        if(rpg_chatdock == 1) { bx0 = 24.0f; bx1 = bx0 + bw; }
+        else { bx1 = X - 24.0f; bx0 = bx1 - bw; }
         float tabh = 50.6f, lineh = 33.0f, pad = 13.2f;
         int nlines = RPG_CHAT_VISIBLE;
         // framed in-panel input field (MMO layout): the panel grows by the
@@ -2728,11 +2995,22 @@ namespace game
         int shown = min(nlines, end);
         loopi(shown)
         {
-            string fit; rpg_chatfit(fit, b[end-shown+i].text, bw - 2*pad, lineh*0.9f);
+            rpg_chatline &cl = b[end-shown+i];
+            // WoW chat Phase 2 (Nov 23): replayed history is stamped on
+            // first draw, so its fade clock starts when the player sees it.
+            if(cl.millis < 0) cl.millis = lastmillis;
+            float alpha = rpg_chatfadealpha(cl.millis);
+            if(alpha <= 0.0f) continue; // fully faded: slot stays blank
+            // WoW chat Phase 2 (Nov 23): inline [HH:MM] prefix when the
+            // toggle is on. The prefix is part of the fitted string so it
+            // counts against the message-area width like the rest of the line.
+            string disp;
+            if(rpg_chattimestamps && cl.stamp[0]) formatstring(disp)("%s %s", cl.stamp, cl.text);
+            else copystring(disp, cl.text);
+            string fit; rpg_chatfit(fit, disp, bw - 2*pad, lineh*0.9f);
             float ly = msgby1 - pad - (shown-i)*lineh;
             // lines carry their own \f color codes; the default tint covers plain lines
-            rpg_chattext(fit, int(bx0+pad), int(ly), lineh*0.9f,
-                         rpg_chancol[rpg_chattab][0], rpg_chancol[rpg_chattab][1], rpg_chancol[rpg_chattab][2]);
+            rpg_chattextf(fit, int(bx0+pad), int(ly), lineh*0.9f, alpha);
         }
 
         // framed in-panel input field (user design, Oct 19): a real text-entry

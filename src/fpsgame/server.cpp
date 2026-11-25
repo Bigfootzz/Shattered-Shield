@@ -949,6 +949,50 @@ namespace server
         }
     }
 
+    // WoW chat Phase 3 (Nov 25): whisper delivery. Shared by the
+    // N_RPG_WHISPER packet handler and the /w fallback in rpg_chatcmd (raw
+    // N_TEXT "/w ..."). Delivers a real server packet to the target
+    // (inform=0) and an inform packet back to the sender (inform=1, the
+    // CHAT_MSG_WHISPER_INFORM copy); the sender's line is never a local
+    // echo. Failures go to the sender's System tab via rpg_qmsg.
+    // Returns false when nothing was delivered.
+    static bool rpg_whisper(clientinfo *cq, const char *target, const char *text)
+    {
+        if(!cq || !target || !target[0] || !text || !text[0]) return false;
+        clientinfo *t = rpg_findclient(target);
+        if(!t) { defformatstring(m)("No player named '%s' is online.", target); rpg_qmsg(cq, m); return false; }
+        if(t == cq) { rpg_qmsg(cq, "You can't whisper yourself."); return false; }
+        if(rpg::ismuted(t->name, cq->name) || rpg::isblocked(t->name, cq->name)) { rpg_qmsg(cq, "That player is not accepting whispers from you."); return false; }
+        sendf(t->clientnum, 1, "riisi", N_RPG_WHISPER, cq->clientnum, text, 0);
+        sendf(cq->clientnum, 1, "riisi", N_RPG_WHISPER, t->clientnum, text, 1);
+        return true;
+    }
+
+    // WoW chat Phase 3 (Nov 25): clan send. Shared by the N_RPG_CLANSAY
+    // packet handler, the /g fallback in rpg_chatcmd, and the N_SAYTEAM
+    // clan branch. Fans the line out as N_RPG_CLANCHAT to online clan
+    // members only. The sender is skipped: they already saw the local
+    // echo (the old N_SAYTEAM branch did not skip, so clan senders saw
+    // their line twice — once plain, once with [TAG]). Not in a clan ->
+    // false, no line printed here; the caller decides the feedback (the
+    // packet path errors, the N_SAYTEAM path falls through to stock).
+    static bool rpg_clansay(clientinfo *cq, const char *text)
+    {
+        if(!cq || !text || !text[0]) return false;
+        int clanid = rpg::clan_of(cq->name);
+        if(clanid <= 0) return false;
+        string ctag; rpg::clan_tagof(cq->name, ctag);
+        char names[32][64]; int n = rpg::clan_memberlist(clanid, names, NULL, 32);
+        loopi(n)
+        {
+            clientinfo *t = rpg_findclient(names[i]);
+            if(!t || t == cq || t->state.state == CS_SPECTATOR) continue;
+            if(rpg::ismuted(t->name, cq->name)) continue;
+            sendf(t->clientnum, 1, "riiss", N_RPG_CLANCHAT, cq->clientnum, ctag, text);
+        }
+        return true;
+    }
+
     static void rpg_syncquest(clientinfo *cq); // quest engine v2, defined below
     static void rpg_syncbuffs(clientinfo *cq); // bundle: active buff sync, defined below
     static void rpg_spawnchampion(clientinfo *cq); // defined with the mob spawns below
@@ -2999,8 +3043,16 @@ namespace server
         f.hasshield = rpg_atk_hasshield(ci->name);
     }
     // White roll (auto-attacks + "quick" fillers): one roll, precedence
-    // miss > dodge > parry > glancing > block > crit > hit. ismelee gates
-    // parry (arrows cannot be parried). Returns the ATK_* outcome.
+    // miss > dodge > parry > glancing > block > crit > crushing > hit.
+    // ismelee gates parry and block (arrows cannot be parried or
+    // blocked: the WoW ranged table is miss/dodge/crit/hit). Glancing
+    // is PvE melee-only (WoW): only a player/bot attacker vs a monster
+    // target with a melee attack can glance, so PvP, mob attackers
+    // (they crush instead), and ranged attacks never glance. Crushing
+    // Blow is mob-only: only a monster attacker 3+ levels above its
+    // target can crush (atk_crushchance); players and battleground bots
+    // feed 0, so a player can never deal a crushing blow. Returns the
+    // ATK_* outcome.
     static int rpg_atk_rollwhite(clientinfo *att, clientinfo *def, int attfallbacklevel, bool ismelee, float roll, int damage, int &outdmg)
     {
         rpg_atkfighter a, d;
@@ -3009,22 +3061,33 @@ namespace server
         float miss = rpg::atk_misschance(a.level, d.level);
         float dodge = rpg::atk_dodgechance(d.dex);
         float parry = ismelee ? rpg::atk_parrychance(d.str, d.canparry) : 0.0f;
-        float glance = rpg::atk_glancechance(a.level, d.level);
-        float block = rpg::atk_blockchance(d.hasshield);
-        return rpg::atk_rollwhite(roll, miss, dodge, parry, glance, block, a.critchance, a.critmult, damage, outdmg);
+        bool attisplayer = att && att->state.ai.type != ai::AI_TYPE_MONSTER;
+        bool defismonster = def && def->state.ai.type == ai::AI_TYPE_MONSTER;
+        float glance = rpg::atk_glanceapplies(attisplayer, defismonster, ismelee) ? rpg::atk_glancechance(a.level, d.level) : 0.0f;
+        float block = ismelee ? rpg::atk_blockchance(d.hasshield) : 0.0f;
+        float crush = (att && att->state.ai.type == ai::AI_TYPE_MONSTER) ? rpg::atk_crushchance(a.level, d.level) : 0.0f;
+        return rpg::atk_rollwhite(roll, miss, dodge, parry, glance, block, a.critchance, crush, a.critmult, damage, outdmg);
     }
-    // Yellow roll (specials): two rolls (miss, then crit) + a concurrent
-    // block roll for PHYSICAL attacks only (spells never block). Returns
-    // false when the attack missed (outdmg 0); otherwise outdmg is the
-    // adjusted damage, crit/blocked report whether each landed (both can
+    // Yellow roll (specials): miss roll, then dodge/parry rolls, then a
+    // concurrent block roll for PHYSICAL attacks only and the crit roll.
+    // Precedence: miss > dodge > parry > (block + crit, concurrent).
+    // A special from the front can be dodged or parried (WoW): dodge
+    // applies to any physical special (melee or ranged), parry is
+    // melee-only (Warrior + monsters). Spells are never blocked, dodged,
+    // or parried. A dodged/parried special deals no damage and does not
+    // crit. Returns false when the attack missed or was dodged/parried
+    // (outdmg 0); otherwise outdmg is the adjusted damage, and
+    // crit/blocked/dodged/parried report what landed (block and crit can
     // land together, per the WoW table).
-    static bool rpg_atk_rollyellow(clientinfo *att, clientinfo *def, int attfallbacklevel, bool isphysical, float rollmiss, float rollcrit, float rollblock, int damage, int &outdmg, bool &crit, bool &blocked)
+    static bool rpg_atk_rollyellow(clientinfo *att, clientinfo *def, int attfallbacklevel, bool isphysical, bool ismelee, float rollmiss, float rolldodge, float rollparry, float rollcrit, float rollblock, int damage, int &outdmg, bool &crit, bool &blocked, bool &dodged, bool &parried)
     {
         rpg_atkfighter a, d;
         rpg_atk_attacker(att, attfallbacklevel, a);
         rpg_atk_defender(def, d);
-        crit = false; blocked = false;
+        crit = false; blocked = false; dodged = false; parried = false;
         if(rpg::atk_rollyellowmiss(rollmiss, a.level, d.level)) { outdmg = 0; return false; }
+        if(isphysical && rpg::atk_rollyellowdodge(rolldodge, d.dex)) { outdmg = 0; dodged = true; return false; }
+        if(isphysical && ismelee && rpg::atk_rollyellowparry(rollparry, d.str, d.canparry)) { outdmg = 0; parried = true; return false; }
         outdmg = damage;
         blocked = isphysical && rpg::atk_rollyellowblock(rollblock, d.hasshield);
         if(blocked) outdmg = int(outdmg*(100.0f - rpg::ATK_BLOCK_REDUCE_PCT)/100.0f + 0.5f);
@@ -3095,7 +3158,11 @@ namespace server
         }
         // --- RPG: WoW-style attack table, mob -> player (v0.1.146) ---
         // Monster bites are white attacks: one roll, precedence miss >
-        // dodge > parry > glancing > block > crit > hit. The roll runs
+        // dodge > parry > glancing > block > crit > crushing > hit.
+        // Glancing never applies here (PvE melee-only: mobs crush
+        // instead, and only a player attacker vs a monster target can
+        // glance). A mob 3+ levels above the player crushes 15% of the
+        // time (150% damage); the roll runs
         // here (after imp-halving / level scaling, before armor
         // mitigation) because monster damage reaches dodamage through the
         // generic gun hit path, not through rpg_cast. DoT ticks and player
@@ -4852,10 +4919,33 @@ namespace server
         // ---- /phelp ----
         if(!strcmp(cmd, "/phelp"))
         {
+            rpg_qmsg(cq, "Chat: /w <name> <msg> (whisper) /r <msg> (reply) /g <msg> (clan) /world|/clan|/system <msg>");
             rpg_qmsg(cq, "Party: /pinvite <name> /paccept /pdecline /pleave /proster");
             rpg_qmsg(cq, "Safety: /mute <name> (toggle) /block <name> (toggle) /report <name> [reason]");
             rpg_qmsg(cq, "Clan: /clancreate <name> <tag> /claninvite <name> /clanaccept /clandecline");
             rpg_qmsg(cq, "Clan: /clanleave /clankick <name> /clanpromote|/clandemote <name> /clandisband /clanroster");
+            return true;
+        }
+        // ---- /w (whisper fallback, WoW chat Phase 3) ----
+        // The client normally parses /w first and sends N_RPG_WHISPER; a raw
+        // N_TEXT "/w ..." still lands here (old clients, console say) and
+        // gets the same delivery. /r has no server fallback: the reply
+        // target lives on the sending client only.
+        if(!strcmp(cmd, "/w") || !strcmp(cmd, "/whisper") || !strcmp(cmd, "/t") || !strcmp(cmd, "/tell"))
+        {
+            const char *sp2 = strchr(args, ' ');
+            if(!sp2 || !sp2[1]) { rpg_qmsg(cq, "Usage: /w <name> <message>"); return true; }
+            string target; copystring(target, args, min(int(sp2 - args) + 1, (int)sizeof(target)));
+            rpg_whisper(cq, target, sp2 + 1);
+            return true;
+        }
+        // ---- /g (clan fallback, WoW chat Phase 3) ----
+        // Same split as /w: the client normally sends N_RPG_CLANSAY; a raw
+        // N_TEXT "/g ..." lands here.
+        if(!strcmp(cmd, "/g") || !strcmp(cmd, "/guild"))
+        {
+            if(!args[0]) { rpg_qmsg(cq, "Usage: /g <message>"); return true; }
+            if(!rpg_clansay(cq, args)) rpg_qmsg(cq, "You are not in a clan. (/clancreate <name> <tag>)");
             return true;
         }
         // ---- /pinvite ----
@@ -5543,8 +5633,9 @@ namespace server
                 // Projectiles roll at ARRIVAL (their damage was stored
                 // un-rolled in pr.damage at cast). Same split as rpg_cast:
                 // white (Basic Attack + "quick" fillers) one roll, yellow
-                // (specials) two rolls + a concurrent block roll for
-                // physical attacks. A miss/dodge/parry fizzles the bolt:
+                // (specials) miss roll, then dodge/parry rolls, then a
+                // concurrent block roll for physical attacks and the crit
+                // roll. A miss/dodge/parry fizzles the bolt:
                 // no dodamage, no DoT, no PROJHIT — the client already
                 // renders PROJFIZZLE. The caster is told why there is no
                 // damage number (bots' owners get it, as in rpg_cast).
@@ -5565,13 +5656,16 @@ namespace server
                     else
                     {
                         float rollmiss = float(rand()%10000)/100.0f;
+                        float rolldodge = float(rand()%10000)/100.0f;
+                        float rollparry = float(rand()%10000)/100.0f;
                         float rollcrit = float(rand()%10000)/100.0f;
                         float rollblock = float(rand()%10000)/100.0f;
                         bool isphysical = ab.melee || !strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison") || !strcmp(ab.damagetype, "quick");
                         int outdmg = pr.damage;
-                        bool hit = rpg_atk_rollyellow(caster, t, pr.level, isphysical, rollmiss, rollcrit, rollblock, pr.damage, outdmg, projcrit, projblocked);
+                        bool projdodged = false, projparried = false;
+                        bool hit = rpg_atk_rollyellow(caster, t, pr.level, isphysical, ab.melee, rollmiss, rolldodge, rollparry, rollcrit, rollblock, pr.damage, outdmg, projcrit, projblocked, projdodged, projparried);
                         pr.damage = outdmg;
-                        projoutcome = hit ? (projcrit ? rpg::ATK_CRIT : rpg::ATK_HIT) : rpg::ATK_MISS;
+                        projoutcome = hit ? (projcrit ? rpg::ATK_CRIT : rpg::ATK_HIT) : (projdodged ? rpg::ATK_DODGE : projparried ? rpg::ATK_PARRY : rpg::ATK_MISS);
                     }
                     if(projoutcome == rpg::ATK_MISS || projoutcome == rpg::ATK_DODGE || projoutcome == rpg::ATK_PARRY)
                     {
@@ -5916,9 +6010,10 @@ namespace server
         // Instant hits roll here; projectiles roll at arrival in
         // rpg_projectiletick (their damage is stored un-rolled in
         // pr.damage). White (Basic Attack + "quick" fillers): one roll,
-        // precedence miss > dodge > parry > glancing > block > crit > hit.
-        // Yellow (specials): two rolls (miss, then crit) + a concurrent
-        // block roll for physical attacks. A miss/dodge/parry lands
+        // precedence miss > dodge > parry > glancing > block > crit >
+        // crushing > hit. Yellow (specials): miss roll, then dodge/parry
+        // concurrent block roll for physical attacks and the crit roll.
+        // A miss/dodge/parry lands
         // nothing and applies no DoT; mana and cooldown are still spent
         // (WoW-correct: a missed special still costs mana and the GCD).
         bool atkavoided = false;
@@ -5947,13 +6042,16 @@ namespace server
             else
             {
                 float rollmiss = float(rand()%10000)/100.0f;
+                float rolldodge = float(rand()%10000)/100.0f;
+                float rollparry = float(rand()%10000)/100.0f;
                 float rollcrit = float(rand()%10000)/100.0f;
                 float rollblock = float(rand()%10000)/100.0f;
                 bool isphysical = ab.melee || !strcmp(ab.damagetype, "pierce") || !strcmp(ab.damagetype, "poison") || !strcmp(ab.damagetype, "quick");
                 int outdmg = castdmg;
-                bool hit = rpg_atk_rollyellow(cq, target, level, isphysical, rollmiss, rollcrit, rollblock, castdmg, outdmg, crit, atkblocked);
+                bool atkdodged = false, atkparried = false;
+                bool hit = rpg_atk_rollyellow(cq, target, level, isphysical, ab.melee, rollmiss, rolldodge, rollparry, rollcrit, rollblock, castdmg, outdmg, crit, atkblocked, atkdodged, atkparried);
                 castdmg = outdmg;
-                atkoutcome = hit ? (crit ? rpg::ATK_CRIT : rpg::ATK_HIT) : rpg::ATK_MISS;
+                atkoutcome = hit ? (crit ? rpg::ATK_CRIT : rpg::ATK_HIT) : (atkdodged ? rpg::ATK_DODGE : atkparried ? rpg::ATK_PARRY : rpg::ATK_MISS);
                 if(!hit) atkavoided = true;
             }
         }
@@ -8014,6 +8112,22 @@ namespace server
                 if(cq) rpg_talk(cq, npcidx);
                 break;
             }
+            case N_RPG_WHISPER: // WoW chat Phase 3: whisper send (target, text)
+            {
+                string target, text;
+                getstring(target, p);
+                getstring(text, p);
+                filtertext(text, text);
+                if(cq) rpg_whisper(cq, target, text);
+                break;
+            }
+            case N_RPG_CLANSAY: // WoW chat Phase 3: clan send (text)
+            {
+                getstring(text, p);
+                filtertext(text, text);
+                if(cq && !rpg_clansay(cq, text)) rpg_qmsg(cq, "You are not in a clan. (/clancreate <name> <tag>)");
+                break;
+            }
             case N_RPG_RESPOND: // quest engine v2: dialogue response button
             {
                 int idx = getint(p);
@@ -8197,20 +8311,9 @@ namespace server
                 // members only (with [TAG]); non-members keep stock team behavior.
                 if(rpg::mapactive(smapname))
                 {
-                    int clanid = rpg::clan_of(cq->name);
-                    if(clanid > 0)
-                    {
-                        string ctag; rpg::clan_tagof(cq->name, ctag);
-                        char names[32][64]; int n = rpg::clan_memberlist(clanid, names, NULL, 32);
-                        loopi(n)
-                        {
-                            clientinfo *t = rpg_findclient(names[i]);
-                            if(!t || t->state.state == CS_SPECTATOR) continue;
-                            if(rpg::ismuted(t->name, cq->name)) continue;
-                            sendf(t->clientnum, 1, "riiss", N_RPG_CLANCHAT, cq->clientnum, ctag, text);
-                        }
-                        break;
-                    }
+                    // WoW chat Phase 3: the shared clan fan-out (sender
+                    // skipped — they already saw the local echo).
+                    if(rpg_clansay(cq, text)) break;
                     // no clan: fall through to stock team chat
                 }
                 if(!ci || !cq || (ci->state.state==CS_SPECTATOR && !ci->local && ci->privilege < PRIV_MASTER) || !m_teammode || !cq->team[0]) break;

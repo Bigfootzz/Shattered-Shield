@@ -37,6 +37,7 @@ void quit()                     // normal exit
     abortconnect();
     disconnect();
     localdisconnect();
+    game::rpg_chatsave(); // WoW chat Phase 2 (Nov 23): persist chat history
     writecfg();
     cleanup();
     exit(EXIT_SUCCESS);
