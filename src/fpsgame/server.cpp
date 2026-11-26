@@ -957,7 +957,7 @@ namespace server
     static void rpg_social_send(clientinfo *cq, int kind, const char *payload)
     {
         if(!cq) return;
-        sendf(cq->clientnum, 1, "ris", N_RPG_SOCSYNC, kind, "");
+        sendf(cq->clientnum, 1, "riis", N_RPG_SOCSYNC, kind, "");
         if(!payload || !payload[0]) return;
         string out;
         out[0] = '\0';
@@ -968,7 +968,7 @@ namespace server
             int linelen = nl ? (int)(nl - cur) : (int)strlen(cur);
             if(out[0] && (int)strlen(out) + 1 + linelen > 200)
             {
-                sendf(cq->clientnum, 1, "ris", N_RPG_SOCSYNC, kind, out);
+                sendf(cq->clientnum, 1, "riis", N_RPG_SOCSYNC, kind, out);
                 out[0] = '\0';
             }
             if(out[0]) concatstring(out, "\n");
@@ -976,7 +976,7 @@ namespace server
             if(olen + linelen < (int)sizeof(out)) { memcpy(out + olen, cur, linelen); out[olen + linelen] = '\0'; }
             cur = nl ? nl + 1 : NULL;
         }
-        if(out[0]) sendf(cq->clientnum, 1, "ris", N_RPG_SOCSYNC, kind, out);
+        if(out[0]) sendf(cq->clientnum, 1, "riis", N_RPG_SOCSYNC, kind, out);
     }
     // Case-insensitive substring search (no strcasestr on MinGW).
     static bool soc_contains_ci(const char *hay, const char *needle)
