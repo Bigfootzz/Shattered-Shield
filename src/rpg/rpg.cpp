@@ -265,6 +265,33 @@ namespace rpg
                 "clan_id INTEGER NOT NULL,"
                 "name TEXT NOT NULL PRIMARY KEY,"
                 "rank INTEGER NOT NULL DEFAULT 2)");
+        // --- social window v1 (.148, Nov 25): rank store, action log, friends ---
+        // Ranks are stored per clan (not the fixed 3-value enum): name +
+        // privilege bitmask per rank index. Seeded lazily per clan by
+        // clan_ranks_ensure() so pre-.148 clans pick up the 3 defaults.
+        execsql("CREATE TABLE IF NOT EXISTS rpg_clan_ranks("
+                "clan_id INTEGER NOT NULL,"
+                "rank INTEGER NOT NULL,"
+                "name TEXT NOT NULL,"
+                "privs INTEGER NOT NULL DEFAULT 0,"
+                "PRIMARY KEY(clan_id, rank))");
+        execsql("CREATE TABLE IF NOT EXISTS rpg_clan_log("
+                "clan_id INTEGER NOT NULL,"
+                "ts INTEGER NOT NULL,"
+                "actor TEXT NOT NULL,"
+                "action TEXT NOT NULL,"
+                "target TEXT NOT NULL DEFAULT '')");
+        execsql("CREATE TABLE IF NOT EXISTS rpg_friends("
+                "owner TEXT NOT NULL,"
+                "friend TEXT NOT NULL,"
+                "added INTEGER NOT NULL DEFAULT 0,"
+                "PRIMARY KEY(owner, friend))");
+        // .148 migrations (same ALTER pattern as copper/embers: fails
+        // harmlessly when the column already exists).
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE rpg_clans ADD COLUMN motd TEXT NOT NULL DEFAULT ''", NULL, NULL, &err); sqlite3_free(err); }
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE rpg_clans ADD COLUMN info TEXT NOT NULL DEFAULT ''", NULL, NULL, &err); sqlite3_free(err); }
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE rpg_clan_members ADD COLUMN note TEXT NOT NULL DEFAULT ''", NULL, NULL, &err); sqlite3_free(err); }
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE rpg_clan_members ADD COLUMN onote TEXT NOT NULL DEFAULT ''", NULL, NULL, &err); sqlite3_free(err); }
         conoutf("rpg: character database open at %s (sqlite %s)", (const char *)dbfile, sqlite3_libversion());
     }
 
@@ -2316,6 +2343,7 @@ namespace rpg
         if(rc != SQLITE_DONE) return -1; // name taken (UNIQUE) or other error
         int id = (int)sqlite3_last_insert_rowid(db);
         clan_addmember(id, leader, CLAN_RANK_LEADER);
+        clan_ranks_ensure(id); // .148: seed the 3 default ranks + privileges
         return id;
     }
     int clan_of(const char *name)
@@ -2380,7 +2408,11 @@ namespace rpg
     }
     bool clan_setrank(const char *name, int rank)
     {
-        if(!db || !name || !name[0] || rank < 0 || rank > 2) return false;
+        if(!db || !name || !name[0] || rank < 0) return false;
+        // .148: ranks are stored per clan now, so the bound is the clan's
+        // rank count, not the old fixed 0..2.
+        int id = clan_of(name);
+        if(id <= 0 || rank >= clan_rankcount(id)) return false;
         sqlite3_stmt *st = NULL;
         if(sqlite3_prepare_v2(db, "UPDATE rpg_clan_members SET rank=? WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
         sqlite3_bind_int(st, 1, rank);
@@ -2394,7 +2426,9 @@ namespace rpg
         if(!db || id <= 0) return;
         defformatstring(s1)("DELETE FROM rpg_clan_members WHERE clan_id=%d", id);
         defformatstring(s2)("DELETE FROM rpg_clans WHERE id=%d", id);
-        execsql(s1); execsql(s2);
+        defformatstring(s3)("DELETE FROM rpg_clan_ranks WHERE clan_id=%d", id); // .148
+        defformatstring(s4)("DELETE FROM rpg_clan_log WHERE clan_id=%d", id); // .148
+        execsql(s1); execsql(s2); execsql(s3); execsql(s4);
     }
     int clan_membercount(int id)
     {
@@ -2429,6 +2463,414 @@ namespace rpg
         }
         sqlite3_finalize(st);
         return n;
+    }
+
+    // --- social window v1 (.148, Nov 25) ---
+    // Payload-safe copy: notes/MOTD/rank names travel inside \x1f-field
+    // lines, so newlines and \x1f must never survive into a stored value.
+    static void soc_clean(char *dst, const char *src, int maxlen)
+    {
+        if(!dst || maxlen <= 0) return;
+        dst[0] = '\0';
+        if(!src) return;
+        int n = 0;
+        for(int i = 0; src[i] && n < maxlen - 1; i++)
+        {
+            char c = src[i];
+            if(c == '\n' || c == '\r' || c == '\x1f') c = ' ';
+            dst[n++] = c;
+        }
+        dst[n] = '\0';
+    }
+    int clan_priv_default(int rank)
+    {
+        if(rank <= 0) return CLAN_PRIV_ALL; // Leader
+        if(rank == 1) return CLAN_PRIV_INVITE|CLAN_PRIV_KICK|CLAN_PRIV_PROMOTE|CLAN_PRIV_MOTD|CLAN_PRIV_NOTE|CLAN_PRIV_ONOTE|CLAN_PRIV_CHAT; // Officer
+        return CLAN_PRIV_CHAT; // Member and any custom rank
+    }
+    // Raw rank-row count, no seeding (clan_ranks_ensure uses it to decide).
+    static int clan_rankcount_raw(int id)
+    {
+        if(!db || id <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM rpg_clan_ranks WHERE clan_id=?", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_int(st, 1, id);
+        int n = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        sqlite3_finalize(st);
+        return n;
+    }
+    void clan_ranks_ensure(int id)
+    {
+        if(!db || id <= 0) return;
+        if(clan_rankcount_raw(id) > 0) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO rpg_clan_ranks(clan_id, rank, name, privs) VALUES(?,?,?,?)", -1, &st, NULL) != SQLITE_OK) return;
+        const char *names[] = { "Leader", "Officer", "Member" };
+        loopi(3)
+        {
+            sqlite3_bind_int(st, 1, id);
+            sqlite3_bind_int(st, 2, i);
+            sqlite3_bind_text(st, 3, names[i], -1, SQLITE_STATIC);
+            sqlite3_bind_int(st, 4, clan_priv_default(i));
+            sqlite3_step(st);
+            sqlite3_reset(st);
+            sqlite3_clear_bindings(st);
+        }
+        sqlite3_finalize(st);
+    }
+    int clan_rankcount(int id)
+    {
+        if(!db || id <= 0) return 0;
+        // Ensure first: pre-.148 clans have no rank rows yet, and the count
+        // is the gate for setrank, so it must see the seeded defaults.
+        if(clan_rankcount_raw(id) == 0) clan_ranks_ensure(id);
+        return clan_rankcount_raw(id);
+    }
+    bool clan_rankname(int id, int rank, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return false;
+        buf[0] = '\0';
+        if(!db || id <= 0 || rank < 0) return false;
+        clan_ranks_ensure(id);
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT name FROM rpg_clan_ranks WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, rank);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok) copystring(buf, (const char *)sqlite3_column_text(st, 0), buflen);
+        sqlite3_finalize(st);
+        return ok;
+    }
+    int clan_rankprivs(int id, int rank)
+    {
+        if(!db || id <= 0 || rank < 0) return 0;
+        if(rank == 0) return CLAN_PRIV_ALL; // Leader: always everything
+        clan_ranks_ensure(id);
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT privs FROM rpg_clan_ranks WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return clan_priv_default(rank);
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, rank);
+        int p = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : clan_priv_default(rank);
+        sqlite3_finalize(st);
+        return p;
+    }
+    bool clan_haspriv(const char *name, int priv)
+    {
+        if(!name || !name[0]) return false;
+        int id = clan_of(name);
+        if(id <= 0) return false;
+        int rank = clan_rank(name);
+        if(rank < 0) return false;
+        if(rank == 0) return true; // Leader always
+        return (clan_rankprivs(id, rank) & priv) != 0;
+    }
+    bool clan_setrankname(int id, int rank, const char *name)
+    {
+        if(!db || id <= 0 || rank < 0 || !name || !name[0]) return false;
+        char clean[32]; soc_clean(clean, name, sizeof(clean));
+        if(strlen(clean) < 2 || strlen(clean) > 16) return false;
+        clan_ranks_ensure(id);
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE rpg_clan_ranks SET name=? WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, clean, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 2, id);
+        sqlite3_bind_int(st, 3, rank);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_setrankpriv(int id, int rank, int priv, bool on)
+    {
+        if(!db || id <= 0 || rank <= 0 || priv <= 0) return false; // rank 0 (Leader) is always ALL; never stored
+        clan_ranks_ensure(id);
+        int cur = clan_rankprivs(id, rank);
+        int next = on ? (cur | priv) : (cur & ~priv);
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE rpg_clan_ranks SET privs=? WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, next);
+        sqlite3_bind_int(st, 2, id);
+        sqlite3_bind_int(st, 3, rank);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_rankadd(int id, const char *name)
+    {
+        if(!db || id <= 0) return false;
+        clan_ranks_ensure(id);
+        int n = clan_rankcount(id);
+        if(n < 2 || n >= 8) return false;
+        char clean[32];
+        if(name && name[0]) soc_clean(clean, name, sizeof(clean));
+        else formatstring(clean)("Rank %d", n + 1);
+        if(strlen(clean) < 2 || strlen(clean) > 16) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT INTO rpg_clan_ranks(clan_id, rank, name, privs) VALUES(?,?,?,?)", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, n);
+        sqlite3_bind_text(st, 3, clean, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 4, clan_priv_default(n));
+        int rc = sqlite3_step(st);
+        sqlite3_finalize(st);
+        return rc == SQLITE_DONE;
+    }
+    bool clan_rankdel(int id)
+    {
+        if(!db || id <= 0) return false;
+        clan_ranks_ensure(id);
+        int n = clan_rankcount(id);
+        if(n <= 2) return false; // always keep Leader + at least one more rank
+        // Only the lowest rank may go, and only when no member holds it.
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM rpg_clan_members WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, n - 1);
+        int held = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : 0;
+        sqlite3_finalize(st);
+        if(held > 0) return false;
+        if(sqlite3_prepare_v2(db, "DELETE FROM rpg_clan_ranks WHERE clan_id=? AND rank=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, n - 1);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_setnote(const char *name, const char *note, bool officer)
+    {
+        if(!db || !name || !name[0] || !note) return false;
+        char clean[32]; soc_clean(clean, note, sizeof(clean));
+        if(strlen(clean) > 31) clean[31] = '\0';
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, officer ? "UPDATE rpg_clan_members SET onote=? WHERE name=?" : "UPDATE rpg_clan_members SET note=? WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, clean, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_getnotes(const char *name, char *note, int notelen, char *onote, int onotelen)
+    {
+        if(note && notelen > 0) note[0] = '\0';
+        if(onote && onotelen > 0) onote[0] = '\0';
+        if(!db || !name || !name[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT note, onote FROM rpg_clan_members WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok)
+        {
+            if(note) copystring(note, (const char *)sqlite3_column_text(st, 0), notelen);
+            if(onote) copystring(onote, (const char *)sqlite3_column_text(st, 1), onotelen);
+        }
+        sqlite3_finalize(st);
+        return ok;
+    }
+    bool clan_setmotd(int id, const char *motd)
+    {
+        if(!db || id <= 0 || !motd) return false;
+        char clean[129]; soc_clean(clean, motd, sizeof(clean));
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE rpg_clans SET motd=? WHERE id=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, clean, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 2, id);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_getmotd(int id, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return false;
+        buf[0] = '\0';
+        if(!db || id <= 0) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT motd FROM rpg_clans WHERE id=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok) copystring(buf, (const char *)sqlite3_column_text(st, 0), buflen);
+        sqlite3_finalize(st);
+        return ok;
+    }
+    bool clan_setinfo(int id, const char *info)
+    {
+        if(!db || id <= 0 || !info) return false;
+        // 120 chars: the INFO line rides the roster payload in <200-char
+        // chunks, so the stored text must leave room for its prefix.
+        char clean[121]; soc_clean(clean, info, sizeof(clean));
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "UPDATE rpg_clans SET info=? WHERE id=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, clean, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 2, id);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool clan_getinfo(int id, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return false;
+        buf[0] = '\0';
+        if(!db || id <= 0) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT info FROM rpg_clans WHERE id=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_int(st, 1, id);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok) copystring(buf, (const char *)sqlite3_column_text(st, 0), buflen);
+        sqlite3_finalize(st);
+        return ok;
+    }
+    void clan_log(int id, const char *actor, const char *action, const char *target)
+    {
+        if(!db || id <= 0 || !actor || !action) return;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT INTO rpg_clan_log(clan_id, ts, actor, action, target) VALUES(?,?,?,?,?)", -1, &st, NULL) != SQLITE_OK) return;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int64(st, 2, (sqlite3_int64)time(NULL));
+        sqlite3_bind_text(st, 3, actor, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 4, action, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 5, target ? target : "", -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    int clan_loglist(int id, char lines[][256], int max)
+    {
+        if(!db || id <= 0 || !lines || max <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT ts, actor, action, target FROM rpg_clan_log WHERE clan_id=? ORDER BY ts DESC, rowid DESC LIMIT ?", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_int(st, 1, id);
+        sqlite3_bind_int(st, 2, max);
+        int n = 0;
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            int ts = sqlite3_column_int(st, 0);
+            const char *actor = (const char *)sqlite3_column_text(st, 1);
+            const char *action = (const char *)sqlite3_column_text(st, 2);
+            const char *target = (const char *)sqlite3_column_text(st, 3);
+            formatstring(lines[n])("%d\x1f%s\x1f%s\x1f%s", ts, actor ? actor : "", action ? action : "", target ? target : "");
+            n++;
+        }
+        sqlite3_finalize(st);
+        return n;
+    }
+    bool friend_add(const char *owner, const char *target)
+    {
+        if(!db || !owner || !owner[0] || !target || !target[0] || !strcmp(owner, target)) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO rpg_friends(owner, friend, added) VALUES(?,?,?)", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 3, (sqlite3_int64)time(NULL));
+        int rc = sqlite3_step(st);
+        sqlite3_finalize(st);
+        return rc == SQLITE_DONE && sqlite3_changes(db) > 0;
+    }
+    bool friend_remove(const char *owner, const char *target)
+    {
+        if(!db || !owner || !owner[0] || !target || !target[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "DELETE FROM rpg_friends WHERE owner=? AND friend=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        return sqlite3_changes(db) > 0;
+    }
+    bool friend_is(const char *owner, const char *target)
+    {
+        if(!db || !owner || !owner[0] || !target || !target[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT 1 FROM rpg_friends WHERE owner=? AND friend=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+        return ok;
+    }
+    int friend_list(const char *owner, char names[][64], int max)
+    {
+        if(!db || !owner || !owner[0] || !names || max <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT friend FROM rpg_friends WHERE owner=? ORDER BY friend", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        int n = 0;
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+            n++;
+        }
+        sqlite3_finalize(st);
+        return n;
+    }
+    bool charinfo(const char *name, int *level, char *archetype, int alen, char *map, int mlen, int *lastseen)
+    {
+        if(level) *level = 1;
+        if(archetype && alen > 0) archetype[0] = '\0';
+        if(map && mlen > 0) map[0] = '\0';
+        if(lastseen) *lastseen = 0;
+        if(!db || !name || !name[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT level, archetype, map, last_seen FROM characters WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        bool ok = sqlite3_step(st) == SQLITE_ROW;
+        if(ok)
+        {
+            if(level) *level = sqlite3_column_int(st, 0);
+            if(archetype) copystring(archetype, (const char *)sqlite3_column_text(st, 1), alen);
+            if(map) copystring(map, (const char *)sqlite3_column_text(st, 2), mlen);
+            if(lastseen) *lastseen = sqlite3_column_int(st, 3);
+        }
+        sqlite3_finalize(st);
+        return ok;
+    }
+    bool charisbot(const char *name)
+    {
+        if(!db || !name || !name[0]) return false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT bot FROM characters WHERE name=?", -1, &st, NULL) != SQLITE_OK) return false;
+        sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+        bool b = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) != 0;
+        sqlite3_finalize(st);
+        return b;
+    }
+    int mutelist(const char *owner, char names[][64], int max)
+    {
+        if(!db || !owner || !owner[0] || !names || max <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT target FROM rpg_mutes WHERE owner=? ORDER BY target", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        int n = 0;
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+            n++;
+        }
+        sqlite3_finalize(st);
+        return n;
+    }
+    int blocklist(const char *owner, char names[][64], int max)
+    {
+        if(!db || !owner || !owner[0] || !names || max <= 0) return 0;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(db, "SELECT target FROM rpg_blocks WHERE owner=? ORDER BY target", -1, &st, NULL) != SQLITE_OK) return 0;
+        sqlite3_bind_text(st, 1, owner, -1, SQLITE_STATIC);
+        int n = 0;
+        while(n < max && sqlite3_step(st) == SQLITE_ROW)
+        {
+            copystring(names[n], (const char *)sqlite3_column_text(st, 0), 64);
+            n++;
+        }
+        sqlite3_finalize(st);
+        return n;
+    }
+    void fmt_timeago(int ts, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        if(ts <= 0) { copystring(buf, "never", buflen); return; }
+        int diff = (int)time(NULL) - ts;
+        if(diff < 0) diff = 0;
+        if(diff < 60) copystring(buf, "just now", buflen);
+        else if(diff < 3600) formatstring(buf)("%dm ago", diff / 60);
+        else if(diff < 86400) formatstring(buf)("%dh ago", diff / 3600);
+        else if(diff < 86400 * 30) formatstring(buf)("%dd ago", diff / 86400);
+        else formatstring(buf)("%dmo ago", diff / (86400 * 30));
     }
 
     // --- clan system v1: client presentation cache ---
@@ -2991,5 +3433,464 @@ namespace rpg
     {
         if(i < 0 || i >= (int)journalines.size() || !buf || buflen <= 0) { if(buf && buflen > 0) buf[0] = '\0'; return; }
         copystring(buf, journalines[i].c_str(), buflen);
+    }
+
+    // --- social window v1 (.148): client-side cache (never authoritative) ---
+    // Filled by N_RPG_SOCSYNC chunks (same clear + append pattern as
+    // N_RPG_RECIPES: a 260-char `string` cannot hold a whole roster, so the
+    // server sends an empty packet to clear, then <200-char chunks).
+    struct soc_member { std::string name; int rank; std::string rankname; bool online; std::string zone; int level; std::string cls; std::string lastseen; std::string note; std::string onote; };
+    struct soc_friend { std::string name; bool online; std::string zone; int level; std::string cls; std::string lastseen; };
+    struct soc_rank { int rank; std::string name; int privs; };
+    static std::vector<soc_member> soc_roster;
+    static std::vector<soc_friend> soc_friends, soc_who;
+    static std::vector<soc_rank> soc_ranks;
+    static std::vector<std::string> soc_log, soc_ignore; // log: display lines; ignore: "name\x1fkind"
+    static string soc_clanname, soc_clantag, soc_clanleader, soc_motd, soc_info;
+    static int soc_clancount = 0, soc_clanonline = 0, soc_myprivs = 0;
+    static int soc_tab = 0, soc_mode = 0, soc_sel = -1, soc_ranksel = -1;
+    static bool soc_showoff = true, soc_control = false, soc_infoopen = false;
+    // Split one \x1f-field line into fields, preserving empty fields.
+    // Returns the field count (max 10).
+    static int soc_split(char *line, char *fields[], int maxfields)
+    {
+        int n = 0;
+        char *cur = line;
+        while(cur && n < maxfields)
+        {
+            char *sep = strchr(cur, '\x1f');
+            if(sep) *sep = '\0';
+            fields[n++] = cur;
+            cur = sep ? sep + 1 : NULL;
+        }
+        return n;
+    }
+    static const char *soc_classcolor(const char *cls)
+    {
+        if(!cls) return "\f7";
+        if(!strcmp(cls, "Ranger")) return "\f0"; // WoW hunter green
+        if(!strcmp(cls, "Warrior")) return "\f6"; // WoW warrior tan (orange is closest)
+        if(!strcmp(cls, "Magi")) return "\f1"; // WoW mage blue
+        return "\f7";
+    }
+    // Visible roster row -> roster index (honours the show-offline toggle).
+    static int soc_roster_vis(int visrow)
+    {
+        int v = -1;
+        loopi((int)soc_roster.size())
+        {
+            if(!soc_showoff && !soc_roster[i].online) continue;
+            v++;
+            if(v == visrow) return i;
+        }
+        return -1;
+    }
+    void rpg_social_sync(int kind, const char *payload)
+    {
+        if(!payload) return;
+        // Empty payload = clear this kind's list (chunk protocol).
+        if(!payload[0])
+        {
+            switch(kind)
+            {
+                case 0: soc_roster.clear(); soc_clanname[0] = soc_clantag[0] = soc_clanleader[0] = soc_motd[0] = soc_info[0] = '\0'; soc_clancount = soc_clanonline = soc_myprivs = 0; break;
+                case 1: soc_friends.clear(); break;
+                case 2: soc_who.clear(); break;
+                case 3: soc_log.clear(); break;
+                case 4: soc_ranks.clear(); break;
+                case 5: soc_ignore.clear(); break;
+                default: break;
+            }
+            return;
+        }
+        char buf[512]; copystring(buf, payload, sizeof(buf));
+        char *line = buf;
+        while(line && *line)
+        {
+            char *nl = strchr(line, '\n');
+            if(nl) *nl = '\0';
+            char *f[10]; int nf = soc_split(line, f, 10);
+            switch(kind)
+            {
+                case 0: // roster: header line, MOTD/INFO lines, member lines
+                    if(soc_roster.empty() && !soc_clanname[0] && nf >= 7)
+                    {
+                        // Header: name, tag, leader, count, online, myprivs
+                        // (MOTD/info ride their own lines below, so the
+                        // header stays well under the 200-char chunk cap).
+                        copystring(soc_clanname, f[0], sizeof(soc_clanname));
+                        copystring(soc_clantag, f[1], sizeof(soc_clantag));
+                        copystring(soc_clanleader, f[2], sizeof(soc_clanleader));
+                        soc_clancount = atoi(f[3]);
+                        soc_clanonline = atoi(f[4]);
+                        soc_myprivs = atoi(f[5]);
+                    }
+                    else if(nf == 2 && !strcmp(f[0], "MOTD"))
+                    {
+                        copystring(soc_motd, f[1], sizeof(soc_motd));
+                    }
+                    else if(nf == 2 && !strcmp(f[0], "INFO"))
+                    {
+                        copystring(soc_info, f[1], sizeof(soc_info));
+                    }
+                    else if(nf >= 10)
+                    {
+                        // Member line: name, rank, rankname, online, zone,
+                        // level, class, lastseen, note, onote. Rank name
+                        // rides in the payload (not a client DB lookup) so
+                        // the roster is self-contained on remote servers.
+                        soc_member m; m.name = f[0]; m.rank = atoi(f[1]); m.rankname = f[2]; m.online = atoi(f[3]) != 0;
+                        m.zone = f[4]; m.level = atoi(f[5]); m.cls = f[6]; m.lastseen = f[7];
+                        m.note = f[8]; m.onote = f[9];
+                        soc_roster.push_back(m);
+                    }
+                    break;
+                case 1: // friends
+                    if(nf >= 6)
+                    {
+                        soc_friend fr; fr.name = f[0]; fr.online = atoi(f[1]) != 0;
+                        fr.zone = f[2]; fr.level = atoi(f[3]); fr.cls = f[4]; fr.lastseen = f[5];
+                        soc_friends.push_back(fr);
+                    }
+                    break;
+                case 2: // who
+                    if(nf >= 6)
+                    {
+                        soc_friend fr; fr.name = f[0]; fr.online = atoi(f[1]) != 0;
+                        fr.zone = f[2]; fr.level = atoi(f[3]); fr.cls = f[4]; fr.lastseen = f[5];
+                        soc_who.push_back(fr);
+                    }
+                    break;
+                case 3: // log: fields ago/actor/action/target -> display line
+                    if(nf >= 4)
+                    {
+                        char disp[256];
+                        if(f[3][0]) formatstring(disp)("[%s] %s %s %s", f[0], f[1], f[2], f[3]);
+                        else formatstring(disp)("[%s] %s %s", f[0], f[1], f[2]);
+                        soc_log.push_back(std::string(disp));
+                    }
+                    break;
+                case 4: // ranks
+                    if(nf >= 3)
+                    {
+                        soc_rank r; r.rank = atoi(f[0]); r.name = f[1]; r.privs = atoi(f[2]);
+                        soc_ranks.push_back(r);
+                    }
+                    break;
+                case 5: // ignore: "name\x1fkind"
+                    if(nf >= 2) soc_ignore.push_back(std::string(line));
+                    break;
+                default: break;
+            }
+            line = nl ? nl + 1 : NULL;
+        }
+        // Selection stays valid: clamp it to the new row count.
+        if(soc_sel >= rpg_social_rows(soc_tab)) soc_sel = -1;
+        if(soc_ranksel >= (int)soc_ranks.size()) soc_ranksel = -1;
+    }
+    int rpg_social_tab() { return soc_tab; }
+    void rpg_social_settab(int tab) { if(tab >= 0 && tab <= 2) { soc_tab = tab; soc_sel = -1; soc_control = false; soc_infoopen = false; } }
+    int rpg_social_mode() { return soc_mode; }
+    void rpg_social_setmode(int mode) { if(mode == 0 || mode == 1) soc_mode = mode; }
+    bool rpg_social_showoff() { return soc_showoff; }
+    void rpg_social_setshowoff(bool on) { soc_showoff = on; soc_sel = -1; }
+    bool rpg_social_control() { return soc_control; }
+    void rpg_social_setcontrol(bool on) { soc_control = on; if(on) soc_infoopen = false; }
+    bool rpg_social_info() { return soc_infoopen; }
+    void rpg_social_setinfo(bool on) { soc_infoopen = on; if(on) soc_control = false; }
+    int rpg_social_sel() { return soc_sel; }
+    void rpg_social_setsel(int idx) { soc_sel = (idx >= 0 && idx < rpg_social_rows(soc_tab)) ? idx : -1; }
+    int rpg_social_rank_sel() { return soc_ranksel; }
+    void rpg_social_setrank_sel(int idx) { soc_ranksel = (idx >= 0 && idx < (int)soc_ranks.size()) ? idx : -1; }
+    int rpg_social_rows(int tab)
+    {
+        switch(tab)
+        {
+            case 0: return (int)soc_friends.size();
+            case 1:
+            {
+                if(!soc_showoff)
+                {
+                    int n = 0;
+                    loopi((int)soc_roster.size()) if(soc_roster[i].online) n++;
+                    return n;
+                }
+                return (int)soc_roster.size();
+            }
+            case 2: return (int)soc_who.size();
+            default: return 0;
+        }
+    }
+    void rpg_social_cell(int tab, int row, int col, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        string tmp;
+        switch(tab)
+        {
+            case 0: // Friends: name | zone | lvl | class | last seen
+            {
+                if(row < 0 || row >= (int)soc_friends.size()) return;
+                const soc_friend &fr = soc_friends[row];
+                switch(col)
+                {
+                    case 0: formatstring(tmp)("%s%s", soc_classcolor(fr.cls.c_str()), fr.name.c_str()); copystring(buf, tmp, buflen); break;
+                    case 1: copystring(buf, fr.zone.c_str(), buflen); break;
+                    case 2: formatstring(buf)("%d", fr.level); break;
+                    case 3: copystring(buf, fr.cls.c_str(), buflen); break;
+                    case 4: copystring(buf, fr.lastseen.c_str(), buflen); break;
+                    default: break;
+                }
+                return;
+            }
+            case 1: // Clan: mode 0 Name|Zone|Lvl|Class|Rank, mode 1 Name|Rank|Note|Last Online
+            {
+                int ri = soc_roster_vis(row);
+                if(ri < 0) return;
+                const soc_member &m = soc_roster[ri];
+                if(soc_mode == 0)
+                {
+                    switch(col)
+                    {
+                        case 0: formatstring(tmp)("%s%s", soc_classcolor(m.cls.c_str()), m.name.c_str()); copystring(buf, tmp, buflen); break;
+                        case 1: copystring(buf, m.zone.c_str(), buflen); break;
+                        case 2: formatstring(buf)("%d", m.level); break;
+                        case 3: copystring(buf, m.cls.c_str(), buflen); break;
+                        case 4: copystring(buf, m.rankname.c_str(), buflen); break;
+                        default: break;
+                    }
+                }
+                else
+                {
+                    switch(col)
+                    {
+                        case 0: formatstring(tmp)("%s%s", soc_classcolor(m.cls.c_str()), m.name.c_str()); copystring(buf, tmp, buflen); break;
+                        case 1: copystring(buf, m.rankname.c_str(), buflen); break;
+                        case 2: copystring(buf, m.note.c_str(), buflen); break;
+                        case 3: copystring(buf, m.lastseen.c_str(), buflen); break;
+                        default: break;
+                    }
+                }
+                return;
+            }
+            case 2: // Who: name | zone | lvl | class | (last seen unused)
+            {
+                if(row < 0 || row >= (int)soc_who.size()) return;
+                const soc_friend &fr = soc_who[row];
+                switch(col)
+                {
+                    case 0: formatstring(tmp)("%s%s", soc_classcolor(fr.cls.c_str()), fr.name.c_str()); copystring(buf, tmp, buflen); break;
+                    case 1: copystring(buf, fr.zone.c_str(), buflen); break;
+                    case 2: formatstring(buf)("%d", fr.level); break;
+                    case 3: copystring(buf, fr.cls.c_str(), buflen); break;
+                    default: break;
+                }
+                return;
+            }
+            default: break;
+        }
+    }
+    // Truncate to maxlen visible chars, ".." when cut (dst needs maxlen+1).
+    static void soc_trunc(char *dst, const char *src, int maxlen)
+    {
+        if(!dst || maxlen <= 0) return;
+        dst[0] = '\0';
+        if(!src) return;
+        int n = (int)strlen(src);
+        if(n <= maxlen) { copystring(dst, src, maxlen + 1); return; }
+        if(maxlen < 3) maxlen = 3;
+        memcpy(dst, src, maxlen - 2);
+        dst[maxlen - 2] = '.';
+        dst[maxlen - 1] = '.';
+        dst[maxlen] = '\0';
+    }
+    void rpg_social_row(int tab, int row, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        char zone[13], note[21], rank[10];
+        switch(tab)
+        {
+            case 0: // Friends: name, level, class, last seen
+            {
+                if(row < 0 || row >= (int)soc_friends.size()) return;
+                const soc_friend &fr = soc_friends[row];
+                formatstring(buf)("%s%-16s %3d  %-7s  %s",
+                    soc_classcolor(fr.cls.c_str()), fr.name.c_str(), fr.level, fr.cls.c_str(), fr.lastseen.c_str());
+                return;
+            }
+            case 1: // Clan: mode 0 Name|Zone|Lvl|Class, mode 1 Name|Rank|Note|Last Online
+            {
+                int ri = soc_roster_vis(row);
+                if(ri < 0) return;
+                const soc_member &m = soc_roster[ri];
+                if(soc_mode == 0)
+                {
+                    soc_trunc(zone, m.zone.c_str(), 12);
+                    formatstring(buf)("%s%-16s %-12s %3d  %-7s",
+                        soc_classcolor(m.cls.c_str()), m.name.c_str(), zone, m.level, m.cls.c_str());
+                }
+                else
+                {
+                    soc_trunc(rank, m.rankname.c_str(), 9);
+                    soc_trunc(note, m.note.c_str(), 20);
+                    formatstring(buf)("%s%-16s %-9s %-20s %s",
+                        soc_classcolor(m.cls.c_str()), m.name.c_str(), rank, note, m.lastseen.c_str());
+                }
+                return;
+            }
+            case 2: // Who: name, zone, level, class
+            {
+                if(row < 0 || row >= (int)soc_who.size()) return;
+                const soc_friend &fr = soc_who[row];
+                soc_trunc(zone, fr.zone.c_str(), 12);
+                formatstring(buf)("%s%-16s %-12s %3d  %-7s",
+                    soc_classcolor(fr.cls.c_str()), fr.name.c_str(), zone, fr.level, fr.cls.c_str());
+                return;
+            }
+            default: break;
+        }
+    }
+    void rpg_social_rowheader(int tab, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        switch(tab)
+        {
+            case 0: copystring(buf, "Name             Lvl  Class    Last Seen", buflen); break;
+            case 1:
+                if(soc_mode == 0) copystring(buf, "Name             Zone         Lvl  Class", buflen);
+                else copystring(buf, "Name             Rank      Note                 Last Online", buflen);
+                break;
+            case 2: copystring(buf, "Name             Zone         Lvl  Class", buflen); break;
+            default: break;
+        }
+    }
+    void rpg_social_claninfo(char *name, int nlen, char *tag, int tlen, char *leader, int llen, char *motd, int mlen, char *info, int ilen, int *count, int *online, int *myprivs)
+    {
+        if(name && nlen > 0) copystring(name, soc_clanname, nlen);
+        if(tag && tlen > 0) copystring(tag, soc_clantag, tlen);
+        if(leader && llen > 0) copystring(leader, soc_clanleader, llen);
+        if(motd && mlen > 0) copystring(motd, soc_motd, mlen);
+        if(info && ilen > 0) copystring(info, soc_info, ilen);
+        if(count) *count = soc_clancount;
+        if(online) *online = soc_clanonline;
+        if(myprivs) *myprivs = soc_myprivs;
+    }
+    int rpg_social_rankrows() { return (int)soc_ranks.size(); }
+    void rpg_social_rankcell(int row, int col, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        if(row < 0 || row >= (int)soc_ranks.size()) return;
+        switch(col)
+        {
+            case 0: formatstring(buf)("%d", soc_ranks[row].rank); break;
+            case 1: copystring(buf, soc_ranks[row].name.c_str(), buflen); break;
+            case 2: formatstring(buf)("%d", soc_ranks[row].privs); break;
+            default: break;
+        }
+    }
+    int rpg_social_rankprivs_sel()
+    {
+        if(soc_ranksel < 0 || soc_ranksel >= (int)soc_ranks.size()) return 0;
+        return soc_ranks[soc_ranksel].privs;
+    }
+    int rpg_social_logrows() { return (int)soc_log.size(); }
+    void rpg_social_logline(int i, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        if(i < 0 || i >= (int)soc_log.size()) return;
+        copystring(buf, soc_log[i].c_str(), buflen);
+    }
+    int rpg_social_ignorerows() { return (int)soc_ignore.size(); }
+    void rpg_social_ignorecell(int row, int col, char *buf, int buflen)
+    {
+        if(!buf || buflen <= 0) return;
+        buf[0] = '\0';
+        if(row < 0 || row >= (int)soc_ignore.size()) return;
+        // Stored "name\x1fkind": split without mutating the cached string.
+        const std::string &line = soc_ignore[row];
+        size_t sep = line.find('\x1f');
+        if(col == 0) copystring(buf, line.substr(0, sep).c_str(), buflen);
+        else if(col == 1 && sep != std::string::npos) copystring(buf, line.substr(sep + 1).c_str(), buflen);
+    }
+    void rpg_social_selinfo(char *name, int nlen, int *rank, char *rankname, int rnlen, int *online, int *level, char *cls, int clen, char *zone, int zlen, char *lastseen, int llen, char *note, int notelen, char *onote, int olen)
+    {
+        if(name && nlen > 0) name[0] = '\0';
+        if(rank) *rank = -1;
+        if(rankname && rnlen > 0) rankname[0] = '\0';
+        if(online) *online = 0;
+        if(level) *level = 0;
+        if(cls && clen > 0) cls[0] = '\0';
+        if(zone && zlen > 0) zone[0] = '\0';
+        if(lastseen && llen > 0) lastseen[0] = '\0';
+        if(note && notelen > 0) note[0] = '\0';
+        if(onote && olen > 0) onote[0] = '\0';
+        if(soc_sel < 0) return;
+        if(soc_tab == 0)
+        {
+            if(soc_sel >= (int)soc_friends.size()) return;
+            const soc_friend &fr = soc_friends[soc_sel];
+            if(name) copystring(name, fr.name.c_str(), nlen);
+            if(online) *online = fr.online ? 1 : 0;
+            if(level) *level = fr.level;
+            if(cls) copystring(cls, fr.cls.c_str(), clen);
+            if(zone) copystring(zone, fr.zone.c_str(), zlen);
+            if(lastseen) copystring(lastseen, fr.lastseen.c_str(), llen);
+        }
+        else if(soc_tab == 1)
+        {
+            int ri = soc_roster_vis(soc_sel);
+            if(ri < 0) return;
+            const soc_member &m = soc_roster[ri];
+            if(name) copystring(name, m.name.c_str(), nlen);
+            if(rank) *rank = m.rank;
+            if(online) *online = m.online ? 1 : 0;
+            if(level) *level = m.level;
+            if(cls) copystring(cls, m.cls.c_str(), clen);
+            if(zone) copystring(zone, m.zone.c_str(), zlen);
+            if(lastseen) copystring(lastseen, m.lastseen.c_str(), llen);
+            if(note) copystring(note, m.note.c_str(), notelen);
+            if(onote) copystring(onote, m.onote.c_str(), olen);
+            if(rankname) copystring(rankname, m.rankname.c_str(), rnlen);
+        }
+        else if(soc_tab == 2)
+        {
+            if(soc_sel >= (int)soc_who.size()) return;
+            const soc_friend &fr = soc_who[soc_sel];
+            if(name) copystring(name, fr.name.c_str(), nlen);
+            if(online) *online = fr.online ? 1 : 0;
+            if(level) *level = fr.level;
+            if(cls) copystring(cls, fr.cls.c_str(), clen);
+            if(zone) copystring(zone, fr.zone.c_str(), zlen);
+            if(lastseen) copystring(lastseen, fr.lastseen.c_str(), llen);
+        }
+    }
+    bool rpg_social_can(int priv)
+    {
+        return (soc_myprivs & priv) != 0;
+    }
+    void rpg_social_dump()
+    {
+        conoutf("rpg_social: clan '%s' [%s] leader %s members %d (%d online) myprivs %d motd '%s'",
+            soc_clanname, soc_clantag, soc_clanleader, soc_clancount, soc_clanonline, soc_myprivs, soc_motd);
+        loopi((int)soc_roster.size())
+            conoutf("rpg_social: roster[%d] %s rank %d %s %s lvl %d %s last '%s' note '%s' onote '%s'",
+                i, soc_roster[i].name.c_str(), soc_roster[i].rank, soc_roster[i].online ? "online" : "offline",
+                soc_roster[i].zone.c_str(), soc_roster[i].level, soc_roster[i].cls.c_str(),
+                soc_roster[i].lastseen.c_str(), soc_roster[i].note.c_str(), soc_roster[i].onote.c_str());
+        loopi((int)soc_friends.size())
+            conoutf("rpg_social: friend[%d] %s %s %s lvl %d %s last '%s'",
+                i, soc_friends[i].name.c_str(), soc_friends[i].online ? "online" : "offline",
+                soc_friends[i].zone.c_str(), soc_friends[i].level, soc_friends[i].cls.c_str(), soc_friends[i].lastseen.c_str());
+        loopi((int)soc_who.size())
+            conoutf("rpg_social: who[%d] %s %s lvl %d %s",
+                i, soc_who[i].name.c_str(), soc_who[i].zone.c_str(), soc_who[i].level, soc_who[i].cls.c_str());
+        loopi((int)soc_ranks.size())
+            conoutf("rpg_social: rank[%d] '%s' privs %d", soc_ranks[i].rank, soc_ranks[i].name.c_str(), soc_ranks[i].privs);
+        loopi((int)soc_log.size()) conoutf("rpg_social: log[%d] %s", i, soc_log[i].c_str());
+        loopi((int)soc_ignore.size()) conoutf("rpg_social: ignore[%d] %s", i, soc_ignore[i].c_str());
     }
 }

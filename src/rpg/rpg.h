@@ -496,6 +496,87 @@ namespace rpg
     int clan_membercount(int id);
     void clan_tagof(const char *name, char *tag); // empty if none
     int clan_memberlist(int id, char names[][64], int *ranks, int max); // returns count
+    // --- social window v1 (.148, Nov 25): ranks, notes, MOTD, log, friends ---
+    // Privilege bits, stored per rank in rpg_clan_ranks (see below). Rank 0
+    // (Leader) always has every privilege, whatever the stored flags say.
+    enum {
+        CLAN_PRIV_INVITE = 1<<0,  // invite to the clan
+        CLAN_PRIV_KICK = 1<<1,    // kick members below own rank
+        CLAN_PRIV_PROMOTE = 1<<2, // promote/demote, up to 1 rank below own
+        CLAN_PRIV_MOTD = 1<<3,    // set the message of the day
+        CLAN_PRIV_NOTE = 1<<4,    // edit public member notes
+        CLAN_PRIV_ONOTE = 1<<5,   // view/modify officer notes
+        CLAN_PRIV_INFO = 1<<6,    // modify clan information
+        CLAN_PRIV_CONTROL = 1<<7, // edit ranks + privileges
+        CLAN_PRIV_CHAT = 1<<8,    // speak in clan chat (listening is universal)
+        CLAN_PRIV_ALL = 0x1FF
+    };
+    int clan_priv_default(int rank); // default privs for a fresh rank index
+    bool clan_haspriv(const char *name, int priv); // leader always true
+    // Rank store (rpg_clan_ranks, seeded lazily with 3 defaults per clan).
+    void clan_ranks_ensure(int id);
+    int clan_rankcount(int id);
+    bool clan_rankname(int id, int rank, char *buf, int buflen);
+    int clan_rankprivs(int id, int rank);
+    bool clan_setrankname(int id, int rank, const char *name);
+    bool clan_setrankpriv(int id, int rank, int priv, bool on);
+    bool clan_rankadd(int id, const char *name); // appends a new lowest rank (max 8)
+    bool clan_rankdel(int id); // removes the lowest rank; false when members hold it or only 2 ranks left
+    // Member notes (31 chars each; officer note visible to officers+ only).
+    bool clan_setnote(const char *name, const char *note, bool officer);
+    bool clan_getnotes(const char *name, char *note, int notelen, char *onote, int onotelen);
+    // Message of the day + clan information (rpg_clans columns).
+    bool clan_setmotd(int id, const char *motd);
+    bool clan_getmotd(int id, char *buf, int buflen);
+    bool clan_setinfo(int id, const char *info);
+    bool clan_getinfo(int id, char *buf, int buflen);
+    // Action log (rpg_clan_log): joins, leaves, kicks, promotes, demotes,
+    // rank changes, disbands. Lines are "ts\x1factor\x1faction\x1ftarget",
+    // newest first.
+    void clan_log(int id, const char *actor, const char *action, const char *target);
+    int clan_loglist(int id, char lines[][256], int max);
+    // Friends (rpg_friends): no existence check on the target — an offline
+    // or mistyped name just shows as offline, WoW-style.
+    bool friend_add(const char *owner, const char *target);
+    bool friend_remove(const char *owner, const char *target);
+    bool friend_is(const char *owner, const char *target);
+    int friend_list(const char *owner, char names[][64], int max);
+    // Character lookup for roster/who rows (level, class, last map, last seen).
+    bool charinfo(const char *name, int *level, char *archetype, int alen, char *map, int mlen, int *lastseen);
+    bool charisbot(const char *name); // characters.bot flag (Who list skips bots)
+    // Ignore lists (rpg_mutes / rpg_blocks), same shape as friend_list.
+    int mutelist(const char *owner, char names[][64], int max);
+    int blocklist(const char *owner, char names[][64], int max);
+    // "5m ago" / "2h ago" / "3d ago" / "never" for a unix timestamp (0 = now).
+    void fmt_timeago(int ts, char *buf, int buflen);
+    // --- social window v1 (.148): client-side cache (never authoritative) ---
+    // Filled by N_RPG_SOCSYNC; the GUI reads it through the accessors below.
+    void rpg_social_sync(int kind, const char *payload);
+    int rpg_social_tab(); void rpg_social_settab(int tab); // 0 Friends, 1 Clan, 2 Who
+    int rpg_social_mode(); void rpg_social_setmode(int mode); // 0 Player Status, 1 Guild Status
+    bool rpg_social_showoff(); void rpg_social_setshowoff(bool on);
+    bool rpg_social_control(); void rpg_social_setcontrol(bool on);
+    bool rpg_social_info(); void rpg_social_setinfo(bool on);
+    int rpg_social_sel(); void rpg_social_setsel(int idx); // -1 = none
+    int rpg_social_rank_sel(); void rpg_social_setrank_sel(int idx); // -1 = none
+    int rpg_social_rows(int tab); // visible rows (clan list honours show-offline)
+    void rpg_social_cell(int tab, int row, int col, char *buf, int buflen);
+    // One pre-formatted list row (name padded, class-coloured) + header line.
+    void rpg_social_row(int tab, int row, char *buf, int buflen);
+    void rpg_social_rowheader(int tab, char *buf, int buflen);
+    void rpg_social_claninfo(char *name, int nlen, char *tag, int tlen, char *leader, int llen, char *motd, int mlen, char *info, int ilen, int *count, int *online, int *myprivs);
+    int rpg_social_rankrows();
+    void rpg_social_rankcell(int row, int col, char *buf, int buflen);
+    int rpg_social_rankprivs_sel(); // stored privs of the selected rank
+    int rpg_social_logrows();
+    void rpg_social_logline(int i, char *buf, int buflen);
+    int rpg_social_ignorerows(); // "name\x1fkind" rows (muted/blocked)
+    void rpg_social_ignorecell(int row, int col, char *buf, int buflen);
+    // Selected-row details (tab 0/1/2): name, rank index, rank name, online,
+    // level, class, zone, last-seen text, public note, officer note.
+    void rpg_social_selinfo(char *name, int nlen, int *rank, char *rankname, int rnlen, int *online, int *level, char *cls, int clen, char *zone, int zlen, char *lastseen, int llen, char *note, int notelen, char *onote, int olen);
+    bool rpg_social_can(int priv); // my stored privs (leader = all)
+    void rpg_social_dump(); // conoutf cache summary (harness)
     // --- clan system v1: client presentation cache (never authoritative) ---
     void setclientclan(int id, int rank, const char *name, const char *tag);
     bool getclientclan(int &id, int &rank, char *name, char *tag); // true when in a clan

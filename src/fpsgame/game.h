@@ -779,7 +779,25 @@ enum
     // WoW chat Phase 3 (Nov 25): appended last so no existing wire value moves.
     N_RPG_WHISPER, // c->s: whisper send (target name, text); s->c: whisper line (sender cn, text, inform 0 = incoming / 1 = outgoing copy)
     N_RPG_CLANSAY, // c->s: clan send (text); server fans out as N_RPG_CLANCHAT
+    // Shattered Shield social window v1 (.148, Nov 25): appended last so no
+    // existing wire value moves. One request packet + one sync packet, kind-
+    // tagged (SOC_* below). Payloads are \n-separated lines, fields
+    // separated by \x1f (same precedent as N_RPG_RECIPES, one line per
+    // recipe) — no new packet per list, and no fixed-size arrays.
+    N_RPG_SOCREQ, // c->s: social data request (kind int, arg string)
+    N_RPG_SOCSYNC, // s->c: social data sync (kind int, payload string)
     NUMSV
+};
+
+// Social sync kinds (N_RPG_SOCREQ / N_RPG_SOCSYNC), .148 Nov 25.
+enum
+{
+    SOC_ROSTER = 0, // clan roster + header (motd/info/counts/my privs)
+    SOC_FRIENDS,    // friend list
+    SOC_WHO,        // online-player list (arg = zone filter substring, "" = all)
+    SOC_LOG,        // clan action log (newest first)
+    SOC_RANKS,      // clan rank list (rank, name, privs)
+    SOC_IGNORE      // ignore list (mute/block rows)
 };
 
 static const int msgsizes[] =               // size inclusive message token, 0 for variable or not-checked sizes
@@ -817,7 +835,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
     N_RPG_TALK, 2, N_RPG_QMSG, 0, N_RPG_QUEST, 5, N_RPG_DIALOG, 0, N_RPG_RESPOND, 2, N_RPG_QTEXT, 0, N_RPG_CLANCHAT, 0, N_RPG_CLAN, 0, N_RPG_HP, 2, N_RPG_MOBHOME, 5,
     N_RPG_PROJ, 8, N_RPG_PROJHIT, 4, N_RPG_PROJFIZZLE, 2,
     N_RPG_CRAFT, 0, N_RPG_CRAFTL, 1, N_RPG_RECIPES, 0, N_RPG_CRAFTRESULT, 0,
-    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0, N_BG_POINT, 8, N_RPG_WHISPER, 0, N_RPG_CLANSAY, 0,
+    N_BG_QUEUE, 3, N_BG_START, 2, N_BG_CANCEL, 1, N_BG_LEAVE, 1, N_BG_LEFT, 1, N_RPG_FLOATDMG, 5, N_RPG_EMBERS, 2, N_RPG_NOTICE, 0, N_BG_POINT, 8, N_RPG_WHISPER, 0, N_RPG_CLANSAY, 0, N_RPG_SOCREQ, 0, N_RPG_SOCSYNC, 0,
     -1
 };
 
@@ -828,7 +846,7 @@ static const int msgsizes[] =               // size inclusive message token, 0 f
 #define RR_MASTER_PORT 16962
 #define RR_MASTER_HOST "rr.master.theintercooler.com"
 
-#define PROTOCOL_VERSION 269            // bump when protocol changes (269: N_RPG_WHISPER + N_RPG_CLANSAY, Nov 25)
+#define PROTOCOL_VERSION 270            // bump when protocol changes (270: N_RPG_SOCREQ + N_RPG_SOCSYNC social window, Nov 25)
 #define DEMO_VERSION 1                  // bump when demo format changes
 #define DEMO_MAGIC "REVREV_DEMO"
 

@@ -887,6 +887,159 @@ namespace game
     ICOMMAND(rpg_journal_lines, "", (), intret(rpg::rpg_journal_lines()));
     ICOMMAND(rpg_journal_line, "i", (int *i),
         { char b[256]; rpg::rpg_journal_line(*i, b, sizeof(b)); result(b); });
+    // --- social window v1 (.148, Nov 25) ---
+    // Open: request fresh data for every tab, then show the GUI. Buttons
+    // call rpgsocialcmd, a raw N_TEXT slash send with no chat throttle or
+    // hardware gate — the click IS the user action, same as the client's
+    // own slash fallback in rpg_chatslash (line 2876).
+    ICOMMAND(rpgsocial, "", (), {
+        addmsg(N_RPG_SOCREQ, "ris", SOC_ROSTER, "");
+        addmsg(N_RPG_SOCREQ, "ris", SOC_FRIENDS, "");
+        addmsg(N_RPG_SOCREQ, "ris", SOC_WHO, "");
+        addmsg(N_RPG_SOCREQ, "ris", SOC_IGNORE, "");
+        showgui("rpgsocial");
+    });
+    ICOMMAND(rpgsocialreq, "is", (int *kind, char *arg), { addmsg(N_RPG_SOCREQ, "ris", *kind, arg ? arg : ""); });
+    ICOMMAND(rpgsocialcmd, "C", (char *s), {
+        if(!s || !s[0] || s[0] != '/') { conoutf("rpgsocialcmd: expected a /command"); return; }
+        addmsg(N_TEXT, "rcs", player1, s);
+    });
+    ICOMMAND(rpgsocial_settab, "i", (int *v), { rpg::rpg_social_settab(*v); });
+    ICOMMAND(rpgsocial_setmode, "i", (int *v), { rpg::rpg_social_setmode(*v); });
+    ICOMMAND(rpgsocial_setshowoff, "i", (int *v), { rpg::rpg_social_setshowoff(*v != 0); });
+    ICOMMAND(rpgsocial_setcontrol, "i", (int *v), { rpg::rpg_social_setcontrol(*v != 0); });
+    ICOMMAND(rpgsocial_setinfo, "i", (int *v), { rpg::rpg_social_setinfo(*v != 0); });
+    ICOMMAND(rpgsocial_setsel, "i", (int *v), { rpg::rpg_social_setsel(*v); });
+    ICOMMAND(rpgsocial_setranksel, "i", (int *v), { rpg::rpg_social_setrank_sel(*v); });
+    // GUI state accessors (called as functions from rpg.cfg).
+    ICOMMAND(rpgsocial_inclan, "", (), { int id; int rank; string n; string t; intret(rpg::getclientclan(id, rank, n, t) ? 1 : 0); });
+    ICOMMAND(rpgsocial_tab, "", (), { intret(rpg::rpg_social_tab()); });
+    ICOMMAND(rpgsocial_mode, "", (), { intret(rpg::rpg_social_mode()); });
+    ICOMMAND(rpgsocial_showoff, "", (), { intret(rpg::rpg_social_showoff() ? 1 : 0); });
+    ICOMMAND(rpgsocial_control, "", (), { intret(rpg::rpg_social_control() ? 1 : 0); });
+    ICOMMAND(rpgsocial_info, "", (), { intret(rpg::rpg_social_info() ? 1 : 0); });
+    ICOMMAND(rpgsocial_sel, "", (), { intret(rpg::rpg_social_sel()); });
+    ICOMMAND(rpgsocial_ranksel, "", (), { intret(rpg::rpg_social_rank_sel()); });
+    // Clan header by field: 0 name, 1 tag, 2 leader, 3 motd, 4 info,
+    // 5 member count, 6 online count, 7 my privilege bits.
+    ICOMMAND(rpgsocial_claninfo, "i", (int *f), {
+        char n[64]; char t[32]; char l[64]; char m[129]; char inf[121]; int c; int o; int p;
+        rpg::rpg_social_claninfo(n, sizeof(n), t, sizeof(t), l, sizeof(l), m, sizeof(m), inf, sizeof(inf), &c, &o, &p);
+        switch(*f)
+        {
+            case 0: result(n); break;
+            case 1: result(t); break;
+            case 2: result(l); break;
+            case 3: result(m); break;
+            case 4: result(inf); break;
+            case 5: intret(c); break;
+            case 6: intret(o); break;
+            case 7: intret(p); break;
+            default: result(""); break;
+        }
+    });
+    ICOMMAND(rpgsocial_rows, "i", (int *tab), { intret(rpg::rpg_social_rows(*tab)); });
+    ICOMMAND(rpgsocial_row, "ii", (int *tab, int *row), {
+        char b[256]; rpg::rpg_social_row(*tab, *row, b, sizeof(b)); result(b);
+    });
+    ICOMMAND(rpgsocial_rowheader, "i", (int *tab), {
+        char b[128]; rpg::rpg_social_rowheader(*tab, b, sizeof(b)); result(b);
+    });
+    ICOMMAND(rpgsocial_cell, "iii", (int *tab, int *row, int *col), {
+        char b[256]; rpg::rpg_social_cell(*tab, *row, *col, b, sizeof(b)); result(b);
+    });
+    // Unignore by ignore-list row (index baked into the button action at
+    // GUI build time — the name/kind are read from the cache at click time).
+    ICOMMAND(rpgsocial_unignore, "i", (int *row), {
+        char name[64]; char kind[16];
+        rpg::rpg_social_ignorecell(*row, 0, name, sizeof(name));
+        rpg::rpg_social_ignorecell(*row, 1, kind, sizeof(kind));
+        if(!name[0]) { conoutf("rpgsocial_unignore: no such row"); return; }
+        string cmd;
+        formatstring(cmd)("/%s %s", !strcmp(kind, "muted") ? "mute" : "block", name);
+        addmsg(N_TEXT, "rcs", player1, cmd);
+    });
+    // Selected-row details by field: 0 name, 1 rank index, 2 rank name,
+    // 3 online, 4 level, 5 class, 6 zone, 7 last seen, 8 note, 9 officer note.
+    ICOMMAND(rpgsocial_selinfo, "i", (int *f), {
+        char n[64]; char rn[32]; char cls[32]; char zone[64]; char last[32]; char note[32]; char onote[32];
+        int rank; int online; int level;
+        rpg::rpg_social_selinfo(n, sizeof(n), &rank, rn, sizeof(rn), &online, &level, cls, sizeof(cls), zone, sizeof(zone), last, sizeof(last), note, sizeof(note), onote, sizeof(onote));
+        switch(*f)
+        {
+            case 0: result(n); break;
+            case 1: intret(rank); break;
+            case 2: result(rn); break;
+            case 3: intret(online); break;
+            case 4: intret(level); break;
+            case 5: result(cls); break;
+            case 6: result(zone); break;
+            case 7: result(last); break;
+            case 8: result(note); break;
+            case 9: result(onote); break;
+            default: result(""); break;
+        }
+    });
+    ICOMMAND(rpgsocial_can, "i", (int *priv), { intret(rpg::rpg_social_can(*priv) ? 1 : 0); });
+    ICOMMAND(rpgsocial_rankrows, "", (), { intret(rpg::rpg_social_rankrows()); });
+    ICOMMAND(rpgsocial_rankcell, "ii", (int *row, int *col), {
+        char b[64]; rpg::rpg_social_rankcell(*row, *col, b, sizeof(b)); result(b);
+    });
+    ICOMMAND(rpgsocial_rankprivs_sel, "", (), { intret(rpg::rpg_social_rankprivs_sel()); });
+    ICOMMAND(rpgsocial_logrows, "", (), { intret(rpg::rpg_social_logrows()); });
+    ICOMMAND(rpgsocial_logline, "i", (int *i), {
+        char b[256]; rpg::rpg_social_logline(*i, b, sizeof(b)); result(b);
+    });
+    ICOMMAND(rpgsocial_ignorerows, "", (), { intret(rpg::rpg_social_ignorerows()); });
+    ICOMMAND(rpgsocial_ignorecell, "ii", (int *row, int *col), {
+        char b[64]; rpg::rpg_social_ignorecell(*row, *col, b, sizeof(b)); result(b);
+    });
+    // TEST-ONLY (harness, .148): inject a SOCSYNC packet through the REAL
+    // parsemessages() receive path (same idiom as rpgtestchatrecv), then
+    // dump the parsed cache. Payload uses '|' between fields and ';'
+    // between lines (the -x script cannot carry \x1f/\n bytes); the probe
+    // translates them and sends clear + <200-char chunks, exactly like the
+    // server does, so the chunk protocol itself is exercised.
+    void parsemessages(int cn, fpsent *d, ucharbuf &p); // defined below
+    ICOMMAND(rpgtestsocial, "is", (int *kind, char *s),
+    {
+        if(!s || !s[0]) { conoutf("rpgtestsocial: usage: rpgtestsocial <kind 0..5> <payload, | fields, ; lines>"); return; }
+        char payload[1024]; copystring(payload, s, sizeof(payload));
+        for(int i = 0; payload[i]; i++) { if(payload[i] == '|') payload[i] = '\x1f'; else if(payload[i] == ';') payload[i] = '\n'; }
+        static uchar buf[512];
+        { // clear packet
+            ucharbuf p(buf, sizeof(buf));
+            putint(p, N_RPG_SOCSYNC); putint(p, *kind); sendstring("", p);
+            ucharbuf q(buf, p.length()); parsemessages(-1, NULL, q);
+        }
+        string out; out[0] = '\0';
+        const char *cur = payload;
+        while(cur && *cur)
+        {
+            const char *nl = strchr(cur, '\n');
+            int linelen = nl ? (int)(nl - cur) : (int)strlen(cur);
+            if(out[0] && (int)strlen(out) + 1 + linelen > 200)
+            {
+                ucharbuf p(buf, sizeof(buf));
+                putint(p, N_RPG_SOCSYNC); putint(p, *kind); sendstring(out, p);
+                ucharbuf q(buf, p.length()); parsemessages(-1, NULL, q);
+                out[0] = '\0';
+            }
+            if(out[0]) concatstring(out, "\n");
+            int olen = (int)strlen(out);
+            if(olen + linelen < (int)sizeof(out)) { memcpy(out + olen, cur, linelen); out[olen + linelen] = '\0'; }
+            cur = nl ? nl + 1 : NULL;
+        }
+        if(out[0])
+        {
+            ucharbuf p(buf, sizeof(buf));
+            putint(p, N_RPG_SOCSYNC); putint(p, *kind); sendstring(out, p);
+            ucharbuf q(buf, p.length()); parsemessages(-1, NULL, q);
+        }
+        conoutf("rpgtestsocial: kind %d injected", *kind);
+        rpg::rpg_social_dump();
+    });
+    ICOMMAND(rpgtestsocialdump, "", (), { rpg::rpg_social_dump(); });
     // --- TEST-ONLY scaffolding (mouse & targeting v1 harness) ---
     // The headless harness cannot move the OS pointer, so these drive the same
     // code paths the real input takes: rpgtestdelta exercises game::cursormove
@@ -4453,6 +4606,14 @@ namespace game
                 getstring(cname, p);
                 getstring(ctag, p);
                 rpg::setclientclan(id, rank, cname, ctag);
+                break;
+            }
+            case N_RPG_SOCSYNC: // social window v1 (.148): chunked data sync
+            {
+                int kind = getint(p);
+                string payload;
+                getstring(payload, p);
+                rpg::rpg_social_sync(kind, payload);
                 break;
             }
 
