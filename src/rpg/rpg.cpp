@@ -3771,8 +3771,14 @@ namespace rpg
         if(name && nlen > 0) copystring(name, soc_clanname, nlen);
         if(tag && tlen > 0) copystring(tag, soc_clantag, tlen);
         if(leader && llen > 0) copystring(leader, soc_clanleader, llen);
-        if(motd && mlen > 0) copystring(motd, soc_motd, mlen);
-        if(info && ilen > 0) copystring(info, soc_info, ilen);
+        // Layout (Ed, Nov 25: text must fit the frame): the MOTD (128) and
+        // clan info (120) are unbounded display lines, so a long one ran
+        // past the right edge of the 44 FONTW column and stretched the
+        // window. Truncate the DISPLAY copy to 40 chars (".." when cut);
+        // the full text stays in soc_motd/soc_info and in the editable
+        // fields, which are separate vars.
+        if(motd && mlen > 0) { char tmp[129]; soc_trunc(tmp, soc_motd, 40); copystring(motd, tmp, mlen); }
+        if(info && ilen > 0) { char tmp[121]; soc_trunc(tmp, soc_info, 40); copystring(info, tmp, ilen); }
         if(count) *count = soc_clancount;
         if(online) *online = soc_clanonline;
         if(myprivs) *myprivs = soc_myprivs;
