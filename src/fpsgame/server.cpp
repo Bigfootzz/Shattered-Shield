@@ -1005,7 +1005,7 @@ namespace server
         cmap[0] = '\0';
         rpg::charinfo(name, &level, NULL, 0, cmap, sizeof(cmap), &lastseen);
         char cls[32];
-        if(!rpg::classforname(name, cls, sizeof(cls))) copystring(cls, "—", sizeof(cls));
+        if(!rpg::classforname(name, cls, sizeof(cls))) copystring(cls, "-", sizeof(cls));
         const char *zone = online ? smapname : cmap;
         char last[32];
         if(online) copystring(last, "Online", sizeof(last));
@@ -1015,7 +1015,7 @@ namespace server
         rpg::clan_getnotes(name, note, sizeof(note), onote, sizeof(onote));
         formatstring(dst)("%s\x1f%d\x1f%s\x1f%d\x1f%s\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s",
             name, rank, rankname ? rankname : "", online ? 1 : 0,
-            zone && zone[0] ? zone : "—", level, cls[0] ? cls : "—", last,
+            zone && zone[0] ? zone : "-", level, cls[0] ? cls : "-", last,
             note, showonote ? onote : "");
     }
     static void rpg_social_sync(clientinfo *cq, int kind, const char *arg)
@@ -1072,15 +1072,15 @@ namespace server
                     cmap[0] = '\0';
                     rpg::charinfo(names[i], &level, NULL, 0, cmap, sizeof(cmap), &lastseen);
                     char cls[32];
-                    if(!rpg::classforname(names[i], cls, sizeof(cls))) copystring(cls, "—", sizeof(cls));
+                    if(!rpg::classforname(names[i], cls, sizeof(cls))) copystring(cls, "-", sizeof(cls));
                     char last[32];
                     if(online) copystring(last, "Online", sizeof(last));
                     else rpg::fmt_timeago(lastseen, last, sizeof(last));
                     char line[256];
                     formatstring(line)("%s\x1f%d\x1f%s\x1f%d\x1f%s\x1f%s",
                         names[i], online ? 1 : 0,
-                        online ? smapname : (cmap[0] ? cmap : "—"),
-                        level, cls[0] ? cls : "—", last);
+                        online ? smapname : (cmap[0] ? cmap : "-"),
+                        level, cls[0] ? cls : "-", last);
                     if(payload[0]) concatstring(payload, "\n", sizeof(payload));
                     concatstring(payload, line, sizeof(payload));
                 }
@@ -1101,10 +1101,10 @@ namespace server
                     cmap[0] = '\0';
                     rpg::charinfo(m->name, &level, NULL, 0, cmap, sizeof(cmap), &lastseen);
                     char cls[32];
-                    if(!rpg::classforname(m->name, cls, sizeof(cls))) copystring(cls, "—", sizeof(cls));
+                    if(!rpg::classforname(m->name, cls, sizeof(cls))) copystring(cls, "-", sizeof(cls));
                     char line[256];
                     formatstring(line)("%s\0371\037%s\037%d\037%s\037Online",
-                        m->name, smapname, level, cls[0] ? cls : "—");
+                        m->name, smapname, level, cls[0] ? cls : "-");
                     if(payload[0]) concatstring(payload, "\n", sizeof(payload));
                     concatstring(payload, line, sizeof(payload));
                 }
