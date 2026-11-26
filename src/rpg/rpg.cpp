@@ -3513,7 +3513,7 @@ namespace rpg
             switch(kind)
             {
                 case 0: // roster: header line, MOTD/INFO lines, member lines
-                    if(soc_roster.empty() && !soc_clanname[0] && nf >= 7)
+                    if(soc_roster.empty() && !soc_clanname[0] && nf >= 6)
                     {
                         // Header: name, tag, leader, count, online, myprivs
                         // (MOTD/info ride their own lines below, so the
