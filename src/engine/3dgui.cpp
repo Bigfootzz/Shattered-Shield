@@ -448,7 +448,7 @@ struct gui : g3d_gui
 
     // RR: Add minimum width var
     int text  (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, false, minwidth); }
-    int button(const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, true, false, minwidth); }
+    int button(const char *text, int color, const char *icon, int minwidth, bool framed) { autotab(); return button_(text, color, icon, true, false, minwidth, framed); }
     int title (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, true, minwidth); }
     ///RR
     void separator() { autotab(); line_(FONTH/3); }
@@ -1141,7 +1141,7 @@ struct gui : g3d_gui
     }
 
     // RR -> Minimum width
-    int button_(const char *rawText, int color, const char *icon, bool clickable, bool center, int minwidth)
+    int button_(const char *rawText, int color, const char *icon, bool clickable, bool center, int minwidth, bool framed = false)
     {
         // RR: Try to find a translation
         const char *text = rawText[0] == 't' && rawText[1] == ':' ? getTranslation((rawText+2)) : rawText;
@@ -1163,12 +1163,44 @@ struct gui : g3d_gui
         }
         ///RR
 
+        // Framed button (v0.1.148-test, Ed Nov 25): action controls render
+        // as visibly framed buttons, not bare text. The engine has no
+        // framed button style (guibutton's 4th arg is minwidth, not a
+        // style), so button_ draws the frame itself: dark fill + steel
+        // border, the same flat-plate idiom as the RPG chat plates in
+        // fps.cpp (rpg_fillrect). Padding is 1 FONTW each side; the layout
+        // width includes it so frames never overlap neighbours.
+        const int fpad = framed ? FONTW : 0;
         if(visible())
         {
-            bool hit = ishit(w, FONTH);
-            if(hit && clickable) color = 0xFF0000;	
-            int x = curx;	
+            bool hit = ishit(w + 2*fpad, FONTH, curx - fpad, cury);
+            if(hit && clickable) color = 0xFF0000;
+            int x = curx;
             if(isvertical() && center) x += (xsize-w)/2;
+
+            if(framed)
+            {
+                // Frame: fill + 1-unit steel border, 1-unit inset top/bottom
+                // so stacked rows keep a hairline gap. Hover brightens the fill.
+                // Untextured quads MUST run under notextureshader: with the
+                // default shader active the quads sample the stale bound
+                // texture (font atlas, mostly transparent) and render
+                // invisible — the first version of this frame drew nothing.
+                // Same wrap as background() elsewhere in this file.
+                int fx = x - fpad, fy = cury + 1, fw = w + 2*fpad, fh = FONTH - 2;
+                glDisable(GL_TEXTURE_2D);
+                notextureshader->set();
+                if(hit && clickable) glColor4f(0.14f, 0.14f, 0.19f, 0.95f);
+                else glColor4f(0.05f, 0.05f, 0.08f, 0.92f);
+                rect_(fx, fy, fw, fh);
+                glColor4f(0.45f, 0.47f, 0.52f, 0.95f);
+                rect_(fx, fy, fw, 1);
+                rect_(fx, fy + fh - 1, fw, 1);
+                rect_(fx, fy, 1, fh);
+                rect_(fx + fw - 1, fy, 1, fh);
+                glEnable(GL_TEXTURE_2D);
+                defaultshader->set();
+            }
 
             if(icon)
             {
@@ -1197,7 +1229,7 @@ struct gui : g3d_gui
             if(icon && text) x += padding;
             if(text) text_(text, x, cury, color, center || (hit && clickable && actionon), hit && clickable);
         }
-        return layout(w, FONTH);
+        return layout(w + 2*fpad, FONTH);
     }
 
     static Texture *skintex, *overlaytex, *slidertex;

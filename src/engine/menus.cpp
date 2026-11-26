@@ -428,6 +428,28 @@ void guibutton(char *name, char *action, char *icon, int *minwidth)
     }
 }
 
+//@DOC name and icon are optional
+// Framed button (v0.1.148-test, Ed Nov 25): same as guibutton, but the
+// label renders inside a dark fill + steel border (gui::button framed
+// path in 3dgui.cpp), so action controls read as buttons, not bare text.
+void guibuttonframed(char *name, char *action, char *icon, int *minwidth)
+{
+    if(!cgui) return;
+    bool hideicon = !strcmp(icon, "0");
+    int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : (icon[0] ? icon : (strstr(action, "showgui") ? "menu" : "action")), *minwidth, true);
+    if(ret&G3D_UP)
+    {
+        updatelater.add().schedule(action[0] ? action : name);
+        if(shouldclearmenu) clearlater = true;
+    }
+    else if(ret&G3D_ROLLOVER)
+    {
+        alias("guirollovername", name);
+        alias("guirolloveraction", action);
+        alias("guirolloveranyaction", action);
+    }
+}
+
 void guiimage(char *path, char *action, float *scale, int *overlaid, char *alt, int *colour)
 {
     if(!cgui) return;
@@ -796,6 +818,7 @@ void guitextscale(float *scale, uint *contents)
 
 COMMAND(newgui, "ssss");
 COMMAND(guibutton, "sssi");
+COMMAND(guibuttonframed, "sssi");
 COMMAND(guitext, "ssi");
 COMMAND(guiheader, "s");
 ICOMMAND(cleargui, "i", (int *n), intret(cleargui(*n)));

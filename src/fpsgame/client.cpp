@@ -1349,6 +1349,31 @@ namespace game
                 }
             }
         }
+        // Social window heartbeat (v0.1.148-test, Ed Nov 25): while any
+        // social window is open, re-request all social data every 15s so
+        // the lists stay fresh with no Refresh button. Gated on guishowing
+        // (never a flag alone), same pattern as the walk-away auto-close
+        // above. The timer resets when the windows close, so no polling
+        // ever happens while closed; the first beat lands a full 15s
+        // after opening. Six tiny messages (roster/friends/who/log/ranks/
+        // ignore) per beat; the server side is a handful of small SQLite
+        // reads, so the load is negligible even with many players online.
+        static int rpg_social_lastbeat = 0;
+        if(guishowing("rpgsocial") || guishowing("rpgclancontrol") || guishowing("rpgclaninfo"))
+        {
+            if(!rpg_social_lastbeat) rpg_social_lastbeat = totalmillis;
+            else if(totalmillis - rpg_social_lastbeat >= 15000)
+            {
+                rpg_social_lastbeat = totalmillis;
+                addmsg(N_RPG_SOCREQ, "ris", SOC_ROSTER, "");
+                addmsg(N_RPG_SOCREQ, "ris", SOC_FRIENDS, "");
+                addmsg(N_RPG_SOCREQ, "ris", SOC_WHO, "");
+                addmsg(N_RPG_SOCREQ, "ris", SOC_LOG, "");
+                addmsg(N_RPG_SOCREQ, "ris", SOC_RANKS, "");
+                addmsg(N_RPG_SOCREQ, "ris", SOC_IGNORE, "");
+            }
+        }
+        else rpg_social_lastbeat = 0;
         updateprojectilefx(); // projectile spell visuals (no-op when none)
         int w, h; rpg_screenwh(w, h);
         if(w <= 0 || h <= 0) return;
