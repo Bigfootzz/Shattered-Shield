@@ -1723,6 +1723,13 @@ namespace game
     ICOMMAND(rpgequip, "s", (char *s), { if(!require_hardware_event("rpgequip")) return; addmsg(N_RPG_EQUIP, "rs", s); });
     ICOMMAND(rpgunequip, "s", (char *s), { if(!require_hardware_event("rpgunequip")) return; addmsg(N_RPG_UNEQUIP, "ri", rpg::slotid(s)); });
     ICOMMAND(rpguse, "s", (char *s), { if(!require_hardware_event("rpguse")) return; addmsg(N_RPG_USE, "rs", s); });
+    // TEST-ONLY (harness): use an item through the same path as rpguse
+    // (same N_RPG_USE message; the server still validates ownership and
+    // item usability), without the hardware-event gate (Nov 14 sandbox
+    // blocks rpguse from -x scripts, so headless checks cannot apply
+    // crafted buffs otherwise). Console-only, like the rest of the
+    // rpgtest* family.
+    ICOMMAND(rpgtestuse, "s", (char *s), { addmsg(N_RPG_USE, "rs", s); conoutf("rpgtestuse: sent '%s'", s); });
     ICOMMAND(rpgdrop, "s", (char *s), { if(!require_hardware_event("rpgdrop")) return; addmsg(N_RPG_DROP, "rs", s); });
     // client cache queries for the GUIs (never authoritative)
     static int rpg_cln = 0;
