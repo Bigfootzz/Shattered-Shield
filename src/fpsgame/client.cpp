@@ -100,6 +100,23 @@ namespace game
     ICOMMAND(ability4, "", (), { if(!require_hardware_event("ability4")) return; rpg_castslot(4); });
     // Arrow Shot (v0.1.8): ranger's ranged attack, ability index 5.
     ICOMMAND(ability5, "", (), { if(!require_hardware_event("ability5")) return; rpg_castslot(5); });
+    // TEST-ONLY (harness): cast an ability through the same path as
+    // ability1 (rpg_castslot -> rpg_castability -> N_RPG_CAST; the server
+    // still validates cooldown, mana, target, range and class), without
+    // the hardware-event gate (Nov 14 sandbox blocks ability1 from -x
+    // scripts, so headless checks cannot cast otherwise). Takes an
+    // ability id, not a hotbar slot: fresh harness characters have no
+    // class list, so slot resolution is a no-op for them, while an
+    // explicit id tests the cast path directly. No arg defaults to 0
+    // (Power Strike). Console-only, like the rest of the rpgtest* family.
+    void rpgtestcast_cmd(tagval *args, int numargs)
+    {
+        int id = numargs >= 1 ? args[0].getint() : 0;
+        if(!rpg::validability(id)) { conoutf("rpgtestcast: bad ability id %d", id); return; }
+        rpg_castability(id);
+        conoutf("rpgtestcast: %s (id %d)", rpg::ability(id).name, id);
+    }
+    COMMANDN(rpgtestcast, rpgtestcast_cmd, "iV");
 
     // Filler auto-attack (v0.1.146): the class's slot-1 ability from
     // rpg::classabilities IS the auto-attack (Quick Shot for Ranger at
@@ -1834,6 +1851,18 @@ namespace game
         rpg_craftresult[0] = '\0'; rpg_craftresultok = 0; rpg_craftresultset = false;
         addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]);
         showgui("rpgcraft");
+    });
+    // TEST-ONLY (harness): send the craft request through the same path
+    // as rpgcraftsend (same N_RPG_CRAFT message, same slots, same window
+    // re-show; the server still validates ownership and the recipe),
+    // without the hardware-event gate (Nov 14 sandbox blocks rpgcraftsend
+    // from -x scripts, so headless checks cannot craft otherwise).
+    // Console-only, like the rest of the rpgtest* family.
+    ICOMMAND(rpgtestcraft, "", (), {
+        rpg_craftresult[0] = '\0'; rpg_craftresultok = 0; rpg_craftresultset = false;
+        addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]);
+        showgui("rpgcraft");
+        conoutf("rpgtestcraft: sent '%s' + '%s'", rpg_craftslot[0], rpg_craftslot[1]);
     });
     ICOMMAND(rpg_craft_result, "", (), { result(rpg_craftresultset ? rpg_craftresult : ""); });
     ICOMMAND(rpg_craft_result_ok, "", (), intret(rpg_craftresultset ? rpg_craftresultok : 0));
