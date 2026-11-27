@@ -11,6 +11,13 @@ namespace rpg
     static const abilitydef ABILITIES[ABILITY_COUNT] =
     {
         // key            name            cooldown  mana  range   dmg   melee  type       delivery             projectile
+        // MANA TIERING (Nov 27, Ed): every ability costs mana, tiered by
+        // damage on the Magi's scale (Arcane 8 / Spark 12 / Ice 15,
+        // ~4-5 dmg per mana). Filler alone stays under the 6/s regen so
+        // auto-attack never stalls; weaving every special on cooldown
+        // drains the pool, so mana management matters for every class
+        // the way it already did for Magi. Level-1 pool 80, regen 6/s
+        // (stats.cpp); both grow with level and Wisdom.
         // Power Strike range is CENTER-TO-CENTER (client pre-check + server
         // validation both measure origin distance). Two characters in body
         // contact already stand ~7 units apart (model radii 3.5 + 3.5), and a
@@ -20,7 +27,7 @@ namespace rpg
         // covers real fighting distance with margin and stays clearly melee
         // next to Spark Bolt's 45. (Playtest bug, Oct 20: "weapons do nothing"
         // — every prior proof had masked this with the test range bypasses.)
-        { "powerstrike",  "Power Strike", 2000,     0,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior", "A powerful melee slash." },
+        { "powerstrike",  "Power Strike", 2000,     8,    15.0f, 35,   true,  "slash", DELIVERY_INSTANT,    NULL, "Warrior", "A powerful melee slash." },
         // MANA RETUNE Oct 22 (v0.1.8 fix 8): 25 -> 12. Level-1 pool is 80
         // (stat_maxmana base 40 -> 60): ~6.7 raw casts; the 3.5s Spark weave
         // (3.4 mana/s) sits under the 6/s regen, so steady casting is
@@ -31,7 +38,7 @@ namespace rpg
         // (base + weapon + Strength) yields 7 + weapon + Strength.
         // TUNING Oct 21 (user-approved): a weaponless level-1 fists
         // (0 + 0 + 1 = 1/tick) could never win starter hunts.
-        { "basicattack",  "Basic Attack", 800,      0,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL, NULL, "A basic weapon swing." },
+        { "basicattack",  "Basic Attack", 800,      2,    15.0f, 7,    true,  "slash", DELIVERY_INSTANT,    NULL, NULL, "A basic weapon swing." },
         // PROJECTILE SPELLS (Oct 21, Ed's request for wizard testing): the
         // first implementation of the RANGED DELIVERY DESIGN. Range + LoS are
         // checked at release exactly like Spark Bolt; the bolt then tracks
@@ -48,29 +55,30 @@ namespace rpg
         // (range + LoS at release, tracks target, fizzles if target dies) —
         // proving the delivery works for non-spell projectiles. Physical
         // damage: 40 + 2xDexterity (mirrors the spell formula's 2xKnowledge).
-        // 0 mana (it's an arrow, not a spell), 2.5s cooldown. Ranger-only.
-        { "arrowshot",    "Arrow Shot",   2500,     0,    120.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger", "A piercing arrow shot at range." },
+        // 8 mana, tiered like Arcane Bolt (40 dmg), 2.5s cooldown. Ranger-only.
+        { "arrowshot",    "Arrow Shot",   2500,     8,    120.0f, 40,   false, "pierce", DELIVERY_PROJECTILE, "arrow", "Ranger", "A piercing arrow shot at range." },
         // VENOM SHOT (v0.1.8 fix 10): the ranger's second starting attack.
         // Poison arrow: upfront physical hit (Dex-scaled like Arrow Shot)
-        // plus a 10s poison DoT (see abilitydot() below). 0 mana (it's an
-        // arrow), 8s cooldown — an opener, not a spam button.
-        { "poisonshot",   "Venom Shot",   8000,     0,    120.0f, 20,   false, "poison", DELIVERY_PROJECTILE, "arrow", "Ranger", "A poisoned arrow that wounds." },
+        // plus a 10s poison DoT (see abilitydot() below). 12 mana
+        // (20 upfront + 60 DoT), 8s cooldown — an opener, not a spam button.
+        { "poisonshot",   "Venom Shot",   8000,     12,   120.0f, 20,   false, "poison", DELIVERY_PROJECTILE, "arrow", "Ranger", "A poisoned arrow that wounds." },
         // REND (v0.1.8 fix 15): the warrior's second starting attack. Bleed
         // flavor of the same design: upfront melee hit (Strength-scaled)
-        // plus a 10s bleed DoT. 8s cooldown, melee range.
-        { "rend",         "Rend",         8000,     0,    15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior", "A slash that causes bleeding." },
+        // plus a 10s bleed DoT. 12 mana (15 upfront + 60 DoT), 8s cooldown, melee range.
+        { "rend",         "Rend",         8000,     12,   15.0f, 15,   true,  "bleed", DELIVERY_INSTANT,    NULL, "Warrior", "A slash that causes bleeding." },
         // QUICK SHOT / QUICK SLASH (v0.1.146): the fast filler attacks, one
         // per class, in hotbar slot 1 and tied to auto-attack. They fill the
         // rotation gap between the two slower specials. damagetype "quick":
         // base + weapon ONLY, no attribute scaling (see rpg_cast in
         // server.cpp) — with standard scaling the shared weapon+attribute
         // term would let the filler out-DPS the main attack at high level.
-        // 1.2s cooldown, 0 mana. Quick Shot is the Release-only clip
+        // 1.2s cooldown, 3 mana for Quick Shot (2 for Quick Slash: melee
+        // filler, 10 dmg vs 12). Quick Shot is the Release-only clip
         // (0.83s), which also gives the Ranger a ranged auto-attack
         // (range 120); before this, auto-attack was melee-only (Basic
         // Attack, range 15) so right-click at bow range did nothing.
-        { "quickshot",    "Quick Shot",   1200,     0,    120.0f, 12,  false, "quick", DELIVERY_PROJECTILE, "arrow", "Ranger", "A fast arrow shot." },
-        { "quickslash",   "Quick Slash",  1200,     0,    15.0f, 10,   true,  "quick", DELIVERY_INSTANT,    NULL, "Warrior", "A fast weapon slash." },
+        { "quickshot",    "Quick Shot",   1200,     3,    120.0f, 12,  false, "quick", DELIVERY_PROJECTILE, "arrow", "Ranger", "A fast arrow shot." },
+        { "quickslash",   "Quick Slash",  1200,     2,    15.0f, 10,   true,  "quick", DELIVERY_INSTANT,    NULL, "Warrior", "A fast weapon slash." },
     };
 
     // DoT definitions for the two v0.1.8 DoT attacks. 1s ticks x 10 = 10s.
