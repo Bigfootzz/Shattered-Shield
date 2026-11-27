@@ -4156,20 +4156,25 @@ namespace game
         // the dark interior and the metal rim stay visible around
         // it. Mapping (Ed): character -> lower-left, bag ->
         // lower-right, crafting -> bottom-center-right, social ->
-        // bottom-center-left (the reserved slot, filled Nov 27: the
-        // mirror of crafting across the composite center, 0.3520 =
-        // 1 - 0.6480). The clock text goes in the art's top black
+        // bottom-center-left (the reserved slot, filled Nov 27).
+        // Nov 27: these centers are MEASURED from the frame art
+        // itself (dark-disc components in radar_frame.png), not
+        // estimated — the art's circles sit ~2 screen px above the
+        // old estimates, and social sits 1.8px left of the exact
+        // crafting mirror (0.3523), so the constants are the true
+        // disc centers and the icons sit centered in their circles.
+        // The clock text goes in the art's top black
         // inset box, centered; the code-drawn bottom time box is
         // GONE entirely. The two small upper-right sockets are the
         // zoom buttons (glyphs baked into the art): their hit-rects
         // use the same 0.82x convention.
         {
-            float chx = compx + 0.1499f*comp, chy = compy + 0.7658f*comp, chz = 0.82f*0.1435f*comp;
-            float bgx = compx + 0.8405f*comp, bgy = compy + 0.7678f*comp, bgz = 0.82f*0.1435f*comp;
-            float crx = compx + 0.6480f*comp, cry = compy + 0.9040f*comp, crz = 0.82f*0.1435f*comp;
-            float sox = compx + 0.3520f*comp, soy = compy + 0.9040f*comp, soz = 0.82f*0.1435f*comp;
-            float zpx = compx + 0.8153f*comp, zpy = compy + 0.2184f*comp, zpz = 0.82f*0.0877f*comp;
-            float zmx = compx + 0.8655f*comp, zmy = compy + 0.2921f*comp, zmz = 0.82f*0.0877f*comp;
+            float chx = compx + 0.1529f*comp, chy = compy + 0.7600f*comp, chz = 0.82f*0.1435f*comp;
+            float bgx = compx + 0.8375f*comp, bgy = compy + 0.7592f*comp, bgz = 0.82f*0.1435f*comp;
+            float crx = compx + 0.6477f*comp, cry = compy + 0.8941f*comp, crz = 0.82f*0.1435f*comp;
+            float sox = compx + 0.3439f*comp, soy = compy + 0.8943f*comp, soz = 0.82f*0.1435f*comp;
+            float zpx = compx + 0.8138f*comp, zpy = compy + 0.2185f*comp, zpz = 0.82f*0.0877f*comp;
+            float zmx = compx + 0.8589f*comp, zmy = compy + 0.3018f*comp, zmz = 0.82f*0.0877f*comp;
             rpg_radar_char_rect[0] = chx - chz*0.5f; rpg_radar_char_rect[1] = chy - chz*0.5f;
             rpg_radar_char_rect[2] = chx + chz*0.5f; rpg_radar_char_rect[3] = chy + chz*0.5f;
             rpg_radar_bag_rect[0] = bgx - bgz*0.5f; rpg_radar_bag_rect[1] = bgy - bgz*0.5f;
