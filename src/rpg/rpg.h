@@ -48,6 +48,30 @@ namespace rpg
     // Set by bg_fillbots right after onconnect creates the bot row.
     // No-op when the row is missing.
     bool setbot(const char *name, bool bot);
+    // Action-bar assignment (Nov 27, Ed: Spells panel CAST replaced by an
+    // assign-to-bar control, WoW spellbook style). Per-character hotbar
+    // layout, stored in the characters.hotbar column as CSV of 10 ability
+    // ids (slot 1..10, -1 = unassigned). Resolved map: an assigned ability
+    // takes its chosen slot; any other slot keeps the class auto-fill
+    // (classabilities order), except an auto-filled ability that is
+    // assigned elsewhere is suppressed there, so no ability appears twice.
+    // Nothing assigned = today's fixed auto-fill, byte for byte.
+    // gethotbar/sethotbar are the raw column access (fail closed when the
+    // row/column is missing, same pattern as setarchetype/setmodel/setbot).
+    // hotbarmap resolves the 10 slots for a character (-1 = empty slot);
+    // hotbarability is the 1-based slot lookup. hotbarassign puts an owned
+    // ability in the first free slot (returns false when the bar is full
+    // or the ability is not in the character's class list); hotbarunassign
+    // removes an assignment (auto-fill returns). hotbarslot returns the
+    // 1-based assigned slot for an ability, or 0 when it is not assigned.
+    static const int HOTBAR_SLOTS = 10;
+    bool gethotbar(const char *name, int *out, int max);
+    bool sethotbar(const char *name, const int *slots, int n);
+    int hotbarmap(const char *name, int *out, int max);
+    int hotbarability(const char *name, int slot);
+    bool hotbarassign(const char *name, int ability, int &slotout);
+    bool hotbarunassign(const char *name, int ability);
+    int hotbarslot(const char *name, int ability);
     void ondisconnect(const char *name, const char *map, float x, float y, float z, float yaw);
     // Reload quest + repeatable caches from the DB for an already-connected
     // client. Needed because onconnect runs before the first map change, so

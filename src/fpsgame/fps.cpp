@@ -2195,12 +2195,11 @@ namespace game
             if(rpg_hotbar_rect[i][0] >= 0 && vx >= rpg_hotbar_rect[i][0] && vx < rpg_hotbar_rect[i][2] &&
                vy >= rpg_hotbar_rect[i][1] && vy < rpg_hotbar_rect[i][3])
             {
-                // Slots 1-5 have abilityN commands (the number-key path).
-                // A slot past 5 holding an ability (no class has one today;
-                // classabilities caps at 6) falls through to the world pick
-                // rather than inventing a new command.
-                if(i < 5) { defformatstring(cmd)("ability%d", i+1); execute(cmd); return true; }
-                return false;
+                // Every slot has an abilityN command (Nov 27, assign-to-bar:
+                // ability6-10 exist so assigned abilities on slots 6-10 have
+                // a key/click path like slots 1-5). An empty slot falls
+                // through to the world pick rather than casting nothing.
+                defformatstring(cmd)("ability%d", i+1); execute(cmd); return true;
             }
         }
         return false;
@@ -2302,6 +2301,10 @@ namespace game
         // order (v0.1.146: filler first — Warrior: Quick Slash, Power
         // Strike, Rend; Magi: Spark/Arcane/Ice Bolt; Ranger: Quick Shot,
         // Arrow Shot, Venom Shot). Remaining slots are empty kit frames.
+        // Nov 27 (assign-to-bar): the slots show the RESOLVED hotbar map
+        // (rpg::hotbarmap) instead of the fixed class order — an assigned
+        // ability takes its chosen slot, unassigned slots keep the
+        // auto-fill, and nothing assigned = the old order exactly.
         Texture *slottex = rpg_loadtex("packages/ui/rpg/slots/slot.png");
         static const char *abiconfiles[10] = {
             "packages/ui/rpg/hud/icon_powerstrike.png", // 0 Power Strike
@@ -2315,9 +2318,9 @@ namespace game
             "packages/ui/rpg/hud/icon_quickshot.png",   // 8 Quick Shot (bow art on the HUD tile, Nov 27)
             "packages/ui/rpg/hud/icon_quickslash.png",  // 9 Quick Slash (sword art on the HUD tile, Nov 27)
         };
-        char hudarch[32]; hudarch[0] = '\0';
-        if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
-        int hudids[6]; int hudn = rpg::classabilities(hudarch, hudids, 6);
+        int hudids[10];
+        if(player1 && player1->name[0]) rpg::hotbarmap(player1->name, hudids, 10);
+        else loopi(10) hudids[i] = -1;
         // v0.1.30: larger slot boxes, still inside the HUD frame.
         // 64*s boxes moved up to 84*s keep the bottom at sy+148*s,
         // inside the strip (strip height is ~156*s, bottom margin kept).
@@ -2333,7 +2336,7 @@ namespace game
             float qx = sx + (160 + i*70)*s;
             glBindTexture(GL_TEXTURE_2D, slottex->id);
             rpg_drawtexuv(qx, sloty, slotn, slotn, 0, 0, 1, 1);
-            if(i < hudn)
+            if(hudids[i] >= 0)
             {
                 // v0.1.42: action-bar hit-rect for the click handler (same
                 // geometry as the drawn slot frame and the hover tooltip).
@@ -2391,7 +2394,7 @@ namespace game
             int hoverAid = -1;
             loopi(10)
             {
-                if(i >= hudn) break;
+                if(hudids[i] < 0) continue;
                 float qx = sx + (160 + i*70)*s;
                 if(vx >= qx && vx < qx + slotn && vy >= sloty && vy < sloty + slotn)
                 {

@@ -86,13 +86,15 @@ namespace game
     // v0.1.8: hotbar slots 1-5 cast the nth ability in the character's class
     // list (rpg::classabilities), so each class sees and casts its own kit.
     // Slot with no ability for the class does nothing.
+    // Nov 27 (assign-to-bar): the slot resolves through
+    // rpg::hotbarability, so an assigned ability takes its chosen slot and
+    // unassigned slots keep the class auto-fill; nothing assigned = the old
+    // fixed order exactly, so keys 1-5 behave as before.
     static void rpg_castslot(int slot)
     {
         if(!player1 || slot < 1) return;
-        char arch[32]; arch[0] = '\0';
-        rpg::chararchetype(player1->name, arch, sizeof(arch));
-        int ids[6]; int n = rpg::classabilities(arch, ids, 6);
-        if(slot <= n) rpg_castability(ids[slot-1]);
+        int aid = rpg::hotbarability(player1->name, slot);
+        if(aid >= 0) rpg_castability(aid);
     }
     ICOMMAND(ability1, "", (), { if(!require_hardware_event("ability1")) return; rpg_castslot(1); });
     ICOMMAND(ability2, "", (), { if(!require_hardware_event("ability2")) return; rpg_castslot(2); });
@@ -101,6 +103,15 @@ namespace game
     ICOMMAND(ability4, "", (), { if(!require_hardware_event("ability4")) return; rpg_castslot(4); });
     // Arrow Shot (v0.1.8): ranger's ranged attack, ability index 5.
     ICOMMAND(ability5, "", (), { if(!require_hardware_event("ability5")) return; rpg_castslot(5); });
+    // Slots 6-10 (Nov 27, assign-to-bar): no class ability auto-fills
+    // here today, but an assigned ability needs a key/click path, so the
+    // commands exist and keys 6-0 bind to them on RPG maps. An empty slot
+    // does nothing, same as an empty slot 1-5.
+    ICOMMAND(ability6, "", (), { if(!require_hardware_event("ability6")) return; rpg_castslot(6); });
+    ICOMMAND(ability7, "", (), { if(!require_hardware_event("ability7")) return; rpg_castslot(7); });
+    ICOMMAND(ability8, "", (), { if(!require_hardware_event("ability8")) return; rpg_castslot(8); });
+    ICOMMAND(ability9, "", (), { if(!require_hardware_event("ability9")) return; rpg_castslot(9); });
+    ICOMMAND(ability10, "", (), { if(!require_hardware_event("ability10")) return; rpg_castslot(10); });
     // TEST-ONLY (harness): cast an ability through the same path as
     // ability1 (rpg_castslot -> rpg_castability -> N_RPG_CAST; the server
     // still validates cooldown, mana, target, range and class), without
@@ -2228,6 +2239,60 @@ namespace game
             }
         }
         intret(id);
+    });
+
+    // Action-bar assignment (Nov 27): the Spells panel's ADD TO BAR button
+    // calls rpghotbarassign with the row's ability id; the button label
+    // reads rpghotbarslot to show ON BAR <slot> once assigned (clicking
+    // then unassigns). Assign/unassign are real actions, so they take the
+    // hardware gate like rpgbuy/rpgequip; a real button click passes it.
+    // rpghotbarmap prints the resolved 10 slots for the log/verify path.
+    ICOMMAND(rpghotbarslot, "i", (int *i), { intret(player1 ? rpg::hotbarslot(player1->name, *i) : 0); });
+    ICOMMAND(rpghotbarmap, "", (), {
+        if(!player1) return;
+        int map[rpg::HOTBAR_SLOTS];
+        int filled = rpg::hotbarmap(player1->name, map, rpg::HOTBAR_SLOTS);
+        defformatstring(s)("hotbar %s:", player1->name);
+        loopi(rpg::HOTBAR_SLOTS) { defformatstring(part)(" %d", map[i]); concatstring(s, part); }
+        conoutf("%s (filled %d)", s, filled);
+    });
+    ICOMMAND(rpghotbarassign, "i", (int *i), {
+        if(!require_hardware_event("rpghotbarassign")) return;
+        if(!player1) return;
+        int slot = 0;
+        if(rpg::hotbarassign(player1->name, *i, slot)) conoutf("hotbar: %s assigned to slot %d", rpg::ability(*i).name, slot);
+        else conoutf("hotbar: could not assign %d (not owned, or the bar is full)", *i);
+    });
+    ICOMMAND(rpghotbarunassign, "i", (int *i), {
+        if(!require_hardware_event("rpghotbarunassign")) return;
+        if(!player1) return;
+        if(rpg::hotbarunassign(player1->name, *i)) conoutf("hotbar: %s removed from the bar", rpg::ability(*i).name);
+        else conoutf("hotbar: %d is not assigned", *i);
+    });
+    // TEST-ONLY (harness): assign/unassign through the same internal path
+    // without the hardware gate (Nov 14 sandbox blocks gated commands from
+    // -x scripts, so headless checks cannot assign otherwise). Console-only,
+    // like the rest of the rpgtest* family.
+    ICOMMAND(rpgtesthotbarassign, "i", (int *i), {
+        if(!player1) return;
+        int slot = 0;
+        if(rpg::hotbarassign(player1->name, *i, slot)) conoutf("rpgtesthotbarassign: %s -> slot %d", rpg::ability(*i).name, slot);
+        else conoutf("rpgtesthotbarassign: could not assign %d", *i);
+    });
+    ICOMMAND(rpgtesthotbarunassign, "i", (int *i), {
+        if(!player1) return;
+        if(rpg::hotbarunassign(player1->name, *i)) conoutf("rpgtesthotbarunassign: %d removed", *i);
+        else conoutf("rpgtesthotbarunassign: %d is not assigned", *i);
+    });
+    // TEST-ONLY (harness): cast hotbar SLOT <n> through rpg_castslot, the
+    // same path abilityN takes, without the hardware gate — so headless
+    // checks can prove an assigned ability actually fires from its slot.
+    // (rpgtestcast takes an ability id, which skips slot resolution.)
+    ICOMMAND(rpgtestcastslot, "i", (int *i), {
+        if(!player1) return;
+        int aid = rpg::hotbarability(player1->name, *i);
+        conoutf("rpgtestcastslot: slot %d -> ability %d", *i, aid);
+        rpg_castslot(*i);
     });
 
     void switchname(const char *name)

@@ -200,6 +200,12 @@ namespace rpg
         // were not in the main game's pool, so they leaked through.
         // Same migration pattern: flags bot rows durably by data, not name.
         { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN bot INTEGER NOT NULL DEFAULT 0", NULL, NULL, &err); sqlite3_free(err); }
+        // Action-bar assignment (Nov 27): per-character hotbar layout, CSV
+        // of 10 ability ids (slot 1..10, -1 = unassigned). Same migration
+        // pattern as copper/embers/bot: ALTER fails harmlessly when the
+        // column already exists (new DBs) or the DB predates it; reads and
+        // writes fail closed until the migration has run (server init).
+        { char *err = NULL; sqlite3_exec(db, "ALTER TABLE characters ADD COLUMN hotbar TEXT NOT NULL DEFAULT ''", NULL, NULL, &err); sqlite3_free(err); }
         // --- inventory & equipment v1 (milestone step 4) ---
         execsql("CREATE TABLE IF NOT EXISTS rpg_inventory("
                 "name TEXT NOT NULL,"
@@ -3090,6 +3096,193 @@ namespace rpg
         }
         sqlite3_close(cdb);
         return ok;
+    }
+    // --- action-bar assignment (Nov 27) ---
+    // Per-character hotbar layout in characters.hotbar (CSV of 10 ability
+    // ids, slot 1..10, -1 = unassigned). The cache is name-keyed and
+    // reloads from the DB when the character changes, so the per-frame
+    // hotbar render never touches SQLite (chararchetype does a direct DB
+    // read per call because casts are infrequent; the bar renders every
+    // frame, so it needs the cache).
+    static char hotbar_cache_name[64] = "";
+    static int hotbar_cache_assign[HOTBAR_SLOTS];
+    static bool hotbar_cache_valid = false;
+    static void hotbar_cache_load(const char *name)
+    {
+        loopi(HOTBAR_SLOTS) hotbar_cache_assign[i] = -1;
+        hotbar_cache_valid = false;
+        if(!name || !name[0]) { hotbar_cache_name[0] = '\0'; return; }
+        copystring(hotbar_cache_name, name, sizeof(hotbar_cache_name));
+        int tmp[HOTBAR_SLOTS];
+        if(gethotbar(name, tmp, HOTBAR_SLOTS))
+        {
+            loopi(HOTBAR_SLOTS) hotbar_cache_assign[i] = tmp[i];
+            hotbar_cache_valid = true;
+        }
+    }
+    static void hotbar_cache_ensure(const char *name)
+    {
+        if(!name || !name[0]) return;
+        if(!hotbar_cache_valid || strcmp(hotbar_cache_name, name)) hotbar_cache_load(name);
+    }
+    bool gethotbar(const char *name, int *out, int max)
+    {
+        if(out && max > 0) loopi(max) out[i] = -1;
+        if(!name || !name[0] || !out || max <= 0) return false;
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "SELECT hotbar FROM characters WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+            if(sqlite3_step(st) == SQLITE_ROW)
+            {
+                const char *csv = (const char *)sqlite3_column_text(st, 0);
+                if(csv)
+                {
+                    // CSV of up to 10 ints; a short or malformed tail stays -1.
+                    int n = 0;
+                    const char *p = csv;
+                    while(n < max && *p)
+                    {
+                        char *end = NULL;
+                        long v = strtol(p, &end, 10);
+                        if(end == p) break;
+                        out[n++] = (int)v;
+                        p = end;
+                        if(*p == ',') p++;
+                        else if(*p) break;
+                    }
+                }
+                ok = true;
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        return ok;
+    }
+    bool sethotbar(const char *name, const int *slots, int n)
+    {
+        if(!name || !name[0] || !slots || n <= 0) return false;
+        string csv; csv[0] = '\0';
+        loopi(HOTBAR_SLOTS)
+        {
+            int v = i < n ? slots[i] : -1;
+            defformatstring(part)("%s%d", i ? "," : "", v);
+            concatstring(csv, part);
+        }
+        sqlite3 *cdb = chardb_open();
+        if(!cdb) return false;
+        bool ok = false;
+        sqlite3_stmt *st = NULL;
+        if(sqlite3_prepare_v2(cdb, "UPDATE characters SET hotbar=?1 WHERE name=?2", -1, &st, NULL) == SQLITE_OK)
+        {
+            sqlite3_bind_text(st, 1, csv, -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 2, name, -1, SQLITE_STATIC);
+            ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(cdb) > 0;
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(cdb);
+        if(ok) hotbar_cache_load(name); // keep the session cache in step
+        return ok;
+    }
+    int hotbarmap(const char *name, int *out, int max)
+    {
+        if(out && max > 0) loopi(max) out[i] = -1;
+        if(!name || !name[0] || !out || max <= 0) return 0;
+        hotbar_cache_ensure(name);
+        char arch[32]; arch[0] = '\0';
+        int ids[6]; int n = 0;
+        if(classforname(name, arch, sizeof(arch))) n = classabilities(arch, ids, 6);
+        int filled = 0;
+        loopi(HOTBAR_SLOTS)
+        {
+            if(i >= max) break;
+            int aid = hotbar_cache_assign[i];
+            if(aid >= 0)
+            {
+                // Assigned slot: the stored ability must still be valid
+                // and owned by this class, or the slot reads as empty
+                // (stale rows from a re-rolled character fail closed).
+                bool owned = validability(aid);
+                if(owned)
+                {
+                    owned = false;
+                    loopj(n) if(ids[j] == aid) owned = true;
+                }
+                if(!owned) aid = -1;
+            }
+            if(aid < 0)
+            {
+                // Auto-fill: the class list in order, unless this ability
+                // is assigned to another slot (no ability appears twice).
+                if(i < n)
+                {
+                    aid = ids[i];
+                    loopj(HOTBAR_SLOTS) if(hotbar_cache_assign[j] == aid) { aid = -1; break; }
+                }
+                else aid = -1;
+            }
+            out[i] = aid;
+            if(aid >= 0) filled++;
+        }
+        return filled;
+    }
+    int hotbarability(const char *name, int slot)
+    {
+        if(!name || !name[0] || slot < 1 || slot > HOTBAR_SLOTS) return -1;
+        int map[HOTBAR_SLOTS];
+        hotbarmap(name, map, HOTBAR_SLOTS);
+        return map[slot-1];
+    }
+    bool hotbarassign(const char *name, int ability, int &slotout)
+    {
+        slotout = 0;
+        if(!name || !name[0] || !validability(ability)) return false;
+        char arch[32]; arch[0] = '\0';
+        if(!classforname(name, arch, sizeof(arch))) return false;
+        int ids[6]; int n = classabilities(arch, ids, 6);
+        bool owned = false;
+        loopi(n) if(ids[i] == ability) owned = true;
+        if(!owned) return false;
+        hotbar_cache_ensure(name);
+        // Already assigned: no-op, report the existing slot.
+        loopi(HOTBAR_SLOTS) if(hotbar_cache_assign[i] == ability) { slotout = i+1; return true; }
+        // First free slot in the resolved map (auto-filled slots count as
+        // taken; an empty auto slot counts as free once its ability moved).
+        int map[HOTBAR_SLOTS];
+        hotbarmap(name, map, HOTBAR_SLOTS);
+        int free = -1;
+        loopi(HOTBAR_SLOTS) if(map[i] < 0) { free = i; break; }
+        if(free < 0) return false;
+        int slots[HOTBAR_SLOTS];
+        loopi(HOTBAR_SLOTS) slots[i] = hotbar_cache_assign[i];
+        slots[free] = ability;
+        if(!sethotbar(name, slots, HOTBAR_SLOTS)) return false;
+        slotout = free+1;
+        return true;
+    }
+    bool hotbarunassign(const char *name, int ability)
+    {
+        if(!name || !name[0] || !validability(ability)) return false;
+        hotbar_cache_ensure(name);
+        bool found = false;
+        int slots[HOTBAR_SLOTS];
+        loopi(HOTBAR_SLOTS)
+        {
+            slots[i] = hotbar_cache_assign[i];
+            if(slots[i] == ability) { slots[i] = -1; found = true; }
+        }
+        if(!found) return false;
+        return sethotbar(name, slots, HOTBAR_SLOTS);
+    }
+    int hotbarslot(const char *name, int ability)
+    {
+        if(!name || !name[0] || !validability(ability)) return 0;
+        hotbar_cache_ensure(name);
+        loopi(HOTBAR_SLOTS) if(hotbar_cache_assign[i] == ability) return i+1;
+        return 0;
     }
     // Model dir for one character (used by rpg_enterworld to set the player
     // model). Direct DB read; infrequent so no session caching.
