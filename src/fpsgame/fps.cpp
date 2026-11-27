@@ -3877,6 +3877,7 @@ namespace game
     static float rpg_radar_char_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_bag_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_craft_rect[4] = {-1, -1, -1, -1};
+    static float rpg_radar_social_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_zoomin_rect[4] = {-1, -1, -1, -1};
     static float rpg_radar_zoomout_rect[4] = {-1, -1, -1, -1};
     bool rpg_radariconclick(float vx, float vy)
@@ -3898,6 +3899,12 @@ namespace game
            vy >= rpg_radar_craft_rect[1] && vy < rpg_radar_craft_rect[3])
         {
             execute("rpgcraft"); // v0.1.35: minimap crafting icon, syncs + shows craft window
+            return true;
+        }
+        if(rpg_radar_social_rect[0] >= 0 && vx >= rpg_radar_social_rect[0] && vx < rpg_radar_social_rect[2] &&
+           vy >= rpg_radar_social_rect[1] && vy < rpg_radar_social_rect[3])
+        {
+            execute("rpgsocial"); // same as O key: request fresh data + show social window
             return true;
         }
         // Nov 1 frame: zoom buttons (glyphs baked into the art's two small
@@ -4033,9 +4040,9 @@ namespace game
 
     void drawrpgradar(fpsent *d, int w, int h)
     {
-        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
-        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
-        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
+        if(!rpg::mapactive(getclientmap())) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_social_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
+        if(d->state == CS_DEAD || d->state == CS_SPECTATOR) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_social_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
+        if(!showradar) { rpg_radar_char_rect[0] = rpg_radar_bag_rect[0] = rpg_radar_craft_rect[0] = rpg_radar_social_rect[0] = rpg_radar_zoomin_rect[0] = rpg_radar_zoomout_rect[0] = -1; return; }
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         // Ed's frame art (Nov 1 redesign): the map rect stays s x s (427, as
         // since v0.1.31) but is now CENTERED on the art's ring center,
@@ -4126,17 +4133,19 @@ namespace game
         // at all. Each icon is 0.82x its circle's dark diameter, so
         // the dark interior and the metal rim stay visible around
         // it. Mapping (Ed): character -> lower-left, bag ->
-        // lower-right, crafting -> bottom-center-right. The
-        // bottom-center-left circle stays EMPTY (future social
-        // slot): no icon, no hit-rect, no click. The clock text
-        // goes in the art's top black inset box, centered; the
-        // code-drawn bottom time box is GONE entirely. The two small
-        // upper-right sockets are the zoom buttons (glyphs baked into
-        // the art): their hit-rects use the same 0.82x convention.
+        // lower-right, crafting -> bottom-center-right, social ->
+        // bottom-center-left (the reserved slot, filled Nov 27: the
+        // mirror of crafting across the composite center, 0.3520 =
+        // 1 - 0.6480). The clock text goes in the art's top black
+        // inset box, centered; the code-drawn bottom time box is
+        // GONE entirely. The two small upper-right sockets are the
+        // zoom buttons (glyphs baked into the art): their hit-rects
+        // use the same 0.82x convention.
         {
             float chx = compx + 0.1499f*comp, chy = compy + 0.7658f*comp, chz = 0.82f*0.1435f*comp;
             float bgx = compx + 0.8405f*comp, bgy = compy + 0.7678f*comp, bgz = 0.82f*0.1435f*comp;
             float crx = compx + 0.6480f*comp, cry = compy + 0.9040f*comp, crz = 0.82f*0.1435f*comp;
+            float sox = compx + 0.3520f*comp, soy = compy + 0.9040f*comp, soz = 0.82f*0.1435f*comp;
             float zpx = compx + 0.8153f*comp, zpy = compy + 0.2184f*comp, zpz = 0.82f*0.0877f*comp;
             float zmx = compx + 0.8655f*comp, zmy = compy + 0.2921f*comp, zmz = 0.82f*0.0877f*comp;
             rpg_radar_char_rect[0] = chx - chz*0.5f; rpg_radar_char_rect[1] = chy - chz*0.5f;
@@ -4145,6 +4154,8 @@ namespace game
             rpg_radar_bag_rect[2] = bgx + bgz*0.5f; rpg_radar_bag_rect[3] = bgy + bgz*0.5f;
             rpg_radar_craft_rect[0] = crx - crz*0.5f; rpg_radar_craft_rect[1] = cry - crz*0.5f;
             rpg_radar_craft_rect[2] = crx + crz*0.5f; rpg_radar_craft_rect[3] = cry + crz*0.5f;
+            rpg_radar_social_rect[0] = sox - soz*0.5f; rpg_radar_social_rect[1] = soy - soz*0.5f;
+            rpg_radar_social_rect[2] = sox + soz*0.5f; rpg_radar_social_rect[3] = soy + soz*0.5f;
             rpg_radar_zoomin_rect[0] = zpx - zpz*0.5f; rpg_radar_zoomin_rect[1] = zpy - zpz*0.5f;
             rpg_radar_zoomin_rect[2] = zpx + zpz*0.5f; rpg_radar_zoomin_rect[3] = zpy + zpz*0.5f;
             rpg_radar_zoomout_rect[0] = zmx - zmz*0.5f; rpg_radar_zoomout_rect[1] = zmy - zmz*0.5f;
@@ -4165,6 +4176,12 @@ namespace game
             // the buff icon only.
             glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_craft_hammer.png")->id);
             rpg_drawtexuv(crx - crz*0.5f, cry - crz*0.5f, crz, crz, 0, 0, 1, 1);
+            // Social button (Nov 27): two-person glyph in the reserved
+            // bottom-center-left circle, same 0.82x size and style as
+            // the other cluster icons. Click runs rpgsocial, the same
+            // command the O key calls.
+            glBindTexture(GL_TEXTURE_2D, rpg_loadtex("packages/ui/rpg/hud/icon_radar_social.png")->id);
+            rpg_drawtexuv(sox - soz*0.5f, soy - soz*0.5f, soz, soz, 0, 0, 1, 1);
             // Clock in the top inset box (white on the art's black
             // panel; inset height 0.1116 of the composite). Ed, Oct 28:
             // 12-hour with AM/PM (not 24-hour), one size step bigger,
