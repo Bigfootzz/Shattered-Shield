@@ -3926,6 +3926,28 @@ namespace game
         return false;
     }
 
+    // TEST-ONLY (harness): recorded radar-button rect for rpgtestradarclick.
+    // 0=char, 1=bag, 2=craft, 3=social, 4=zoomin, 5=zoomout. False when the
+    // index is bad or the rect was never recorded (drawrpgradar clears it
+    // to -1 when the radar is not drawn).
+    bool rpg_radarrect(int i, float *r)
+    {
+        const float *src = NULL;
+        switch(i)
+        {
+            case 0: src = rpg_radar_char_rect; break;
+            case 1: src = rpg_radar_bag_rect; break;
+            case 2: src = rpg_radar_craft_rect; break;
+            case 3: src = rpg_radar_social_rect; break;
+            case 4: src = rpg_radar_zoomin_rect; break;
+            case 5: src = rpg_radar_zoomout_rect; break;
+            default: return false;
+        }
+        if(!src || src[0] < 0) return false;
+        r[0] = src[0]; r[1] = src[1]; r[2] = src[2]; r[3] = src[3];
+        return true;
+    }
+
     // Bundle (Ed, Oct 28, WoW-style buff row): one icon per ACTIVE buff
     // type at the top of the screen, extending LEFT from the minimap's
     // left edge (the cluster leaves the top strip left of the ring free).

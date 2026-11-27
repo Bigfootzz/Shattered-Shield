@@ -1172,6 +1172,32 @@ namespace game
         conoutf("rpgtesttabclick: tab %d center virtual (%.0f,%.0f) -> screen (%.0f,%.0f); rpg_chattab %d -> %d %s",
             *i, cx, cy, sx, sy, before, after, after == *i ? "OK" : "NO-SWITCH");
     });
+    // TEST-ONLY (harness): prove radar-button clicks through the REAL click
+    // path. Reads the recorded radar rect (fps.cpp), parks the free cursor
+    // on its center (virtual -> screen px), and fires rpg_doclick(0)
+    // exactly as the MOUSE1 bind does. The console `rpgclick 0 1` CANNOT
+    // do this: the compiler pops the extra arg and the D down-state is 0
+    // with no key pressed, so it arrives as button=0,down=0 and no-ops.
+    // Needs a live player1 and a frame where drawrpgradar has recorded the
+    // rects. Index: 0=char, 1=bag, 2=craft, 3=social, 4=zoomin, 5=zoomout.
+    bool rpg_radarrect(int i, float *r); // fps.cpp
+    ICOMMAND(rpgtestradarclick, "i", (int *i),
+    {
+        float r[4];
+        if(!rpg_radarrect(*i, r)) { conoutf("rpgtestradarclick: radar %d rect not recorded yet (drawrpgradar has not run)", *i); return; }
+        if(r[2] <= r[0] || r[3] <= r[1])
+        {
+            conoutf("rpgtestradarclick: radar %d rect empty", *i);
+            return;
+        }
+        int w = 0; int h = 0; rpg_screenwh(w, h);
+        if(h <= 0) { conoutf("rpgtestradarclick: no window"); return; }
+        float cx = (r[0] + r[2])*0.5f; float cy = (r[1] + r[3])*0.5f; // virtual center
+        float sx = cx*h/hudvirtualheight(h); float sy = cy*h/hudvirtualheight(h); // -> screen px
+        rpg::cursorset(sx, sy);
+        rpg_doclick(0);
+        conoutf("rpgtestradarclick: radar %d center virtual (%.0f,%.0f) -> screen (%.0f,%.0f); doclick fired", *i, cx, cy, sx, sy);
+    });
     ICOMMAND(rpgteststats, "", (), { int l = 0; int x = 0; rpg::getclientstats(l, x); conoutf("rpgteststats: level=%d xp=%d", l, x); });
 
     void parsemessages(int cn, fpsent *d, ucharbuf &p); // defined below
