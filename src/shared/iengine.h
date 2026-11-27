@@ -574,6 +574,10 @@ struct g3d_gui
     virtual void end() = 0;
 
     virtual int text(const char *text, int color, const char *icon = NULL, int minwidth = 0) = 0;
+    // Fit-to-width text (Nov 27, Ed: text must scale with the UI and stay
+    // inside its box at any resolution -- never a fixed shrink, never clip):
+    // draws at the given scale, reduced just enough to fit maxw FONTW.
+    virtual int textfit(const char *text, int color, float maxw, float scale) = 0;
     int textf(const char *fmt, int color, const char *icon = NULL, ...) PRINTFARGS(2, 5)
     {
         defvformatstring(str, icon, fmt);

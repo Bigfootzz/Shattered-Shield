@@ -519,6 +519,11 @@ void guitext(char *name, char *icon, int *minwidth)
     if(cgui) cgui->text(name, !hideicon && icon[0] ? GUI_BUTTON_COLOR : GUI_TEXT_COLOR, hideicon ? NULL : (icon[0] ? icon : "info"), *minwidth);
 }
 
+void guitextfit(char *text, float *maxw, float *scale)
+{
+    if(cgui) cgui->textfit(text, GUI_TEXT_COLOR, *maxw, *scale);
+}
+
 void guititle(char *name, int *minwidth)
 {
     if(cgui) cgui->title(name, GUI_TITLE_COLOR, NULL, *minwidth);
@@ -823,6 +828,7 @@ COMMAND(newgui, "ssss");
 COMMAND(guibutton, "sssi");
 COMMAND(guibuttonframed, "sssii");
 COMMAND(guitext, "ssi");
+COMMAND(guitextfit, "sff");
 COMMAND(guiheader, "s");
 ICOMMAND(cleargui, "i", (int *n), intret(cleargui(*n)));
 COMMAND(showgui, "s");

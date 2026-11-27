@@ -448,6 +448,33 @@ struct gui : g3d_gui
 
     // RR: Add minimum width var
     int text  (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, false, minwidth); }
+
+    // Fit-to-width text (Nov 27, Ed: text must scale with the UI and stay
+    // inside its own box at any resolution -- never a fixed shrink, never
+    // clipped): measure the line at the preferred scale; if it is wider
+    // than maxw FONTW, reduce the scale just enough to fit. Where the line
+    // already fits, the preferred scale is used unchanged, so this is a
+    // no-op at resolutions and aspect ratios where the authored scale
+    // fits. The bound is in FONTW, so it scales with the UI: the same line
+    // fits at 720p, 1080p and 4:3 without the script knowing the
+    // resolution. The layout width is the fitted width, so the parent box
+    // never grows past maxw and no line runs past a box edge. scale <= 0
+    // keeps the current guitextscale.
+    int textfit(const char *text, int color, float maxw, float scale)
+    {
+        autotab();
+        float oldscale = gtextscale;
+        if(scale > 0) gtextscale = scale;
+        int maxwpx = int(maxw * FONTW);
+        if(text && maxwpx > 0)
+        {
+            int w = text_width(text);
+            if(w > maxwpx && w > 0) gtextscale = gtextscale * float(maxwpx) / float(w);
+        }
+        int ret = button_(text, color, NULL, false, false, 0);
+        gtextscale = oldscale;
+        return ret;
+    }
     int button(const char *text, int color, const char *icon, int minwidth, bool framed, int fillcolor = 0) { autotab(); return button_(text, color, icon, true, false, minwidth, framed, fillcolor); }
     int title (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, true, minwidth); }
     ///RR
