@@ -6,6 +6,7 @@
 #include "rpg/abilities.h"
 #include "rpg/stats.h"
 #include "rpg/items.h"
+#include "rpg/crafting.h"
 #include "auth.h"
 
 // rendergl.cpp ground-truth camera basis (global scope)
@@ -1847,17 +1848,24 @@ namespace game
         }
     });
     ICOMMAND(rpgcraftclear, "i", (int *i), { if(*i >= 0 && *i < 2) rpg_craftslot[*i][0] = '\0'; });
-    ICOMMAND(rpgcraftsend, "", (), {
-        if(!require_hardware_event("rpgcraftsend")) return;
-        // v0.1.34: window must STAY OPEN on Craft. rpgcraft is guistayopen
-        // (menus.cpp only auto-closes when shouldclearmenu), so the drop
-        // the user saw is guarded against here as well: after sending, the
-        // window is explicitly re-shown (showgui restores an already-open
-        // menu to the top, no duplicate push), and the stale result is
-        // cleared so the new result line cannot show the old outcome.
+    // Shared send body for rpgcraftsend / rpgtestcraft / rpgcraftrecipe:
+    // clear the stale result, send the two slot ids (the server still
+    // validates ownership and the recipe), and re-show the window.
+    // v0.1.34: window must STAY OPEN on Craft. rpgcraft is guistayopen
+    // (menus.cpp only auto-closes when shouldclearmenu), so the drop
+    // the user saw is guarded against here as well: after sending, the
+    // window is explicitly re-shown (showgui restores an already-open
+    // menu to the top, no duplicate push), and the stale result is
+    // cleared so the new result line cannot show the old outcome.
+    static void rpg_craftsend_now()
+    {
         rpg_craftresult[0] = '\0'; rpg_craftresultok = 0; rpg_craftresultset = false;
         addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]);
         showgui("rpgcraft");
+    }
+    ICOMMAND(rpgcraftsend, "", (), {
+        if(!require_hardware_event("rpgcraftsend")) return;
+        rpg_craftsend_now();
     });
     // TEST-ONLY (harness): send the craft request through the same path
     // as rpgcraftsend (same N_RPG_CRAFT message, same slots, same window
@@ -1866,10 +1874,102 @@ namespace game
     // from -x scripts, so headless checks cannot craft otherwise).
     // Console-only, like the rest of the rpgtest* family.
     ICOMMAND(rpgtestcraft, "", (), {
-        rpg_craftresult[0] = '\0'; rpg_craftresultok = 0; rpg_craftresultset = false;
-        addmsg(N_RPG_CRAFT, "rss", rpg_craftslot[0], rpg_craftslot[1]);
-        showgui("rpgcraft");
+        rpg_craftsend_now();
         conoutf("rpgtestcraft: sent '%s' + '%s'", rpg_craftslot[0], rpg_craftslot[1]);
+    });
+    // --- RPG: craft from a discovered recipe (UI buttons pass, Nov 27) ---
+    // The client only holds the recipe DISPLAY lines, so the ingredients
+    // are resolved by matching the line against the locally loaded recipe
+    // table (same data file, same "%d %s + %d %s = %s" format
+    // rpg_sendrecipes uses) — display names are never parsed. A missing
+    // ingredient refuses locally with the server's own wording and does
+    // NOT send. The GUI switches to the Craft tab after the click (in
+    // rpg.cfg), so the result line is visible either way.
+    static const rpg::craftrecipe *rpg_recipebyline(int i)
+    {
+        if(i < 0 || i >= rpg_craftrecipen) return NULL;
+        const char *line = rpg_craftrecipes[i];
+        loopj(rpg::craftrecipecount())
+        {
+            const rpg::craftrecipe *r = rpg::craftrecipebyindex(j);
+            if(!r) continue;
+            defformatstring(mine)("%d %s + %d %s = %s",
+                r->ingcount[0], rpg::itemname(rpg::finditem(r->ing[0])),
+                r->ingcount[1], rpg::itemname(rpg::finditem(r->ing[1])),
+                rpg::itemname(rpg::finditem(r->out)));
+            if(!strcmp(mine, line)) return r;
+        }
+        return NULL;
+    }
+    // Owned count of one item id in the client inventory cache.
+    static int rpg_craftowned(const char *id)
+    {
+        int idn = rpg::finditem(id);
+        if(idn < 0) return 0;
+        int n = 0;
+        loopi(rpg_cln) if(rpg_clinv[i].item == idn) n += rpg_clinv[i].count;
+        return n;
+    }
+    // Slottable id for ingredient k: the id itself when owned, else (an
+    // enhance recipe's gear only) an owned enhanced variant of it, which
+    // the server resolves back to the base recipe via enhbase. "" = not
+    // owned in any usable form.
+    static void rpg_craftslotid(const rpg::craftrecipe *r, int k, string &out)
+    {
+        out[0] = '\0';
+        const char *id = r->ing[k];
+        if(rpg_craftowned(id) > 0) { copystring(out, id, sizeof(string)); return; }
+        if(!r->enhance || k != 0) return;
+        loopi(rpg_cln)
+        {
+            const rpg::itemdef &d = rpg::item(rpg_clinv[i].item);
+            if(d.enhbase && !strcmp(d.enhbase, id) && rpg_clinv[i].count > 0)
+            { copystring(out, d.id, sizeof(string)); return; }
+        }
+    }
+    // Refuse a recipe craft locally: set the result line (shown on the
+    // Craft tab) and re-show the window. Returns false for the callers.
+    static bool rpg_craftrecipe_refuse(const char *why)
+    {
+        copystring(rpg_craftresult, why, sizeof(string));
+        rpg_craftresultok = 0; rpg_craftresultset = true;
+        showgui("rpgcraft");
+        return false;
+    }
+    // Fill both slots from recipe i and send. False = refused locally
+    // (stale line, or an ingredient not owned); nothing is sent then.
+    static bool rpg_craftrecipe_go(int i)
+    {
+        const rpg::craftrecipe *r = rpg_recipebyline(i);
+        if(!r) return rpg_craftrecipe_refuse("That recipe is no longer available.");
+        rpg_refreshcl();
+        string id0, id1;
+        rpg_craftslotid(r, 0, id0);
+        rpg_craftslotid(r, 1, id1);
+        bool ok = id0[0] && id1[0];
+        if(ok && !strcmp(r->ing[0], r->ing[1]))
+            ok = rpg_craftowned(r->ing[0]) >= r->ingcount[0] + r->ingcount[1];
+        else if(ok)
+            ok = rpg_craftowned(id0) >= r->ingcount[0] && rpg_craftowned(id1) >= r->ingcount[1];
+        if(!ok) return rpg_craftrecipe_refuse("You don't have those ingredients.");
+        copystring(rpg_craftslot[0], id0, sizeof(string));
+        copystring(rpg_craftslot[1], id1, sizeof(string));
+        rpg_craftsend_now();
+        return true;
+    }
+    ICOMMAND(rpgcraftrecipe, "i", (int *i), {
+        if(!require_hardware_event("rpgcraftrecipe")) return;
+        rpg_craftrecipe_go(*i);
+    });
+    // TEST-ONLY (harness): same fill-and-send as rpgcraftrecipe, without
+    // the hardware-event gate, so headless checks can drive the recipe
+    // button path from -x scripts. Console-only, like the rest of the
+    // rpgtest* family.
+    ICOMMAND(rpgtestcraftrecipe, "i", (int *i), {
+        if(rpg_craftrecipe_go(*i))
+            conoutf("rpgtestcraftrecipe: sent '%s' + '%s'", rpg_craftslot[0], rpg_craftslot[1]);
+        else
+            conoutf("rpgtestcraftrecipe: refused (see result line)");
     });
     ICOMMAND(rpg_craft_result, "", (), { result(rpg_craftresultset ? rpg_craftresult : ""); });
     ICOMMAND(rpg_craft_result_ok, "", (), intret(rpg_craftresultset ? rpg_craftresultok : 0));
