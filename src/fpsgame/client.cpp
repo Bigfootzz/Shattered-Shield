@@ -2192,7 +2192,8 @@ namespace game
     // Ability icon (Nov 13 rework): HUD icon path for an ability id, for
     // the character-sheet Spells side panel. Same table as the HUD's
     // abiconfiles (fps.cpp); Basic Attack (id 2) has no icon and falls
-    // back to icon_empty.png, same as rpgeqicon. The table lives outside
+    // back to icon_ability_empty.png (dark HUD tile, Nov 27 - not the grey
+    // item placeholder icon_empty.png used by rpgeqicon). The table lives outside
     // the ICOMMAND because the commas in a brace-initializer would split
     // the macro arguments.
     static const char *rpgabiconfiles[10] = {
@@ -2204,11 +2205,11 @@ namespace game
         "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
         "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot
         "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend
-        "packages/ui/rpg/icons/icon_bow.png",       // 8 Quick Shot (PLACEHOLDER - inventory art, needs HUD-style icon)
-        "packages/ui/rpg/icons/icon_sword.png",     // 9 Quick Slash (PLACEHOLDER - inventory art, needs HUD-style icon)
+        "packages/ui/rpg/hud/icon_quickshot.png",   // 8 Quick Shot (bow art on the HUD tile, Nov 27)
+        "packages/ui/rpg/hud/icon_quickslash.png",  // 9 Quick Slash (sword art on the HUD tile, Nov 27)
     };
     ICOMMAND(rpgabicon, "i", (int *i), {
-        result(rpg::validability(*i) && *i >= 0 && *i < rpg::ABILITY_COUNT && rpgabiconfiles[*i] && rpgabiconfiles[*i][0] ? rpgabiconfiles[*i] : "packages/ui/rpg/icons/icon_empty.png");
+        result(rpg::validability(*i) && *i >= 0 && *i < rpg::ABILITY_COUNT && rpgabiconfiles[*i] && rpgabiconfiles[*i][0] ? rpgabiconfiles[*i] : "packages/ui/rpg/hud/icon_ability_empty.png");
     });
     // Spells tab (Nov 13): ability id at position <slot> in the player's
     // class list (rpg::classabilities), or -1 when the slot is empty.

@@ -2312,8 +2312,8 @@ namespace game
             "packages/ui/rpg/hud/icon_arrowshot.png",   // 5 Arrow Shot
             "packages/ui/rpg/hud/icon_venomshot.png",   // 6 Venom Shot (v0.1.8)
             "packages/ui/rpg/hud/icon_rend.png",        // 7 Rend (v0.1.8)
-            "packages/ui/rpg/icons/icon_bow.png",       // 8 Quick Shot (PLACEHOLDER - inventory art, needs HUD-style icon)
-            "packages/ui/rpg/icons/icon_sword.png",     // 9 Quick Slash (PLACEHOLDER - inventory art, needs HUD-style icon)
+            "packages/ui/rpg/hud/icon_quickshot.png",   // 8 Quick Shot (bow art on the HUD tile, Nov 27)
+            "packages/ui/rpg/hud/icon_quickslash.png",  // 9 Quick Slash (sword art on the HUD tile, Nov 27)
         };
         char hudarch[32]; hudarch[0] = '\0';
         if(player1 && player1->name[0]) rpg::chararchetype(player1->name, hudarch, sizeof(hudarch));
