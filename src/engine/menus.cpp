@@ -432,11 +432,14 @@ void guibutton(char *name, char *action, char *icon, int *minwidth)
 // Framed button (v0.1.148-test, Ed Nov 25): same as guibutton, but the
 // label renders inside a dark fill + steel border (gui::button framed
 // path in 3dgui.cpp), so action controls read as buttons, not bare text.
-void guibuttonframed(char *name, char *action, char *icon, int *minwidth)
+// Optional 5th arg fillcolor (Nov 27, crafting buttons): an RGB fill
+// (e.g. 0xB34700 burnt orange); 0 (default) keeps the dark fill, so
+// every existing caller is unchanged.
+void guibuttonframed(char *name, char *action, char *icon, int *minwidth, int *fillcolor)
 {
     if(!cgui) return;
     bool hideicon = !strcmp(icon, "0");
-    int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : (icon[0] ? icon : (strstr(action, "showgui") ? "menu" : "action")), *minwidth, true);
+    int ret = cgui->button(name, GUI_BUTTON_COLOR, hideicon ? NULL : (icon[0] ? icon : (strstr(action, "showgui") ? "menu" : "action")), *minwidth, true, *fillcolor);
     if(ret&G3D_UP)
     {
         updatelater.add().schedule(action[0] ? action : name);
@@ -818,7 +821,7 @@ void guitextscale(float *scale, uint *contents)
 
 COMMAND(newgui, "ssss");
 COMMAND(guibutton, "sssi");
-COMMAND(guibuttonframed, "sssi");
+COMMAND(guibuttonframed, "sssii");
 COMMAND(guitext, "ssi");
 COMMAND(guiheader, "s");
 ICOMMAND(cleargui, "i", (int *n), intret(cleargui(*n)));

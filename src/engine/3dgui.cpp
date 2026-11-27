@@ -448,7 +448,7 @@ struct gui : g3d_gui
 
     // RR: Add minimum width var
     int text  (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, false, minwidth); }
-    int button(const char *text, int color, const char *icon, int minwidth, bool framed) { autotab(); return button_(text, color, icon, true, false, minwidth, framed); }
+    int button(const char *text, int color, const char *icon, int minwidth, bool framed, int fillcolor = 0) { autotab(); return button_(text, color, icon, true, false, minwidth, framed, fillcolor); }
     int title (const char *text, int color, const char *icon, int minwidth) { autotab(); return button_(text, color, icon, false, true, minwidth); }
     ///RR
     void separator() { autotab(); line_(FONTH/3); }
@@ -1141,7 +1141,7 @@ struct gui : g3d_gui
     }
 
     // RR -> Minimum width
-    int button_(const char *rawText, int color, const char *icon, bool clickable, bool center, int minwidth, bool framed = false)
+    int button_(const char *rawText, int color, const char *icon, bool clickable, bool center, int minwidth, bool framed = false, int fillcolor = 0)
     {
         // RR: Try to find a translation
         const char *text = rawText[0] == 't' && rawText[1] == ':' ? getTranslation((rawText+2)) : rawText;
@@ -1174,7 +1174,7 @@ struct gui : g3d_gui
         if(visible())
         {
             bool hit = ishit(w + 2*fpad, FONTH, curx - fpad, cury);
-            if(hit && clickable) color = 0xFF0000;
+            if(hit && clickable && !fillcolor) color = 0xFF0000;
             int x = curx;
             if(isvertical() && center) x += (xsize-w)/2;
 
@@ -1190,7 +1190,19 @@ struct gui : g3d_gui
                 int fx = x - fpad, fy = cury + 1, fw = w + 2*fpad, fh = FONTH - 2;
                 glDisable(GL_TEXTURE_2D);
                 notextureshader->set();
-                if(hit && clickable) glColor4f(0.14f, 0.14f, 0.19f, 0.95f);
+                if(fillcolor)
+                {
+                    // Custom fill (Nov 27, crafting buttons): the
+                    // caller passes an RGB fill (0 = the default dark
+                    // fill below). Hover brightens it; the steel border
+                    // is unchanged, and the text keeps its normal color
+                    // on hover (red text on orange would be unreadable)
+                    // — the brighter fill is the hover cue.
+                    float fr = ((fillcolor>>16)&0xFF)/255.0f, fg = ((fillcolor>>8)&0xFF)/255.0f, fb = (fillcolor&0xFF)/255.0f;
+                    if(hit && clickable) { fr = min(fr*1.3f, 1.0f); fg = min(fg*1.3f, 1.0f); fb = min(fb*1.3f, 1.0f); glColor4f(fr, fg, fb, 0.95f); }
+                    else glColor4f(fr, fg, fb, 0.92f);
+                }
+                else if(hit && clickable) glColor4f(0.14f, 0.14f, 0.19f, 0.95f);
                 else glColor4f(0.05f, 0.05f, 0.08f, 0.92f);
                 rect_(fx, fy, fw, fh);
                 glColor4f(0.45f, 0.47f, 0.52f, 0.95f);

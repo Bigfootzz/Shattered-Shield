@@ -579,7 +579,7 @@ struct g3d_gui
         defvformatstring(str, icon, fmt);
         return text(str, color, icon);
     }
-    virtual int button(const char *text, int color, const char *icon = NULL, int minwidth = 0, bool framed = false) = 0;
+    virtual int button(const char *text, int color, const char *icon = NULL, int minwidth = 0, bool framed = false, int fillcolor = 0) = 0;
     int buttonf(const char *fmt, int color, const char *icon = NULL, ...) PRINTFARGS(2, 5)
     {
         defvformatstring(str, icon, fmt);
