@@ -108,6 +108,7 @@ namespace rpg
     static std::map<std::string, std::map<int, qrow> > questcache;
     static void questcacheload(const char *name);
     static void rpcacheload(const char *name);
+    static bool saveinv_locked(const char *name); // defined with saveinv below; shares its body without re-entering the transaction
     // quest engine v2: repeatable fetch state, session view of rpg_repeatables
     struct rprow { char item[64]; int amount; int readyat; };
     static std::map<std::string, std::map<int, rprow> > rpcache;
@@ -576,10 +577,18 @@ namespace rpg
     void ondisconnect(const char *name, const char *map, float x, float y, float z, float yaw)
     {
         if(!db || !name || !name[0]) return;
+        // MMO hardening (Nov 27): position + inventory + buff-clear
+        // persist as one transaction, so a crash mid-logout can never
+        // leave position and inventory from different moments. The
+        // saveinv body runs through saveinv_locked (same statements,
+        // no second BEGIN). If BEGIN fails the three calls run as
+        // autocommits, exactly as before; execsql already logs it.
+        bool intxn = execsql("BEGIN IMMEDIATE");
         savepos(name, map, x, y, z, yaw);
-        saveinv(name); // milestone step 4: inventory + equipment persist with the character
+        saveinv_locked(name);
         // Phase 2 buffs: cleared on logout/disconnect by design (death never calls this).
         clearbuffs(name);
+        if(intxn) execsql("COMMIT");
         // quest engine v2: quest + repeatable rows are already write-through; drop the session views
         questcache.erase(std::string(name));
         rpcache.erase(std::string(name));
@@ -864,23 +873,34 @@ namespace rpg
 
     // Write the session cache's inventory + equipment rows for one character.
     // Delete + reinsert is simple and always consistent for these small sets.
-    void saveinv(const char *name)
+    // MMO hardening (Nov 27): the body runs inside a transaction owned by
+    // the caller. saveinv() owns one for its standalone callers
+    // (additem/removeitem); ondisconnect() owns one that also covers
+    // savepos + clearbuffs. Split so neither path can nest a BEGIN inside
+    // the other's transaction (SQLite rejects that, and a COMMIT issued by
+    // the inner call would commit the outer transaction early). Returns
+    // false if any statement failed; true when there was nothing cached
+    // (nothing to write is not a failure).
+    static bool saveinv_locked(const char *name)
     {
         cachedchar *cc = findcached(name);
-        if(!cc || !db || !name || !name[0]) return;
+        if(!cc || !db || !name || !name[0]) return true;
+        bool ok = true;
         sqlite3_stmt *st = NULL;
         if(sqlite3_prepare_v2(db, "DELETE FROM rpg_inventory WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
         {
             sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
-            sqlite3_step(st);
+            if(sqlite3_step(st) != SQLITE_DONE) ok = false;
             sqlite3_finalize(st);
         }
+        else ok = false;
         if(sqlite3_prepare_v2(db, "DELETE FROM rpg_equipment WHERE name=?1", -1, &st, NULL) == SQLITE_OK)
         {
             sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
-            sqlite3_step(st);
+            if(sqlite3_step(st) != SQLITE_DONE) ok = false;
             sqlite3_finalize(st);
         }
+        else ok = false;
         for(std::map<int, int>::iterator it = cc->inv.begin(); it != cc->inv.end(); ++it)
         {
             if(it->second <= 0) continue;
@@ -889,9 +909,10 @@ namespace rpg
                 sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(st, 2, item(it->first).id, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_int(st, 3, it->second);
-                sqlite3_step(st);
+                if(sqlite3_step(st) != SQLITE_DONE) ok = false;
                 sqlite3_finalize(st);
             }
+            else ok = false;
         }
         loopi(SLOT_COUNT)
         {
@@ -901,10 +922,24 @@ namespace rpg
                 sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_int(st, 2, i);
                 sqlite3_bind_text(st, 3, item(cc->equipped[i]).id, -1, SQLITE_TRANSIENT);
-                sqlite3_step(st);
+                if(sqlite3_step(st) != SQLITE_DONE) ok = false;
                 sqlite3_finalize(st);
             }
+            else ok = false;
         }
+        return ok;
+    }
+
+    void saveinv(const char *name)
+    {
+        if(!db || !name || !name[0]) return;
+        // Standalone callers (additem/removeitem) get one transaction for
+        // the whole delete + reinsert, so a crash can never leave an empty
+        // pack. One COMMIT also replaces one fsync per statement, so this
+        // is cheaper on the tick than the old per-statement autocommits.
+        if(!execsql("BEGIN IMMEDIATE")) return; // execsql already logs
+        if(saveinv_locked(name)) execsql("COMMIT");
+        else execsql("ROLLBACK");
     }
 
     bool additem(const char *name, const char *itemid, int count)
