@@ -198,7 +198,7 @@ namespace server
         bool onfire, teamkilled, teamshooter;
         struct clientinfo *fireattacker;
 
-        gamestate() : state(CS_DEAD), editstate(CS_DEAD), lifesequence(0), burnmillis(0), onfire(false) {}
+        gamestate() : state(CS_DEAD), editstate(CS_DEAD), lifesequence(0), burnmillis(0), onfire(false), fireattacker(NULL) {}
 
         bool isalive(int gamemillis)
         {
@@ -240,6 +240,7 @@ namespace server
             lastspawn = -1;
             lastshot = 0;
             onfire = false;
+            fireattacker = NULL; // MMO hardening (Nov 27): never carry a stale attacker across a respawn
         }
 
         void reassign()
@@ -7646,17 +7647,34 @@ namespace server
         {
             gamestate &gs = clients[i]->state;
             int burnmillis = gamemillis-gs.burnmillis;
+            // MMO hardening (Nov 27): fireattacker is a raw pointer that
+            // can dangle if the attacker disconnects (or its bot is
+            // deleted) while the victim is still burning. Validate it is
+            // still a live, connected client before touching it; a stale
+            // attacker ends the burn. (The disconnect sweep in
+            // clientdisconnect clears the common case promptly; this guard
+            // is the backstop for every other teardown path.)
+            clientinfo *fa = NULL;
+            if(gs.fireattacker) loopvj(clients) if(clients[j] == gs.fireattacker && clients[j]->connectionState == CONNECTION_STATE_CONNECTED) { fa = clients[j]; break; }
+            if(!fa)
+            {
+                gs.onfire = false;
+                gs.fireattacker = NULL;
+                sendf(-1, 1, "ri5", N_SETONFIRE, clients[i]->clientnum, clients[i]->clientnum, WEAP_FLAMEJET, 0);
+                continue;
+            }
             if (gs.state == CS_ALIVE && gamemillis-gs.lastburnpain >= clamp(burnmillis, 200, 1000))
             {
-                int damage = min(WEAP(WEAP_FLAMEJET,damage)*1000/max(burnmillis, 1000), gs.health)*(gs.fireattacker->state.quadmillis? 4: 1);
-                dodamage(clients[i], gs.fireattacker, damage, WEAP_FLAMEJET);
+                int damage = min(WEAP(WEAP_FLAMEJET,damage)*1000/max(burnmillis, 1000), gs.health)*(fa->state.quadmillis? 4: 1);
+                dodamage(clients[i], fa, damage, WEAP_FLAMEJET);
                 gs.lastburnpain = gamemillis;
             }
 
             if (burnmillis > 4000)
             {
                 gs.onfire = false;
-                sendf(-1, 1, "ri5", N_SETONFIRE, clients[i]->state.fireattacker->clientnum, clients[i]->clientnum, WEAP_FLAMEJET, 0);
+                gs.fireattacker = NULL;
+                sendf(-1, 1, "ri5", N_SETONFIRE, fa->clientnum, clients[i]->clientnum, WEAP_FLAMEJET, 0);
             }
         }
 
@@ -7836,6 +7854,18 @@ namespace server
             sendf(-1, 1, "ri2", N_CDIS, n);
             clients.removeobj(ci);
             aiman::removeai(ci);
+            // MMO hardening (Nov 27): ci may be the fireattacker of a
+            // burning client. Clear the pointer now, before the slot is
+            // reused, so the burn tick never reads a dangling (or
+            // recycled) attacker. The burn loop's own guard is the
+            // backstop for teardown paths that do not come through here
+            // (e.g. bot deletion via aiman::deleteai).
+            loopv(clients) if(clients[i]->state.fireattacker == ci)
+            {
+                clients[i]->state.fireattacker = NULL;
+                clients[i]->state.onfire = false;
+                sendf(-1, 1, "ri5", N_SETONFIRE, clients[i]->clientnum, clients[i]->clientnum, WEAP_FLAMEJET, 0);
+            }
             // v0.1.47 notes fix 6: the last human leaving a battleground
             // (L-leave disconnect, or closing the game mid-match) never
             // ran the queue-end cleanup, so bot rows leaked and the next
