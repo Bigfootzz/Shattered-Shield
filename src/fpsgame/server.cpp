@@ -3768,7 +3768,9 @@ namespace server
             target->state.deaths++;
             if(actor!=target && isteam(actor->team, target->team))
             {
-                actor->state.teamkills++;
+                // MMO hardening (Nov 27): teamkills was counted twice for
+                // one teamkill (here and again below, with addteamkill).
+                // The single authoritative increment is the one below.
                 if (!target->state.teamshooter)
                 {
                     actor->state.teamkilled = true;
