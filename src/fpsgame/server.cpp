@@ -5999,6 +5999,8 @@ namespace server
         int id;
         int castercn;
         int targetcn;
+        int castersession; // MMO hardening (Nov 27): caster session at
+        int targetsession; // release; -1 for AI (bots carry no sessionid).
         int ability;   // ability id, selects the client visual style
         int damage;    // computed at release (base + 2*Knowledge, crit rolled)
         int level;     // caster level snapshot (DoT attr scaling at apply time)
@@ -6010,12 +6012,24 @@ namespace server
     static const float RPG_PROJ_SPEED = 130.0f;  // u/s: 40u range in ~0.3s
     static const float RPG_PROJ_HITDIST = 6.0f;  // torso-proximity hit radius
 
-    static clientinfo *rpg_projfind(int cn, bool monsteronly)
+    // MMO hardening (Nov 27): slots are matched by clientnum only, so a
+    // clientnum reused after a disconnect could misroute a projectile or
+    // DoT to the new occupant. Null slots are skipped, and a slot whose
+    // owner is no longer connected is skipped too. When session >= 0 the
+    // slot's human owner must still carry that session: a human
+    // reconnect gets a fresh random sessionid (clientconnect), so a
+    // reused clientnum never inherits an old projectile or DoT. Bots
+    // carry no meaningful sessionid (aiman::addai never assigns one),
+    // so the session check is human-only; a bot slot is live iff it is
+    // still in clients[], and bots are removed from clients[] on delete.
+    static clientinfo *rpg_projfind(int cn, bool monsteronly, int session = -1)
     {
         loopv(clients)
         {
             clientinfo *t = clients[i];
-            if(t->clientnum != cn) continue;
+            if(!t || t->clientnum != cn) continue;
+            if(t->connectionState != CONNECTION_STATE_CONNECTED) continue;
+            if(session >= 0 && t->state.ai.type == ai::AI_TYPE_NONE && t->sessionid != session) return NULL;
             if(monsteronly && t->state.ai.type != ai::AI_TYPE_MONSTER) return NULL;
             return t;
         }
@@ -6040,11 +6054,11 @@ namespace server
             // the crash is NOT in the tick's hit branch (zero tick lines
             // fired) — it is somewhere in the per-frame loop after a cast.
             // These two lines prove whether the tick even runs, and whether
-            // the target lookup (rpg_projfind, which dereferences each
-            // clients[] slot with no null check) returns a usable pointer.
+            // the target lookup (rpg_projfind, null/session-guarded since
+            // the Nov 27 MMO hardening) returns a usable pointer.
             conoutf("rpg: proj tick: enter, proj %d, targetcn %d, castercn %d", pr.id, pr.targetcn, pr.castercn);
             fflush(stdout);
-            clientinfo *t = rpg_projfind(pr.targetcn, !bg_pvp);
+            clientinfo *t = rpg_projfind(pr.targetcn, !bg_pvp, pr.targetsession);
             if(t) conoutf("rpg: proj tick: lookup done, proj %d, target '%s', state %d, hp %d", pr.id, t->name, t->state.state, t->state.health);
             else conoutf("rpg: proj tick: lookup done, proj %d, target NULL", pr.id);
             fflush(stdout);
@@ -6063,7 +6077,7 @@ namespace server
             float dist = d.magnitude();
             if(dist <= RPG_PROJ_HITDIST)
             {
-                clientinfo *caster = rpg_projfind(pr.castercn, false);
+                clientinfo *caster = rpg_projfind(pr.castercn, false, pr.castersession);
                 vec push(t->state.o); push.sub(pr.pos); push.z = 0;
                 if(push.squaredlen() > 0.01f) push.normalize();
                 int hpbefore = t->state.health;
@@ -6174,6 +6188,8 @@ namespace server
     {
         int targetcn;
         int casterncn;  // -1 when the caster is gone; dodamage accepts NULL
+        int targetsession; // MMO hardening (Nov 27): sessions at apply
+        int castersession; // time; -1 for AI (bots carry no sessionid).
         int ability;    // ability id (logging + refresh matching)
         int tickdmg;    // damage per tick, computed at apply (base + attr)
         int tickms;     // ms between ticks
@@ -6191,13 +6207,22 @@ namespace server
         loopv(rpg_dots) if(rpg_dots[i].targetcn == target->clientnum && rpg_dots[i].ability == ability)
         {
             // Refresh: reset the clock, keep the caster/level snapshot.
+            // The session snapshots refresh to the live caster/target so
+            // a reconnected clientnum does not fizzle a refreshed dot.
             rpg_dots[i].ticksleft = ticks;
             rpg_dots[i].nexttick = totalmillis + dd->tickms;
+            rpg_dots[i].targetsession = target->state.ai.type == ai::AI_TYPE_NONE ? target->sessionid : -1;
+            rpg_dots[i].castersession = (caster && caster->state.ai.type == ai::AI_TYPE_NONE) ? caster->sessionid : -1;
             return;
         }
         rpg_dot d;
         d.targetcn = target->clientnum;
         d.casterncn = caster ? caster->clientnum : -1;
+        // MMO hardening (Nov 27): snapshot the sessions so a clientnum
+        // reused after a reconnect never inherits this DoT. Humans carry
+        // a random per-connect sessionid; AI carries none.
+        d.targetsession = target->state.ai.type == ai::AI_TYPE_NONE ? target->sessionid : -1;
+        d.castersession = (caster && caster->state.ai.type == ai::AI_TYPE_NONE) ? caster->sessionid : -1;
         d.ability = ability;
         d.tickdmg = dd->tickdmg + (dd->attr >= 0 ? (caster ? rpg::effectiveattr(caster->name, level, dd->attr) : rpg::attrscore(level, dd->attr)) : 0);
         d.tickms = dd->tickms;
@@ -6228,16 +6253,18 @@ namespace server
             int idx = i;
             int targetcn = rpg_dots[idx].targetcn;
             int casterncn = rpg_dots[idx].casterncn;
+            int targetsession = rpg_dots[idx].targetsession;
+            int castersession = rpg_dots[idx].castersession;
             int ability = rpg_dots[idx].ability;
             int tickdmg = rpg_dots[idx].tickdmg;
             int tickms = rpg_dots[idx].tickms;
-            clientinfo *t = rpg_projfind(targetcn, !bg_pvp);
+            clientinfo *t = rpg_projfind(targetcn, !bg_pvp, targetsession);
             bool gone = !t || t->state.state != CS_ALIVE || t->state.health <= 0;
             if(gone || rpg_dots[idx].ticksleft <= 0) { rpg_dots.remove(idx); continue; }
             if(totalmillis < rpg_dots[idx].nexttick) continue;
             rpg_dots[idx].nexttick += tickms;
             rpg_dots[idx].ticksleft--;
-            clientinfo *caster = casterncn >= 0 ? rpg_projfind(casterncn, false) : NULL;
+            clientinfo *caster = casterncn >= 0 ? rpg_projfind(casterncn, false, castersession) : NULL;
             vec nopush(0, 0, 0); // DoT: no knockback
             int hpbefore = t->state.health;
             int ticksleft = rpg_dots[idx].ticksleft;
@@ -6411,6 +6438,11 @@ namespace server
             pr.id = rpg_projnextid++;
             pr.castercn = cq->clientnum;
             pr.targetcn = target->clientnum;
+            // MMO hardening (Nov 27): snapshot the sessions so a clientnum
+            // reused after a reconnect never inherits this projectile.
+            // Humans carry a random per-connect sessionid; AI carries none.
+            pr.castersession = cq->state.ai.type == ai::AI_TYPE_NONE ? cq->sessionid : -1;
+            pr.targetsession = target->state.ai.type == ai::AI_TYPE_NONE ? target->sessionid : -1;
             pr.ability = ability;
             pr.damage = castdmg;
             pr.level = level;
