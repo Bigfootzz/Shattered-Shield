@@ -175,6 +175,13 @@ namespace rpg
             db = NULL;
             return;
         }
+        // MMO hardening (Nov 27): WAL lets readers proceed while a
+        // writer holds the DB, and a busy timeout keeps the second handle
+        // used by character select/create/delete from failing a create on
+        // SQLITE_BUSY when it races a tick write. journal_mode is a
+        // persistent property of the file; the timeout is per handle.
+        sqlite3_busy_timeout(db, 5000);
+        execsql("PRAGMA journal_mode=WAL");
         execsql("CREATE TABLE IF NOT EXISTS characters("
                 "name TEXT PRIMARY KEY,"
                 "level INTEGER NOT NULL DEFAULT 1,"
@@ -2947,6 +2954,10 @@ namespace rpg
         }
         sqlite3 *cdb = NULL;
         if(sqlite3_open(p, &cdb) != SQLITE_OK) { if(cdb) sqlite3_close(cdb); return NULL; }
+        // MMO hardening (Nov 27): wait out a tick write instead of
+        // failing a create on SQLITE_BUSY. WAL mode itself is a property
+        // of the file, set once by the main handle in init().
+        sqlite3_busy_timeout(cdb, 5000);
         return cdb;
     }
     // Bot-name pool for the charlist filter (must match server.cpp bg_botnames).
